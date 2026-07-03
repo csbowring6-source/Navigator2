@@ -903,8 +903,8 @@ let currentNavDest = '';
 
 function navigateTo(dest) {
   currentNavDest = dest;
-  document.getElementById('mapSheetDest').textContent = dest;
-  document.getElementById('mapSheet').classList.add('open');
+  // Preference already saved at setup — go straight to their map app, no re-asking
+  openInMap(selectedMap);
 }
 
 function closeMapSheet(e) {
