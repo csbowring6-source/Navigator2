@@ -129,11 +129,6 @@
   .voice-btn.listening{background:var(--red);border-color:var(--red);color:var(--white);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
-  .wake-bar{margin-bottom:8px;}
-  .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
-  .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
-  .wake-word-btn.active{background:rgba(231,76,60,0.15);border-color:var(--red);color:var(--red);animation:wakePulse 2s infinite;}
-  @keyframes wakePulse{0%,100%{border-color:var(--red);}50%{border-color:rgba(231,76,60,0.3);}}
   .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
   .voice-status.listening-state{color:var(--red);}
   .voice-status.speaking-state{color:var(--amber);}
@@ -321,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 03 Jul 2026, 07:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 03 Jul 2026, 10:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -384,9 +379,6 @@
   </div>
 
   <div class="input-area">
-    <div class="wake-bar">
-      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Hey Navigator</button>
-    </div>
     <div class="input-row" id="inputRow">
       <textarea id="userInput" placeholder="Or type here..." rows="1"
         onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
@@ -439,9 +431,10 @@
 </div>
 
 <script>
-const ANTHROPIC_KEY = "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";
-const GMAPS_KEY     = "AIzaSyCaH2RSV31clT9JlzfHODlgtmfGdBLmAUI";
-const WEATHER_KEY   = "5e1f7a4226943fdbe8872d2b7423d38b";
+// API calls go through the Navigator relay (Cloudflare Worker) — the Anthropic
+// key lives ONLY in the Worker's encrypted settings, never in this file.
+const API_URL = "https://delicate-credit-a17e.csbowring6.workers.dev/";
+const WEATHER_KEY = "5e1f7a4226943fdbe8872d2b7423d38b";
 
 // ── VEHICLE PROFILES ──────────────────────────────────────────────────────────
 // Fuel types available per vehicle
@@ -806,7 +799,6 @@ function initOSMMap() {
     scrollWheelZoom:   false,
   }).setView([gps.lat, gps.lon], 15);
 
-  // CartoDB dark matter — free, no key
   // CartoDB Voyager — light clean style, excellent road visibility, free no key
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     subdomains: 'abcd',
@@ -1022,7 +1014,6 @@ function speak(text) {
   const v=voices.find(v=>v.lang.startsWith('en-AU'))||voices.find(v=>v.lang.startsWith('en-GB'))||voices.find(v=>v.lang.startsWith('en'));
   if(v) utt.voice=v;
   utt.onstart=()=>setVoiceStatus('speaking','🔊 Navigator speaking...');
-  utt.onend=()=>setVoiceStatus('','Tap 🎙 to reply');
   utt.onerror=()=>setVoiceStatus('','');
   // Clear the hint after 3 seconds
   utt.onend = () => {
@@ -1149,9 +1140,9 @@ async function sendMessage(){
   showTyping();
 
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch(API_URL,{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:120,system:SYSTEM,messages})
     });
     const data=await res.json();
