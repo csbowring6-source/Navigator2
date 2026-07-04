@@ -288,7 +288,15 @@
 
     <div class="trip-field">
       <span class="trip-label">Conditions</span>
-      <input class="trip-input" id="tripConditions" placeholder="e.g. hot, dusty, strong headwind">
+      <div class="trip-chip-row" id="tripCondChips">
+        <div class="trip-chip" onclick="toggleTripChip(this)">Clear</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Hot</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Wet roads</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Strong wind</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Dusty / gravel</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Fog</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Storms</div>
+      </div>
     </div>
 
     <div class="trip-field">
@@ -316,7 +324,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:35 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 09:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -359,7 +367,7 @@
 <div class="context-panel">
   <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">👩 Solo driver</div>
   <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ Unleaded 91</div>
-  <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range: 400km</div>
+  <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
 </div>
 
@@ -427,6 +435,24 @@
       <button class="map-sheet-opt" onclick="openInMap('maps.me')">🧭 Maps.me</button>
     </div>
     <button class="map-sheet-cancel" onclick="closeMapSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- CONDITIONS SHEET -->
+<div class="map-sheet" id="condSheet" onclick="closeCondSheet(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">Driving conditions — tap all that apply</div>
+    <div class="trip-chip-row" id="condChipRow" style="justify-content:center;margin-bottom:14px;">
+      <div class="trip-chip" onclick="toggleTripChip(this)">Clear</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Hot</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Wet roads</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Strong wind</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Dusty / gravel</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Fog</div>
+      <div class="trip-chip" onclick="toggleTripChip(this)">Storms</div>
+    </div>
+    <button class="map-sheet-opt" style="justify-content:center;" onclick="applyConditions()">Done</button>
+    <button class="map-sheet-cancel" onclick="closeCondSheet()">Cancel</button>
   </div>
 </div>
 
@@ -606,7 +632,7 @@ function saveTripSetup() {
   const start = document.getElementById('tripStartDate').value;
   const end = document.getElementById('tripEndDate').value;
   const fuel = document.getElementById('tripFuelRange').value.trim();
-  const cond = document.getElementById('tripConditions').value.trim();
+  const cond = Array.from(document.querySelectorAll('#tripCondChips .trip-chip.selected')).map(c => c.textContent).join(', ');
   const passengers = Array.from(document.querySelectorAll('#passengerChips .trip-chip.selected')).map(c => c.textContent).join(', ');
 
   const parts = [];
@@ -677,8 +703,7 @@ function selectVehicle(id) {
   currentVehicle = id;
   document.querySelectorAll('.v-chip').forEach(c => c.classList.remove('active'));
   document.getElementById('v-'+id).classList.add('active');
-  // Update range chip
-  document.getElementById('rangeChip').textContent = '🛣 Range: ' + VEHICLES[id].rangeLabel;
+  // Range chip stays as the user set it — vehicle switch doesn't stamp a number
   // Update fuel type to first available for this vehicle
   const fuels = FUEL_TYPES[id] || FUEL_TYPES.car;
   // Only reset if current fuel not available for new vehicle
@@ -946,12 +971,19 @@ function setFuelType() {
 }
 
 function setRange() {
-  const r = prompt('Fuel range in km:', VEHICLES[currentVehicle].range);
+  const r = prompt('How far can you go on your current tank? (km)', '');
   if (r) document.getElementById('rangeChip').textContent = `🛣 Range: ${r}km`;
 }
-function setCond() {
-  const c = prompt('Conditions (e.g. hot, dusty, wet, strong headwind):', '');
-  if (c) document.getElementById('condChip').textContent = `🌤 ${c}`;
+function setCond() { document.getElementById('condSheet').classList.add('open'); }
+function closeCondSheet(e) {
+  if (!e || e.target === document.getElementById('condSheet')) {
+    document.getElementById('condSheet').classList.remove('open');
+  }
+}
+function applyConditions() {
+  const sel = Array.from(document.querySelectorAll('#condChipRow .trip-chip.selected')).map(c => c.textContent).join(', ');
+  document.getElementById('condChip').textContent = sel ? `🌤 ${sel}` : '🌤 Conditions';
+  document.getElementById('condSheet').classList.remove('open');
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
@@ -1183,7 +1215,7 @@ async function sendMessage(){
 
   const driveHrs=((Date.now()-driveStart)/3600000).toFixed(1);
   const isSolo=document.getElementById('soloChip').classList.contains('active');
-  const rangeText=document.getElementById('rangeChip').textContent.replace('⛽ ','');
+  const rangeText=document.getElementById('rangeChip').textContent.replace('🛣 ','');
   const condText=document.getElementById('condChip').textContent.replace('🌤 ','');
   const v=VEHICLES[currentVehicle];
 
@@ -1192,7 +1224,7 @@ async function sendMessage(){
     weatherCtx,
     fuelCtx,
     v.systemNote,
-    `Fuel type: ${selectedFuel}. ${rangeText}.`,
+    `Fuel type: ${selectedFuel}.${rangeText!=='Range'?' Driver-set fuel range: '+rangeText.replace('Range: ','')+'.':''}`,
     `Drive time: ${driveHrs} hours.`,
     condText!=='Conditions'?`Driver reports: ${condText}.`:'',
     isSolo?'SOLO DRIVER MODE ACTIVE.':'',
