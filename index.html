@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:35 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:50 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -576,13 +576,12 @@ function loadProfile() {
 // ── START OVERLAY / TRIP SETUP ────────────────────────────────────────────────
 function quickStart() {
   document.getElementById('startOverlay').classList.add('hidden');
-  // Pull last saved trip context even on Quick Start
+  // Restore safety-relevant trip context only — fuel is handled by the fuel tile and chips
   try {
     const lastTrip = localStorage.getItem('navigator_last_trip');
     if (lastTrip) {
       tripContext = lastTrip;
       const parsed = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
-      if (parsed.fuel) document.getElementById('rangeChip').textContent = `⛽ Range: ${parsed.fuel}`;
       if (parsed.cond) document.getElementById('condChip').textContent = `🌤 ${parsed.cond}`;
       if (parsed.passengers && parsed.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     }
