@@ -324,7 +324,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 09:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 09:50 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -365,7 +365,7 @@
 
 <!-- CONTEXT CHIPS -->
 <div class="context-panel">
-  <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">👩 Solo driver</div>
+  <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
   <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ Unleaded 91</div>
   <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
@@ -1173,10 +1173,12 @@ RULES:
 - Fatigue over 4 hours: name a specific rest stop in sentence 1.
 - Warning lights: nearest service and distance in sentence 1. Navigate in sentence 2.
 
-SOLO DRIVER MODE (when flagged in context):
-- Same two sentence format.
-- Weight safety in stop selection — well-lit, staffed, reviewed.
-- Replace navigation sentence with check-in reminder when stopping for the night.`;
+SOLO MODE (when flagged in context):
+- Same two sentence format, same word budget.
+- Recommend only staffed, well-lit, well-reviewed stops — never isolated rest areas, remote free camps, or unattended sites, even if cheaper or closer.
+- For overnight stops: prefer sites with other travellers around, and time arrivals before dark — if current time makes a suggested stop an after-dark arrival, say so and offer a nearer option.
+- When the driver is stopping for the night, replace the navigation sentence with a short reminder to let someone know where they are.
+- If fatigue and solo mode combine, treat the rest recommendation as urgent, not optional.`;
 
 // ── LIVE FUEL PRICES (via Worker /fuel route — NSW & TAS coverage) ───────────
 const FUEL_CODE = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'DL','E10':'E10'};
@@ -1227,7 +1229,7 @@ async function sendMessage(){
     `Fuel type: ${selectedFuel}.${rangeText!=='Range'?' Driver-set fuel range: '+rangeText.replace('Range: ','')+'.':''}`,
     `Drive time: ${driveHrs} hours.`,
     condText!=='Conditions'?`Driver reports: ${condText}.`:'',
-    isSolo?'SOLO DRIVER MODE ACTIVE.':'',
+    isSolo?'SOLO MODE ACTIVE.':'',
     tripContext?`Trip plan: ${tripContext}`:'',
   ].filter(Boolean).join(' ');
 
