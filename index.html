@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 02:10 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 02:30 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -979,9 +979,15 @@ function startListening() {
   }
   synth?.cancel();
   capturedFinal = '';
+  const isAndroid = /Android/i.test(navigator.userAgent);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
-  recognition.lang='en-AU'; recognition.continuous=true; recognition.interimResults=true;
+  recognition.lang='en-AU';
+  // Android's engine re-sends cumulative text, so stitching results repeats the
+  // opening words. On Android: single-shot, final transcript only — its native
+  // pause detection decides when you're done. Elsewhere: continuous + silence timer.
+  recognition.continuous = !isAndroid;
+  recognition.interimResults = !isAndroid;
   recognition.onstart = () => {
     isListening=true;
     document.getElementById('voiceBtn').classList.add('listening');
@@ -989,8 +995,12 @@ function startListening() {
     setVoiceStatus('listening','🔴 Listening... pause when done');
   };
   recognition.onresult = e => {
-    // Rebuild the whole transcript from scratch every event — Android re-sends
-    // earlier chunks, so accumulating them causes repeated words
+    if (isAndroid) {
+      const last = e.results[e.results.length-1];
+      if (last.isFinal) document.getElementById('userInput').value = last[0].transcript.trim();
+      return;
+    }
+    // Rebuild the whole transcript from scratch every event
     let full='';
     for(let i=0;i<e.results.length;i++){ full+=e.results[i][0].transcript+' '; }
     document.getElementById('userInput').value=full.replace(/\s+/g,' ').trim();
