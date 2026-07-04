@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 02:30 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1131,7 +1131,7 @@ RULES:
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - No explanations. No suggestions to check other apps. No fluff.
-- FUEL PRICES: You have no live price data. Never state or invent a price, and never refer the driver to another app. Name the best nearby station for the vehicle and offer navigation. If asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
+- FUEL PRICES: If LIVE FUEL PRICES appear in context, they are real and current — quote the actual cents-per-litre price and station name from that list, preferring the cheapest the vehicle can access. If no live prices are in context, never state or invent a price and never refer the driver to another app — name the best nearby station for the vehicle, and if asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -1145,6 +1145,24 @@ SOLO DRIVER MODE (when flagged in context):
 - Weight safety in stop selection — well-lit, staffed, reviewed.
 - Replace navigation sentence with check-in reminder when stopping for the night.`;
 
+// ── LIVE FUEL PRICES (via Worker /fuel route — NSW & TAS coverage) ───────────
+const FUEL_CODE = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'DL','E10':'E10'};
+
+async function fetchFuelPrices() {
+  if (!gps) return '';
+  try {
+    const code = FUEL_CODE[selectedFuel] || 'U91';
+    const radius = Math.min(VEHICLES[currentVehicle].range || 50, 50);
+    const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`);
+    const d = await r.json();
+    if (d.results && d.results.length) {
+      const list = d.results.slice(0,5).map(s => `${s.name} (${s.address}): ${s.price} c/L`).join('; ');
+      return `LIVE FUEL PRICES — ${selectedFuel}, within ${radius}km, cheapest first: ${list}.`;
+    }
+  } catch(e) {}
+  return '';
+}
+
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
   unlockAudio();
@@ -1156,6 +1174,12 @@ async function sendMessage(){
   synth?.cancel();
   addMsg('user',text);
 
+  // Fuel-related question? Grab live prices before asking the AI
+  let fuelCtx = '';
+  if (/fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(text)) {
+    fuelCtx = await fetchFuelPrices();
+  }
+
   const driveHrs=((Date.now()-driveStart)/3600000).toFixed(1);
   const isSolo=document.getElementById('soloChip').classList.contains('active');
   const rangeText=document.getElementById('rangeChip').textContent.replace('⛽ ','');
@@ -1165,6 +1189,7 @@ async function sendMessage(){
   const ctx=[
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'Location: Australia',
     weatherCtx,
+    fuelCtx,
     v.systemNote,
     `Fuel type: ${selectedFuel}. ${rangeText}.`,
     `Drive time: ${driveHrs} hours.`,
