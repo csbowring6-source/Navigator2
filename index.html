@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:50 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 02:10 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -989,12 +989,11 @@ function startListening() {
     setVoiceStatus('listening','🔴 Listening... pause when done');
   };
   recognition.onresult = e => {
-    let interim='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal) capturedFinal+=e.results[i][0].transcript+' ';
-      else interim+=e.results[i][0].transcript;
-    }
-    document.getElementById('userInput').value=(capturedFinal+interim).trim();
+    // Rebuild the whole transcript from scratch every event — Android re-sends
+    // earlier chunks, so accumulating them causes repeated words
+    let full='';
+    for(let i=0;i<e.results.length;i++){ full+=e.results[i][0].transcript+' '; }
+    document.getElementById('userInput').value=full.replace(/\s+/g,' ').trim();
     // Only send after a genuine pause — don't cut the driver off mid-sentence
     clearTimeout(silenceTimer);
     silenceTimer=setTimeout(()=>{ try{if(recognition)recognition.stop();}catch(err){} },1600);
