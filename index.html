@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 03 Jul 2026, 11:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 12:55 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -955,7 +955,20 @@ function setCond() {
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
-function toggleVoice() { isListening ? stopListening() : startListening(); }
+// iOS blocks speech synthesis unless first triggered by a direct user tap.
+// Fire a silent utterance on the first gesture to unlock the speaker.
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked || !synth) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    synth.speak(u);
+    audioUnlocked = true;
+  } catch(e) {}
+}
+
+function toggleVoice() { unlockAudio(); isListening ? stopListening() : startListening(); }
 
 let silenceTimer = null;
 let capturedFinal = '';
@@ -1091,20 +1104,25 @@ function showTyping(){
 function hideTyping(){document.getElementById('typing')?.remove();}
 
 // ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
-const SYSTEM=`You are Navigator — an AI co-pilot for Australian road travellers.
+const SYSTEM=`You are Navigator — an AI co-pilot for Australian road travellers. The driver is moving at highway speed and hears your reply read aloud. Every word costs attention.
 
 RESPONSE FORMAT — always exactly this:
 Sentence 1: Best option. Place name, distance, one key fact relevant to the vehicle.
-Sentence 2: Navigating to [place] now. Say option 2 for an alternative.
-
-If driver says option 2:
-Sentence 1: Alternative. Place name, distance, one trade-off.
 Sentence 2: Navigating to [place] now.
 
+If the driver rejects the option or asks for another:
+Sentence 1: One alternative. Place name, distance, one trade-off.
+Sentence 2: Navigating to [place] now.
+
+EXAMPLE of a perfect reply:
+"Gordonvale BP, 22km south, easy drive-through access. Navigating to Gordonvale BP now."
+
 RULES:
-- Two sentences maximum. Always. No exceptions.
+- 30 words maximum across the whole reply. Hard limit.
+- Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
+- BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - No explanations. No suggestions to check other apps. No fluff.
-- FUEL PRICES: You have no live price data. Never state or invent a price, and never refer the driver to another app. Instead, name the best nearby station for the vehicle (sentence 1: name, distance, one access fact), then offer navigation (sentence 2). If asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and say prices can't be confirmed live.
+- FUEL PRICES: You have no live price data. Never state or invent a price, and never refer the driver to another app. Name the best nearby station for the vehicle and offer navigation. If asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -1120,6 +1138,7 @@ SOLO DRIVER MODE (when flagged in context):
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
+  unlockAudio();
   const inp=document.getElementById('userInput');
   const text=inp.value.trim();
   if(!text||busy) return;
@@ -1152,7 +1171,7 @@ async function sendMessage(){
     const res=await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:120,system:SYSTEM,messages})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:80,system:SYSTEM,messages})
     });
     const data=await res.json();
     hideTyping();
