@@ -316,7 +316,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 12:55 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 01:15 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1186,6 +1186,37 @@ async function sendMessage(){
   busy=false; document.getElementById('sendBtn').disabled=false;
 }
 
+// ── VERSION CHECK ─────────────────────────────────────────────────────────────
+// Compares this page's build stamp against the live file on GitHub.
+// Current → stamp turns green with a tick. Stale → tap-to-update banner.
+async function checkVersion(){
+  try{
+    const res = await fetch(window.location.pathname + '?nocache=' + Date.now(), {cache:'no-store'});
+    const html = await res.text();
+    const m = html.match(/id="buildStamp"[^>]*>([^<]+)</);
+    if(!m) return;
+    const liveStamp = m[1].trim();
+    const el = document.getElementById('buildStamp');
+    const myStamp = el.textContent.replace('✓ ','').trim();
+    if(liveStamp === myStamp){
+      el.textContent = '✓ ' + myStamp;
+      el.style.color = '#2ECC71';
+    } else {
+      showUpdateBanner();
+    }
+  }catch(e){}
+}
+
+function showUpdateBanner(){
+  if(document.getElementById('updateBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'updateBanner';
+  b.textContent = '⬆ New version available — tap to update';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:3000;background:#F5A623;color:#0A1628;text-align:center;padding:10px;font-size:13px;font-weight:600;cursor:pointer;';
+  b.onclick = () => { window.location.href = window.location.pathname + '?v=' + Date.now(); };
+  document.body.appendChild(b);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 if(synth) synth.onvoiceschanged=()=>synth.getVoices();
 initGPS();
@@ -1193,6 +1224,8 @@ updateSuggestions();
 loadMapPreference();
 loadProfile();
 setInterval(fetchWeather,600000);
+checkVersion();
+setInterval(checkVersion, 900000);
 </script>
 </body>
 </html>
