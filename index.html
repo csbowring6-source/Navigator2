@@ -76,13 +76,12 @@
   .welcome h1 span{color:var(--amber);}
   .welcome p{font-size:11px;color:var(--gray2);line-height:1.5;}
 
-  /* 2x2 SUGGESTION GRID */
-  .suggestion-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
-  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 10px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;}
+  /* QUICK SUGGESTION ROW */
+  .suggestion-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px;}
+  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px;}
   .suggestion:hover,.suggestion:active{border-color:var(--amber);background:rgba(245,166,35,0.06);}
-  .sug-icon{font-size:20px;}
-  .sug-label{font-size:12px;font-weight:600;color:var(--amber);}
-  .sug-desc{font-size:11px;color:var(--gray2);}
+  .sug-icon{font-size:18px;}
+  .sug-label{font-size:11px;font-weight:600;color:var(--amber);line-height:1.2;}
 
   /* MESSAGES */
   .msg{display:flex;gap:8px;max-width:640px;}
@@ -329,7 +328,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 10:40 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 10:55 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -736,7 +735,6 @@ function updateSuggestions() {
     <div class="suggestion" onclick="suggest('${s.query.replace(/'/g,"\\'")}')">
       <span class="sug-icon">${s.icon}</span>
       <span class="sug-label">${s.label}</span>
-      <span class="sug-desc">${s.desc}</span>
     </div>
   `).join('');
 }
