@@ -243,13 +243,17 @@
   <div class="start-sub">Your AI co-pilot for the road. Jump straight in, or set up your trip so I already know the details.</div>
   <div class="start-btns">
     <div class="start-btn plan" onclick="openTripSetup()">
-      <div class="start-btn-title">📋 Plan This Trip</div>
+      <div class="start-btn-title">📋 Plan A Trip</div>
       <div class="start-btn-desc">Tell me your destination, dates, fuel, and conditions</div>
     </div>
     <div class="start-btn quick" onclick="quickStart()">
       <div class="start-btn-title">⚡ Quick Start</div>
       <div class="start-btn-desc">Skip setup — just start talking</div>
     </div>
+  </div>
+  <div id="savedTripsWrap" style="display:none;width:100%;max-width:320px;margin-top:16px;">
+    <div style="font-size:10px;color:var(--gray3);text-align:center;letter-spacing:0.08em;margin-bottom:8px;">REGULAR RUNS</div>
+    <div id="savedTripsList" style="display:flex;flex-direction:column;gap:8px;"></div>
   </div>
 </div>
 
@@ -280,7 +284,14 @@
 
     <div class="trip-field">
       <span class="trip-label">Fuel range</span>
-      <input class="trip-input" id="tripFuelRange" placeholder="e.g. 400km">
+      <div class="trip-chip-row" id="tripFuelChips">
+        <div class="trip-chip" onclick="selectOneChip(this)">200km</div>
+        <div class="trip-chip" onclick="selectOneChip(this)">300km</div>
+        <div class="trip-chip" onclick="selectOneChip(this)">400km</div>
+        <div class="trip-chip" onclick="selectOneChip(this)">500km</div>
+        <div class="trip-chip" onclick="selectOneChip(this)">600km</div>
+        <div class="trip-chip" onclick="selectOneChip(this)">700km</div>
+      </div>
     </div>
 
     <div class="trip-field">
@@ -321,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 11:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 05 Jul 2026, 12:30 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -442,6 +453,23 @@
       <button class="map-sheet-opt" onclick="chooseVehicle('truck')">🚛 Truck</button>
     </div>
     <button class="map-sheet-cancel" onclick="closeVehicleSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- RANGE SHEET -->
+<div class="map-sheet" id="rangeSheet" onclick="closeRangeSheet(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">How far on your current tank?</div>
+    <div class="trip-chip-row" style="justify-content:center;margin-bottom:14px;">
+      <div class="trip-chip" onclick="chooseRange('200km')">200km</div>
+      <div class="trip-chip" onclick="chooseRange('300km')">300km</div>
+      <div class="trip-chip" onclick="chooseRange('400km')">400km</div>
+      <div class="trip-chip" onclick="chooseRange('500km')">500km</div>
+      <div class="trip-chip" onclick="chooseRange('600km')">600km</div>
+      <div class="trip-chip" onclick="chooseRange('700km')">700km</div>
+    </div>
+    <button class="map-sheet-opt" style="justify-content:center;" onclick="chooseRange(null)">Clear — don't track range</button>
+    <button class="map-sheet-cancel" onclick="closeRangeSheet()">Cancel</button>
   </div>
 </div>
 
@@ -640,11 +668,19 @@ function toggleTripChip(el) {
   el.classList.toggle('selected');
 }
 
+function selectOneChip(el) {
+  // Single-select: picking one clears its siblings; tap again to clear
+  const wasSelected = el.classList.contains('selected');
+  el.parentElement.querySelectorAll('.trip-chip').forEach(c => c.classList.remove('selected'));
+  if (!wasSelected) el.classList.add('selected');
+}
+
 function saveTripSetup() {
   const dest = document.getElementById('tripDestination').value.trim();
   const start = document.getElementById('tripStartDate').value;
   const end = document.getElementById('tripEndDate').value;
-  const fuel = document.getElementById('tripFuelRange').value.trim();
+  const fuelChip = document.querySelector('#tripFuelChips .trip-chip.selected');
+  const fuel = fuelChip ? fuelChip.textContent : '';
   const cond = Array.from(document.querySelectorAll('#tripCondChips .trip-chip.selected')).map(c => c.textContent).join(', ');
   const passengers = Array.from(document.querySelectorAll('#passengerChips .trip-chip.selected')).map(c => c.textContent).join(', ');
 
@@ -670,6 +706,48 @@ function saveTripSetup() {
   if (tripContext) {
     addMsg('nav', `Trip noted${dest ? ' — heading to ' + dest : ''}. I'll keep all of this in mind. What do you need?`);
   }
+
+  // Remember this journey as a regular run (destination is the key)
+  if (dest) {
+    try {
+      let runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
+      runs = runs.filter(r => r.dest.toLowerCase() !== dest.toLowerCase());
+      runs.unshift({ dest, passengers, vehicle: currentVehicle });
+      localStorage.setItem('navigator_saved_trips', JSON.stringify(runs.slice(0,5)));
+    } catch(e) {}
+  }
+}
+
+// ── REGULAR RUNS — one-tap recall of saved journeys ───────────────────────────
+function renderSavedTrips() {
+  try {
+    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
+    if (!runs.length) return;
+    const wrap = document.getElementById('savedTripsWrap');
+    const list = document.getElementById('savedTripsList');
+    list.innerHTML = runs.map((r, i) => `
+      <button class="start-btn quick" style="padding:12px;text-align:left;" onclick="recallTrip(${i})">
+        <div class="start-btn-title" style="font-size:13px;">🔁 ${r.dest}</div>
+        <div class="start-btn-desc">${VEHICLES[r.vehicle] ? VEHICLES[r.vehicle].icon + ' ' + VEHICLES[r.vehicle].label : ''}${r.passengers ? ' · ' + r.passengers : ''}</div>
+      </button>
+    `).join('');
+    wrap.style.display = 'block';
+  } catch(e) {}
+}
+
+function recallTrip(i) {
+  try {
+    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
+    const r = runs[i];
+    if (!r) return;
+    const parts = [`Destination: ${r.dest}.`];
+    if (r.passengers) parts.push(`Passengers: ${r.passengers}.`);
+    tripContext = parts.join(' ');
+    if (r.vehicle && VEHICLES[r.vehicle]) selectVehicle(r.vehicle);
+    if (r.passengers && r.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
+    document.getElementById('startOverlay').classList.add('hidden');
+    addMsg('nav', `Back on the ${r.dest} run. Conditions and fuel range are fresh — set them if today's different. What do you need?`);
+  } catch(e) {}
 }
 
 // ── MAP PREFERENCE (remembered per device) ────────────────────────────────────
@@ -998,9 +1076,15 @@ function closeFuelSheet(e) {
   }
 }
 
-function setRange() {
-  const r = prompt('How far can you go on your current tank? (km)', '');
-  if (r) document.getElementById('rangeChip').textContent = `🛣 Range: ${r}km`;
+function setRange() { document.getElementById('rangeSheet').classList.add('open'); }
+function chooseRange(r) {
+  document.getElementById('rangeChip').textContent = r ? `🛣 Range: ${r}` : '🛣 Range';
+  document.getElementById('rangeSheet').classList.remove('open');
+}
+function closeRangeSheet(e) {
+  if (!e || e.target === document.getElementById('rangeSheet')) {
+    document.getElementById('rangeSheet').classList.remove('open');
+  }
 }
 function setCond() { document.getElementById('condSheet').classList.add('open'); }
 function closeCondSheet(e) {
@@ -1376,6 +1460,7 @@ initGPS();
 updateSuggestions();
 loadMapPreference();
 loadProfile();
+renderSavedTrips();
 setInterval(fetchWeather,600000);
 checkVersion();
 setInterval(checkVersion, 900000);
