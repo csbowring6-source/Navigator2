@@ -321,7 +321,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 11:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 11:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -442,6 +442,15 @@
       <button class="map-sheet-opt" onclick="chooseVehicle('truck')">🚛 Truck</button>
     </div>
     <button class="map-sheet-cancel" onclick="closeVehicleSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- FUEL SHEET -->
+<div class="map-sheet" id="fuelSheet" onclick="closeFuelSheet(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">Fuel type</div>
+    <div class="map-sheet-options" id="fuelSheetOptions"></div>
+    <button class="map-sheet-cancel" onclick="closeFuelSheet()">Cancel</button>
   </div>
 </div>
 
@@ -973,14 +982,19 @@ function openInMap(app) {
 function toggleChip(el) { el.classList.toggle('active'); }
 function setFuelType() {
   const types = FUEL_TYPES[currentVehicle] || FUEL_TYPES.car;
-  const options = types.map((t,i) => `${i+1}. ${t}`).join('\n');
-  const choice = prompt(`Select fuel type:\n${options}\n\nType the number:`, '1');
-  if (choice) {
-    const index = parseInt(choice) - 1;
-    if (types[index]) {
-      selectedFuel = types[index];
-      document.getElementById('fuelTypeChip').textContent = fuelChipText();
-    }
+  document.getElementById('fuelSheetOptions').innerHTML = types.map(t =>
+    `<button class="map-sheet-opt" onclick="chooseFuel('${t}')">⛽ ${t}</button>`
+  ).join('');
+  document.getElementById('fuelSheet').classList.add('open');
+}
+function chooseFuel(t) {
+  selectedFuel = t;
+  document.getElementById('fuelTypeChip').textContent = fuelChipText();
+  document.getElementById('fuelSheet').classList.remove('open');
+}
+function closeFuelSheet(e) {
+  if (!e || e.target === document.getElementById('fuelSheet')) {
+    document.getElementById('fuelSheet').classList.remove('open');
   }
 }
 
