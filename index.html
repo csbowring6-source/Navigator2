@@ -321,7 +321,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 11:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 04 Jul 2026, 11:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -356,7 +356,7 @@
 <div class="context-panel">
   <div class="ctx-chip active" id="vehicleChip" onclick="openVehicleSheet()">🚗 Car</div>
   <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
-  <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ Unleaded 91</div>
+  <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ U91</div>
   <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
 </div>
@@ -479,6 +479,10 @@ const FUEL_TYPES = {
 };
 
 let selectedFuel = 'Unleaded 91'; // default
+
+// Chip display abbreviations only — full names used internally and for the AI
+const FUEL_ABBR = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'Diesel','E10':'E10'};
+function fuelChipText() { return `⛽ ${FUEL_ABBR[selectedFuel] || selectedFuel}`; }
 
 const VEHICLES = {
   car: {
@@ -720,12 +724,12 @@ function selectVehicle(id) {
   // Only reset if current fuel not available for new vehicle
   if (!fuels.includes(selectedFuel)) {
     selectedFuel = fuels[0];
-    document.getElementById('fuelTypeChip').textContent = `⛽ ${selectedFuel}`;
+    document.getElementById('fuelTypeChip').textContent = fuelChipText();
   }
   // Truck always gets diesel
   if (id === 'truck') {
     selectedFuel = 'Diesel';
-    document.getElementById('fuelTypeChip').textContent = '⛽ Diesel';
+    document.getElementById('fuelTypeChip').textContent = fuelChipText();
   }
   // Update suggestions
   updateSuggestions();
@@ -975,7 +979,7 @@ function setFuelType() {
     const index = parseInt(choice) - 1;
     if (types[index]) {
       selectedFuel = types[index];
-      document.getElementById('fuelTypeChip').textContent = `⛽ ${selectedFuel}`;
+      document.getElementById('fuelTypeChip').textContent = fuelChipText();
     }
   }
 }
