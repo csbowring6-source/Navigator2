@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 06 Jul 2026, 09:45 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 06 Jul 2026, 05:00 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -389,7 +389,7 @@
 
   <div class="input-area">
     <div class="wake-bar">
-      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Hands-free: Off</button>
+      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
     </div>
     <div class="input-row" id="inputRow">
       <textarea id="userInput" placeholder="Or type here..." rows="1"
@@ -501,10 +501,9 @@
 </div>
 
 <script>
-// API calls go through the Navigator relay (Cloudflare Worker) — the Anthropic
-// key lives ONLY in the Worker's encrypted settings, never in this file.
+// API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
+// (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
 const API_URL = "https://delicate-credit-a17e.csbowring6.workers.dev/";
-const WEATHER_KEY = "5e1f7a4226943fdbe8872d2b7423d38b";
 
 // ── VEHICLE PROFILES ──────────────────────────────────────────────────────────
 // Fuel types available per vehicle
@@ -979,7 +978,7 @@ window.initMap = function() {}; // no-op kept for compatibility
 async function fetchWeather() {
   if (!gps) return;
   try {
-    const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${gps.lat}&lon=${gps.lon}&appid=${WEATHER_KEY}&units=metric`);
+    const r = await fetch(`${API_URL}weather?lat=${gps.lat}&lon=${gps.lon}`);
     const d = await r.json();
     const wspd = Math.round((d.wind?.speed||0)*3.6);
     const wdir = ['N','NE','E','SE','S','SW','W','NW'][Math.round((d.wind?.deg||0)/45)%8];
@@ -1113,57 +1112,22 @@ function applyConditions() {
   document.getElementById('condSheet').classList.remove('open');
 }
 
-// ── HANDS-FREE WAKE WORD — "Hey Copilot" / "Hey Navigator" ───────────────────
-// Opt-in. Works while Navigator is open with the screen on (dash mount use).
-let wakeEnabled = false;
-let wakeRec = null;
+// ── CONVERSATION MODE — mic reopens after each spoken reply ──────────────────
+// Opt-in. True always-listening wake words beep constantly on Android (OS
+// behaviour, unsuppressable from a browser) — reserved for the native app.
+let convoEnabled = false;
 
 function toggleWakeWord() {
-  wakeEnabled = !wakeEnabled;
+  convoEnabled = !convoEnabled;
   const b = document.getElementById('wakeBtn');
-  if (wakeEnabled) {
-    b.textContent = '🎙 Hands-free: On — say "Hey Copilot"';
+  if (convoEnabled) {
+    b.textContent = '🎙 Conversation: On — mic reopens after each reply';
     b.classList.add('active');
     unlockAudio();
-    startWakeListening();
   } else {
-    b.textContent = '🎙 Hands-free: Off';
+    b.textContent = '🎙 Conversation: Off';
     b.classList.remove('active');
-    stopWakeListening();
-    setVoiceStatus('','');
   }
-}
-
-function startWakeListening() {
-  if (!wakeEnabled || isListening || busy) return;
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    alert('Voice not supported on this browser.'); wakeEnabled=false; return;
-  }
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  try {
-    wakeRec = new SR();
-    wakeRec.lang='en-AU'; wakeRec.continuous=true; wakeRec.interimResults=true;
-    wakeRec.onresult = e => {
-      let t='';
-      for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript+' ';
-      if (/\bhey,?\s*(co[- ]?pilot|navigator)\b/i.test(t)) {
-        stopWakeListening();
-        setTimeout(startListening, 400);
-      }
-    };
-    wakeRec.onend = () => {
-      // Browsers end continuous sessions regularly — quietly restart while enabled
-      if (wakeEnabled && !isListening && !busy) setTimeout(startWakeListening, 400);
-    };
-    wakeRec.onerror = () => {};
-    wakeRec.start();
-    setVoiceStatus('','👂 Listening for "Hey Copilot"');
-  } catch(e) {}
-}
-
-function stopWakeListening() {
-  try { if (wakeRec) { wakeRec.onend = null; wakeRec.stop(); } } catch(e) {}
-  wakeRec = null;
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
@@ -1189,7 +1153,6 @@ function startListening() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('Voice not supported. Try Chrome on Android.'); return;
   }
-  stopWakeListening(); // never two microphones at once
   synth?.cancel();
   capturedFinal = '';
   const isAndroid = /Android/i.test(navigator.userAgent);
@@ -1262,6 +1225,8 @@ function speak(text) {
   utt.onend = () => {
     setVoiceStatus('','🎙 Tap to reply');
     setTimeout(()=>setVoiceStatus('',''), 3000);
+    // Conversation mode: your turn — mic reopens by itself
+    if (convoEnabled && !busy && !isListening) setTimeout(startListening, 600);
   };
   synth.speak(utt);
 }
@@ -1502,8 +1467,6 @@ async function sendMessage(){
     addMsg('nav','Connection issue — check your internet and try again.');
   }
   busy=false; document.getElementById('sendBtn').disabled=false;
-  // Hands-free mode: go back to listening for the wake word after the reply
-  if (wakeEnabled && !isListening) setTimeout(startWakeListening, 1200);
 }
 
 // ── VERSION CHECK ─────────────────────────────────────────────────────────────
