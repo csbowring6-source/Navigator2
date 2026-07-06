@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 05 Jul 2026, 01:05 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 05 Jul 2026, 08:20 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1351,7 +1351,8 @@ RULES:
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - No explanations. No suggestions to check other apps. No fluff.
-- FUEL PRICES: If LIVE FUEL PRICES appear in context, they are real and current — quote the actual cents-per-litre price and station name from that list, preferring the cheapest the vehicle can access. If no live prices are in context, never state or invent a price and never refer the driver to another app — name the best nearby station for the vehicle, and if asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
+- NEAREST vs CHEAPEST: These are different questions. "Nearest servo" = answer with the closest suitable station to the driver's GPS using all your knowledge, even if it has no live price — never send a driver far away for a nearest question. "Cheapest" = use the live list, but state the distance, and if the cheapest is more than about 25km away also mention the closest option.
+- FUEL PRICES: If LIVE FUEL PRICES appear in context, they are real and current — but the list is sorted by price, includes distances, and covers only price-reporting states, so nearby stations can be missing from it. Quote actual cents-per-litre when you use it. If no live prices are in context, never state or invent a price and never refer the driver to another app — name the best nearby station for the vehicle, and if asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
 - CAMPS/PARKS: If NEARBY CAMPS/PARKS data appears in context, prefer naming real sites from it, blended with your own knowledge of well-known parks — the data is real but may be incomplete. Solo mode filters still apply.
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
 - TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
@@ -1381,8 +1382,11 @@ async function fetchFuelPrices() {
     const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`);
     const d = await r.json();
     if (d.results && d.results.length) {
-      const list = d.results.slice(0,5).map(s => `${s.name} (${s.address}): ${s.price} c/L`).join('; ');
-      return `LIVE FUEL PRICES — ${selectedFuel}, within ${radius}km, cheapest first: ${list}.`;
+      const list = d.results.slice(0,5).map(s => {
+        const km = (s.lat && s.lon) ? `, ${distKm(gps.lat, gps.lon, parseFloat(s.lat), parseFloat(s.lon)).toFixed(0)}km away` : '';
+        return `${s.name} (${s.address}): ${s.price} c/L${km}`;
+      }).join('; ');
+      return `LIVE FUEL PRICES — ${selectedFuel}, sorted cheapest first NOT nearest, and covering ONLY price-reporting states (stations outside them are absent even if closer): ${list}.`;
     }
   } catch(e) {}
   return '';
