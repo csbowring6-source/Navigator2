@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 06 Jul 2026, 05:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 10:00 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -370,6 +370,7 @@
   <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ U91</div>
   <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
+  <div class="ctx-chip" id="logChip" onclick="openFillSheet()">📒 Fill-up</div>
 </div>
 
 <!-- BOTTOM -->
@@ -479,6 +480,46 @@
     <div class="map-sheet-title">Fuel type</div>
     <div class="map-sheet-options" id="fuelSheetOptions"></div>
     <button class="map-sheet-cancel" onclick="closeFuelSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- FILL-UP SHEET -->
+<div class="map-sheet" id="fillSheet" onclick="closeFillSheet(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">Log a fill-up</div>
+    <div class="trip-field">
+      <span class="trip-label">Station</span>
+      <input class="trip-input" id="fillStation" placeholder="Station name">
+    </div>
+    <div class="trip-row">
+      <div class="trip-field">
+        <span class="trip-label">Litres</span>
+        <input class="trip-input" id="fillLitres" type="number" inputmode="decimal" placeholder="e.g. 62.5">
+      </div>
+      <div class="trip-field">
+        <span class="trip-label">Total $</span>
+        <input class="trip-input" id="fillCost" type="number" inputmode="decimal" placeholder="e.g. 105.40">
+      </div>
+    </div>
+    <div class="trip-field">
+      <span class="trip-label">Odometer — optional, enables L/100km</span>
+      <input class="trip-input" id="fillOdo" type="number" inputmode="numeric" placeholder="e.g. 84120">
+    </div>
+    <div class="trip-btn-row">
+      <button class="trip-btn secondary" onclick="showFuelLog()">History</button>
+      <button class="trip-btn primary" onclick="saveFill()">Save</button>
+    </div>
+    <button class="map-sheet-cancel" onclick="closeFillSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- FUEL LOG SHEET -->
+<div class="map-sheet" id="fuelLogSheet" onclick="closeFuelLog(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">Fuel log — newest first</div>
+    <div id="fuelLogList" style="max-height:40vh;overflow-y:auto;font-size:12px;color:var(--gray1);line-height:1.8;margin-bottom:12px;"></div>
+    <button class="map-sheet-opt" style="justify-content:center;" onclick="copyFuelCsv()">📋 Copy as CSV — paste into any spreadsheet</button>
+    <button class="map-sheet-cancel" onclick="closeFuelLog()">Close</button>
   </div>
 </div>
 
@@ -1313,6 +1354,7 @@ EXAMPLE of a perfect reply:
 
 RULES:
 - 30 words maximum across the whole reply. Hard limit.
+- CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - No explanations. No suggestions to check other apps. No fluff.
@@ -1321,6 +1363,7 @@ RULES:
 - CAMPS/PARKS: If NEARBY CAMPS/PARKS data appears in context, prefer naming real sites from it, blended with your own knowledge of well-known parks — the data is real but may be incomplete. Solo mode filters still apply.
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
 - TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
+- If the driver's logged fuel economy appears in context, use it for range and fuel calculations instead of generic estimates.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -1399,6 +1442,94 @@ async function fetchStations() {
   return '';
 }
 
+// ── FUEL LOG — grey nomad data collection ─────────────────────────────────────
+function getFuelLog() {
+  try { return JSON.parse(localStorage.getItem('navigator_fuel_log') || '[]'); } catch(e) { return []; }
+}
+
+function openFillSheet() {
+  document.getElementById('fillSheet').classList.add('open');
+  const st = document.getElementById('fillStation');
+  st.value = '';
+  // Auto-fill the servo you're standing at
+  if (gps) {
+    fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=10`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.results && d.results.length && !st.value) {
+          const nearest = d.results
+            .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
+            .sort((a,b) => a.km - b.km)[0];
+          st.value = nearest.name;
+        }
+      }).catch(()=>{});
+  }
+}
+function closeFillSheet(e) {
+  if (!e || e.target === document.getElementById('fillSheet')) {
+    document.getElementById('fillSheet').classList.remove('open');
+  }
+}
+
+function saveFill() {
+  const station = document.getElementById('fillStation').value.trim() || 'Unknown station';
+  const litres = parseFloat(document.getElementById('fillLitres').value);
+  const cost = parseFloat(document.getElementById('fillCost').value);
+  const odo = parseFloat(document.getElementById('fillOdo').value);
+  const log = getFuelLog();
+  const entry = {
+    date: new Date().toISOString().slice(0,10),
+    station,
+    litres: isNaN(litres) ? null : litres,
+    cost: isNaN(cost) ? null : cost,
+    odo: isNaN(odo) ? null : odo,
+    run: currentRunDest || '',
+    lat: gps ? gps.lat : null,
+    lon: gps ? gps.lon : null,
+  };
+  // Economy since the last odometer entry
+  let econMsg = '';
+  const prev = [...log].reverse().find(x => x.odo);
+  if (prev && entry.odo && entry.litres && entry.odo > prev.odo) {
+    entry.l100 = Math.round((entry.litres / (entry.odo - prev.odo)) * 1000) / 10;
+    econMsg = ` That's ${entry.l100}L/100km since your last fill.`;
+  }
+  log.push(entry);
+  try { localStorage.setItem('navigator_fuel_log', JSON.stringify(log.slice(-100))); } catch(e) {}
+  document.getElementById('fillSheet').classList.remove('open');
+  document.getElementById('fillLitres').value=''; document.getElementById('fillCost').value=''; document.getElementById('fillOdo').value='';
+  const cpl = (entry.cost && entry.litres) ? ` at ${(entry.cost / entry.litres * 100).toFixed(1)}c/L` : '';
+  addMsg('nav', `Fill-up logged — ${station}${entry.litres ? ', ' + entry.litres + 'L' : ''}${cpl}.${econMsg}`);
+}
+
+function showFuelLog() {
+  const log = getFuelLog().slice().reverse();
+  const el = document.getElementById('fuelLogList');
+  el.innerHTML = log.length
+    ? log.map(x => `${x.date} — ${x.station}${x.litres ? ': ' + x.litres + 'L' : ''}${x.cost ? ', $' + x.cost.toFixed(2) : ''}${x.l100 ? ', ' + x.l100 + 'L/100km' : ''}${x.run ? ' (' + x.run + ')' : ''}`).join('<br>')
+    : 'No fill-ups logged yet — tap 📒 Fill-up after your next stop.';
+  document.getElementById('fillSheet').classList.remove('open');
+  document.getElementById('fuelLogSheet').classList.add('open');
+}
+function closeFuelLog(e) {
+  if (!e || e.target === document.getElementById('fuelLogSheet')) {
+    document.getElementById('fuelLogSheet').classList.remove('open');
+  }
+}
+function copyFuelCsv() {
+  const log = getFuelLog();
+  const csv = ['date,station,litres,total_cost,odometer,l_per_100km,run']
+    .concat(log.map(x => [
+      x.date,
+      '"' + (x.station || '').replace(/"/g,'""') + '"',
+      x.litres ?? '', x.cost ?? '', x.odo ?? '', x.l100 ?? '',
+      '"' + (x.run || '').replace(/"/g,'""') + '"',
+    ].join(','))).join('\n');
+  navigator.clipboard.writeText(csv)
+    .then(() => alert('Fuel log copied — paste into any spreadsheet.'))
+    .catch(() => alert('Copy failed on this browser — screenshot the list instead.'));
+}
+
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
   unlockAudio();
@@ -1433,11 +1564,19 @@ async function sendMessage(){
   const condText=document.getElementById('condChip').textContent.replace('🌤 ','');
   const v=VEHICLES[currentVehicle];
 
+  // Real-world economy from the driver's own fuel log beats generic estimates
+  let econCtx='';
+  try {
+    const lastEcon=[...getFuelLog()].reverse().find(x=>x.l100);
+    if(lastEcon) econCtx=`Driver's logged fuel economy: ${lastEcon.l100}L/100km.`;
+  } catch(e) {}
+
   const ctx=[
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'Location: Australia',
     weatherCtx,
     stationsCtx,
     fuelCtx,
+    econCtx,
     campsCtx,
     v.systemNote,
     `Fuel type: ${selectedFuel}.${rangeText!=='Range'?' Driver-set fuel range: '+rangeText.replace('Range: ','')+'.':''}`,
