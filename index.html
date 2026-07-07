@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 02:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 03:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -896,20 +896,28 @@ async function plotTripRoute(dest) {
     return;
   }
   try {
-    // Where is the destination?
-    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-    const gd = await g.json();
-    if (!gd || !gd.length) return;
-    const dlat = parseFloat(gd[0].lat), dlon = parseFloat(gd[0].lon);
+    // Where is the destination? (cached from a previous plot of the same trip)
+    let dlat, dlon;
+    if (window._tripRoute && window._tripRoute.dest === dest && window._tripRoute.dlat) {
+      dlat = window._tripRoute.dlat; dlon = window._tripRoute.dlon;
+    } else {
+      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+      const gd = await g.json();
+      if (!gd || !gd.length) return;
+      dlat = parseFloat(gd[0].lat); dlon = parseFloat(gd[0].lon);
+    }
     // The driving route
     const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
     const rd = await r.json();
     if (!rd.routes || !rd.routes.length) return;
-    // Give the AI the real numbers: distance and car-pace driving time
+    // Give the AI the real numbers: distance and car-pace driving time.
+    // Remember where this was computed from, so deviation triggers a refresh.
     window._tripRoute = {
       dest: dest,
       km: Math.round(rd.routes[0].distance / 1000),
       hours: Math.round((rd.routes[0].duration / 3600) * 10) / 10,
+      originLat: gps.lat, originLon: gps.lon,
+      dlat: dlat, dlon: dlon,
     };
     const latlngs = rd.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
     if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
@@ -1482,6 +1490,7 @@ RULES:
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
 - TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
 - If the driver's logged fuel economy appears in context, use it for range and fuel calculations instead of generic estimates.
+- DEVIATIONS: The driver may not follow any plan you gave earlier. Always answer from CURRENT position and CURRENT ROUTE DATA — earlier plans in this conversation are suggestions that reality has superseded, never commitments to enforce.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -1713,10 +1722,14 @@ async function sendMessage(){
     if(lastEcon) econCtx=`Driver's logged fuel economy: ${lastEcon.l100}L/100km.`;
   } catch(e) {}
 
-  // Route numbers from OSRM — the AI plans legs from these, never guesses
+  // Route numbers from OSRM — the AI plans legs from these, never guesses.
+  // Deviated more than 20km from where the route was computed? Recompute first.
   let routeCtx='';
-  if (window._tripRoute && currentRunDest) {
-    routeCtx = `ROUTE DATA (OSRM, real roads): ${window._tripRoute.dest} is ${window._tripRoute.km}km from current position, about ${window._tripRoute.hours} driving hours at car pace.`;
+  if (window._tripRoute && currentRunDest && gps) {
+    if (distKm(gps.lat, gps.lon, window._tripRoute.originLat, window._tripRoute.originLon) > 20) {
+      await plotTripRoute(currentRunDest);
+    }
+    routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${window._tripRoute.hours} driving hours at car pace.`;
   }
 
   const ctx=[
