@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 02:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 02:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -905,6 +905,12 @@ async function plotTripRoute(dest) {
     const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
     const rd = await r.json();
     if (!rd.routes || !rd.routes.length) return;
+    // Give the AI the real numbers: distance and car-pace driving time
+    window._tripRoute = {
+      dest: dest,
+      km: Math.round(rd.routes[0].distance / 1000),
+      hours: Math.round((rd.routes[0].duration / 3600) * 10) / 10,
+    };
     const latlngs = rd.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
     if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
     if (routeDestMarker) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
@@ -1463,7 +1469,8 @@ EXAMPLE of a perfect reply:
 "Gordonvale BP, 22km south, easy drive-through access. Navigating to Gordonvale BP now."
 
 RULES:
-- 30 words maximum across the whole reply. Hard limit.
+- 30 words maximum across the whole reply. Hard limit — with ONE exception: TRIP LEG PLANNING below.
+- TRIP LEG PLANNING (the only exception to the word cap): when the driver asks how long the trip will take, to plan their days or legs, or where to break and sleep along the way — use the ROUTE DATA in context and reply in this compact shape, 80 words maximum, plain sentences: First, total km and realistic driving hours for THIS vehicle (car = route hours plus 10% for stops; caravan or campervan = route hours plus 30%; truck = plus 20% with mandatory rest breaks). Then one line per driving day: "Day 1: [start] to [overnight town] — break at [real town about 4 hours in], overnight at [real town about 8 hours in]." Pick towns by driving time on the actual route, and prefer overnight towns with caravan parks and motels. Finish by offering to navigate the first leg. Solo mode rules apply to every stop named. If no ROUTE DATA is in context, say you need a trip planned first — never guess distances.
 - CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
@@ -1706,12 +1713,19 @@ async function sendMessage(){
     if(lastEcon) econCtx=`Driver's logged fuel economy: ${lastEcon.l100}L/100km.`;
   } catch(e) {}
 
+  // Route numbers from OSRM — the AI plans legs from these, never guesses
+  let routeCtx='';
+  if (window._tripRoute && currentRunDest) {
+    routeCtx = `ROUTE DATA (OSRM, real roads): ${window._tripRoute.dest} is ${window._tripRoute.km}km from current position, about ${window._tripRoute.hours} driving hours at car pace.`;
+  }
+
   const ctx=[
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'Location: Australia',
     weatherCtx,
     stationsCtx,
     fuelCtx,
     econCtx,
+    routeCtx,
     campsCtx,
     accomCtx,
     v.systemNote,
@@ -1729,7 +1743,7 @@ async function sendMessage(){
     const res=await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:80,system:SYSTEM,messages})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,system:SYSTEM,messages})
     });
     const data=await res.json();
     hideTyping();
