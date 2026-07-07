@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 05:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 05:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1060,8 +1060,8 @@ function updateSuggestions() {
 let gpsRetries = 0;
 
 function initGPS() {
-  if (!navigator.geolocation) { updateGps('📍 No GPS — tap to set manually'); return; }
-  updateGps('📍 Locating... (or tap to set)');
+  if (!navigator.geolocation) { if (!gpsAddress) updateGps('📍 No GPS — tap to set manually'); return; }
+  if (!gpsAddress) updateGps('📍 Locating... (or tap to set)');
   navigator.geolocation.getCurrentPosition(async pos => {
     gpsRetries = 0;
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
@@ -1077,6 +1077,8 @@ function initGPS() {
     loadGoogleMaps();
     fetchWeather();
   }, err => {
+    // A remembered manual location beats a failed GPS attempt — leave it be
+    if (gpsAddress && gpsAddress.includes('(manual)')) return;
     // Report the REAL reason, not a generic guess
     const messages = {
       1: '📍 Blocked — tap to set manually',
@@ -1121,6 +1123,7 @@ async function setManualLocation() {
     if (d && d.length) {
       gps = { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
       gpsAddress = q + ' (manual)';
+      try { localStorage.setItem('navigator_manual_loc', JSON.stringify({ lat: gps.lat, lon: gps.lon, label: q })); } catch(e) {}
       updateGps('📍 ' + gpsAddress);
       document.getElementById('mapPlaceholderText').textContent = gpsAddress;
       loadGoogleMaps();
@@ -1132,6 +1135,22 @@ async function setManualLocation() {
   } catch(e) {
     alert('Location lookup failed — check your connection and try again.');
   }
+}
+
+// Restore a remembered manual location instantly at launch —
+// a real GPS fix, if permitted, overrides it moments later.
+function loadManualLocation() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('navigator_manual_loc') || 'null');
+    if (saved && saved.lat) {
+      gps = { lat: saved.lat, lon: saved.lon };
+      gpsAddress = saved.label + ' (manual)';
+      updateGps('📍 ' + gpsAddress);
+      document.getElementById('mapPlaceholderText').textContent = gpsAddress;
+      loadGoogleMaps();
+      fetchWeather();
+    }
+  } catch(e) {}
 }
 
 // ── OPENSTREETMAP (free, no API key, no billing) ─────────────────────────────
@@ -1908,6 +1927,7 @@ function showUpdateBanner(){
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 if(synth) synth.onvoiceschanged=()=>synth.getVoices();
+loadManualLocation();
 initGPS();
 updateSuggestions();
 loadMapPreference();
