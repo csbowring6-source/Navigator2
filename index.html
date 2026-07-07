@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 01:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 02:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -765,6 +765,7 @@ function saveTripSetup() {
   // Remember this journey as a regular run (destination is the key)
   if (dest) {
     currentRunDest = dest;
+    plotTripRoute(dest);
     try {
       let runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
       runs = runs.filter(r => r.dest.toLowerCase() !== dest.toLowerCase());
@@ -794,6 +795,7 @@ function resumeTrip() {
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     document.getElementById('startOverlay').classList.add('hidden');
+    plotTripRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
   } catch(e) {}
 }
@@ -839,6 +841,7 @@ function recallTrip(i) {
     if (r.vehicle && VEHICLES[r.vehicle]) selectVehicle(r.vehicle);
     if (r.passengers && r.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     document.getElementById('startOverlay').classList.add('hidden');
+    plotTripRoute(currentRunDest);
     addMsg('nav', `Back on the ${r.dest} run. Conditions and fuel range are fresh — set them if today's different. What do you need?`);
   } catch(e) {}
 }
@@ -881,6 +884,38 @@ let recognition = null;
 let isListening = false;
 let driveStart = Date.now();
 const synth = window.speechSynthesis;
+
+// ── TRIP ROUTE ON THE MAP (OSRM over OpenStreetMap roads) ────────────────────
+let routeLine = null;
+let routeDestMarker = null;
+
+async function plotTripRoute(dest) {
+  if (!dest) return;
+  if (!gps || !window._navMap || !window.L) {
+    window._pendingRouteDest = dest; // map not ready yet — draw when it is
+    return;
+  }
+  try {
+    // Where is the destination?
+    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+    const gd = await g.json();
+    if (!gd || !gd.length) return;
+    const dlat = parseFloat(gd[0].lat), dlon = parseFloat(gd[0].lon);
+    // The driving route
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
+    const rd = await r.json();
+    if (!rd.routes || !rd.routes.length) return;
+    const latlngs = rd.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+    if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
+    if (routeDestMarker) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
+    routeLine = L.polyline(latlngs, { color: '#F5A623', weight: 4, opacity: 0.85 }).addTo(window._navMap);
+    routeDestMarker = L.marker([dlat, dlon], { icon: L.divIcon({
+      html: '<div style="width:14px;height:14px;background:#2ECC71;border:3px solid #0A1628;border-radius:50%;box-shadow:0 0 0 3px rgba(46,204,113,0.3);"></div>',
+      className: '', iconSize: [14,14], iconAnchor: [7,7],
+    })}).addTo(window._navMap);
+    window._navMap.fitBounds(routeLine.getBounds(), { padding: [20,20] });
+  } catch(e) {}
+}
 
 // ── VEHICLE SELECTOR ──────────────────────────────────────────────────────────
 function openVehicleSheet() { document.getElementById('vehicleSheet').classList.add('open'); }
@@ -1071,6 +1106,7 @@ function initOSMMap() {
   setTimeout(() => {
     map.invalidateSize(true);
     map.setView([gps.lat, gps.lon], 15);
+    if (window._pendingRouteDest) { plotTripRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
   }, 500);
 
   // Keep position updated
@@ -1167,11 +1203,15 @@ function openInMap(app) {
   const dest = currentNavDest;
   const q    = encodeURIComponent(dest + ' Australia');
   const android = /Android/i.test(navigator.userAgent);
+  // Mid-trip stop? Google can navigate via the stop to the trip destination in one route
+  const finalDest = (currentRunDest && currentRunDest.toLowerCase() !== dest.toLowerCase())
+    ? encodeURIComponent(currentRunDest + ' Australia') : null;
 
   const urls = {
     apple:    `https://maps.apple.com/?daddr=${q}&dirflg=d`,
-    // Android: google.navigation intent launches straight into turn-by-turn — no Start button
-    google:   android ? `google.navigation:q=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`,
+    google:   finalDest
+      ? `https://www.google.com/maps/dir/?api=1&destination=${finalDest}&waypoints=${q}&travelmode=driving`
+      : (android ? `google.navigation:q=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`),
     waze:     `https://waze.com/ul?q=${q}&navigate=yes`,
     'maps.me':`https://maps.me/?q=${q}`,
   };
