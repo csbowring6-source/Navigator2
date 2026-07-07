@@ -354,7 +354,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 12:10 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 01:00 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -690,10 +690,13 @@ function updateGreeting() {
   const tod = h < 12 ? 'morning' : (h < 17 ? 'arvo' : 'evening');
   let place = '';
   if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
+  if (place && /^-?\d/.test(place)) place = ''; // raw coordinates are not a place name
   const wx = window._wx;
   const ps = place ? '<span>' + place + '</span>' : '';
   let msg;
-  if (wx && place) {
+  if (h < 5) {
+    msg = `Burning the midnight oil${name ? ', ' + name : ''} — what are we planning?`;
+  } else if (wx && place) {
     if (/rain|drizzle|thunder/i.test(wx.desc)) msg = `Wet one in ${ps} today${name ? ', ' + name : ''} — where are we headed?`;
     else if (wx.temp >= 33) msg = `Scorcher in ${ps} today${name ? ', ' + name : ''} — what's the plan?`;
     else if (wx.wind >= 30) msg = `Blowy out in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
@@ -1142,8 +1145,15 @@ function initGPS() {
       const d = await r.json();
       const suburb = d.address?.suburb||d.address?.town||d.address?.village||d.address?.county||'';
       const state  = d.address?.state||'';
-      gpsAddress = suburb ? `${suburb}, ${state}` : `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}`;
-    } catch { gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`; }
+      if (suburb) {
+        gpsAddress = `${suburb}, ${state}`;
+      } else if (!gpsAddress || /^📍?\s*-?\d/.test(gpsAddress.replace('📍 ',''))) {
+        // Only fall back to raw numbers if we don't already hold a real name
+        gpsAddress = `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}`;
+      }
+    } catch {
+      if (!gpsAddress) gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`;
+    }
     updateGps('📍 ' + gpsAddress);
     document.getElementById('mapPlaceholderText').textContent = gpsAddress;
     updateGreeting();
