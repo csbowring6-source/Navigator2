@@ -230,6 +230,16 @@
         </div>
       </div>
     </div>
+    <div class="trip-row">
+      <div class="trip-field">
+        <span class="trip-label">Rego — optional</span>
+        <input class="trip-input" id="profileRego" placeholder="e.g. 123ABC">
+      </div>
+      <div class="trip-field">
+        <span class="trip-label">Caravan / van model — optional</span>
+        <input class="trip-input" id="profileVan" placeholder="e.g. Jayco Starcraft 19ft">
+      </div>
+    </div>
     <div class="trip-btn-row">
       <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Let's go</button>
     </div>
@@ -246,14 +256,26 @@
       <div class="start-btn-title" id="resumeTitle">▶ Resume trip</div>
       <div class="start-btn-desc">Pick up where you left off</div>
     </div>
-    <div style="background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:14px;">
-      <div style="font-size:14px;font-weight:600;color:var(--white);margin-bottom:8px;">Where are you going?</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="start-btn quick" style="border-color:rgba(245,166,35,0.5);" onclick="showWhere()">
+        <div class="start-btn-title">🗺 Where are you going?</div>
+        <div class="start-btn-desc">A trip or a big drive — I'll size it up</div>
+      </div>
+      <div class="start-btn quick" style="border-color:rgba(245,166,35,0.5);" onclick="quickStart()">
+        <div class="start-btn-title">🚗 Just popping out</div>
+        <div class="start-btn-desc">No destination — fuel, coffee, whatever</div>
+      </div>
+    </div>
+    <div id="whereWrap" style="display:none;background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:12px;">
       <div style="display:flex;gap:8px;">
-        <input class="trip-input" id="whereInput" placeholder="e.g. Cairns... or the shops" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
+        <input class="trip-input" id="whereInput" placeholder="e.g. Cairns" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
         <button class="trip-btn primary" style="flex:0 0 auto;padding:10px 18px;" onclick="whereTo()">Go</button>
       </div>
     </div>
-    <button class="map-sheet-cancel" style="margin-top:0;" onclick="quickStart()">Just exploring — skip</button>
+    <div class="start-btn quick" onclick="editSetup()" style="padding:11px 14px;">
+      <div class="start-btn-title" style="font-size:13px;">⚙ Edit setup</div>
+      <div class="start-btn-desc">Name · vehicle · rego · van model</div>
+    </div>
   </div>
   <div id="savedTripsWrap" style="display:none;width:100%;max-width:320px;margin-top:16px;">
     <div style="font-size:10px;color:var(--gray3);text-align:center;letter-spacing:0.08em;margin-bottom:8px;">REGULAR RUNS</div>
@@ -332,7 +354,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 05:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 12:10 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -656,6 +678,34 @@ function adoptTrip(dest) {
 }
 let userName = '';
 let userVehicles = [];
+let userRego = '';
+let userVan = '';
+
+// ── LIVING GREETING — place, weather, time and name, composed fresh ───────────
+function updateGreeting() {
+  const el = document.getElementById('startTitle');
+  if (!el) return;
+  const name = (userName && userName !== 'there') ? userName : '';
+  const h = new Date().getHours();
+  const tod = h < 12 ? 'morning' : (h < 17 ? 'arvo' : 'evening');
+  let place = '';
+  if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
+  const wx = window._wx;
+  const ps = place ? '<span>' + place + '</span>' : '';
+  let msg;
+  if (wx && place) {
+    if (/rain|drizzle|thunder/i.test(wx.desc)) msg = `Wet one in ${ps} today${name ? ', ' + name : ''} — where are we headed?`;
+    else if (wx.temp >= 33) msg = `Scorcher in ${ps} today${name ? ', ' + name : ''} — what's the plan?`;
+    else if (wx.wind >= 30) msg = `Blowy out in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
+    else if (/clear|sun/i.test(wx.desc)) msg = `Another beautiful ${tod} in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
+    else msg = `G'day${name ? ' ' + name : ''} — ${tod} in ${ps}. What are we up to?`;
+  } else if (place) {
+    msg = `Good ${tod} from ${ps}${name ? ', ' + name : ''} — what are we up to?`;
+  } else {
+    msg = `Good ${tod}${name ? ', ' + name : ''} — what are we up to today?`;
+  }
+  el.innerHTML = msg;
+}
 
 // ── PROFILE SETUP (first time only — name + owned vehicles) ──────────────────
 function toggleProfileVehicle(el) {
@@ -668,9 +718,11 @@ function saveProfile() {
 
   userName = name || 'there';
   userVehicles = selected.length ? selected : ['car'];
+  userRego = document.getElementById('profileRego').value.trim();
+  userVan = document.getElementById('profileVan').value.trim();
 
   try {
-    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles }));
+    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego: userRego, van: userVan }));
   } catch(e) {}
 
   document.getElementById('profileOverlay').classList.add('hidden');
@@ -678,9 +730,21 @@ function saveProfile() {
   document.getElementById('startOverlay').classList.remove('hidden');
 }
 
+// ── EDIT SETUP — reopen the profile, prefilled ────────────────────────────────
+function editSetup() {
+  document.getElementById('profileName').value = userName === 'there' ? '' : userName;
+  document.getElementById('profileRego').value = userRego || '';
+  document.getElementById('profileVan').value = userVan || '';
+  document.querySelectorAll('.profile-vehicle-opt').forEach(el => {
+    el.classList.toggle('selected', userVehicles.includes(el.dataset.v));
+  });
+  document.getElementById('startOverlay').classList.add('hidden');
+  document.getElementById('profileOverlay').classList.remove('hidden');
+}
+
 function applyProfile() {
-  // Personalise greetings
-  document.getElementById('startTitle').innerHTML = `Welcome back, <span>${userName}</span>`;
+  // Personalise greetings — composed live from place, weather and time
+  updateGreeting();
   const wh = document.getElementById('welcomeHeading');
   if (wh) wh.innerHTML = `G'day ${userName}.<br>Your <span>co-pilot</span> is ready.`;
 
@@ -697,6 +761,8 @@ function loadProfile() {
       const p = JSON.parse(saved);
       userName = p.name;
       userVehicles = p.vehicles;
+      userRego = p.rego || '';
+      userVan = p.van || '';
       applyProfile();
       document.getElementById('profileOverlay').classList.add('hidden');
       document.getElementById('startOverlay').classList.remove('hidden');
@@ -711,6 +777,12 @@ function loadProfile() {
 }
 
 // ── WHERE ARE YOU GOING — one question, the road decides what it is ──────────
+function showWhere() {
+  const w = document.getElementById('whereWrap');
+  w.style.display = 'block';
+  setTimeout(() => document.getElementById('whereInput').focus(), 150);
+}
+
 async function whereTo() {
   const q = document.getElementById('whereInput').value.trim();
   if (!q) { quickStart(); return; }
@@ -1074,6 +1146,7 @@ function initGPS() {
     } catch { gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`; }
     updateGps('📍 ' + gpsAddress);
     document.getElementById('mapPlaceholderText').textContent = gpsAddress;
+    updateGreeting();
     loadGoogleMaps();
     fetchWeather();
   }, err => {
@@ -1149,6 +1222,7 @@ function loadManualLocation() {
       document.getElementById('mapPlaceholderText').textContent = gpsAddress;
       loadGoogleMaps();
       fetchWeather();
+      updateGreeting();
     }
   } catch(e) {}
 }
@@ -1243,8 +1317,10 @@ async function fetchWeather() {
     const wspd = Math.round((d.wind?.speed||0)*3.6);
     const wdir = ['N','NE','E','SE','S','SW','W','NW'][Math.round((d.wind?.deg||0)/45)%8];
     const temp = Math.round(d.main?.temp||0);
+    window._wx = { temp, wind: wspd, desc: (d.weather && d.weather[0] && d.weather[0].main) || '' };
     document.getElementById('windChip').textContent = `🌬 ${wspd}km/h ${wdir} · ${temp}°C`;
     weatherCtx = `Wind: ${wspd}km/h from ${wdir}. Temperature: ${temp}°C.`;
+    updateGreeting();
   } catch {}
 }
 
@@ -1604,6 +1680,7 @@ RULES:
 - ACCOMMODATION: If NEARBY ACCOMMODATION data appears in context, match the tier to the request — "treat ourselves"/luxury = highest stars or best-known quality property; "cheap"/backpackers = hostels and budget motels; otherwise the best-fit nearest. Never state a price or vacancy — you don't have them. Blend with your own knowledge of well-known properties. Solo mode filters still apply.
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
 - TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
+- If the driver's van model appears in context, factor its size into site, park and forecourt access advice. If they ask for their rego, just tell them — it's in context.
 - If the driver's logged fuel economy appears in context, use it for range and fuel calculations instead of generic estimates.
 - BIG DAY CHOICE: If the driver was asked whether to tough out a big single-day drive or overnight partway — "tough it out" (or similar) means reply using the leg-plan format for today only: named rest stops roughly every two hours at real towns, then the destination. "Find somewhere partway" (or similar) means standard two-sentence format naming the town nearest halfway by driving time that has motels or caravan parks. Solo mode rules apply to both.
 - DEVIATIONS: The driver may not follow any plan you gave earlier. Always answer from CURRENT position and CURRENT ROUTE DATA — earlier plans in this conversation are suggestions that reality has superseded, never commitments to enforce. If an "Agreed plan" appears in the trip context, keep answers consistent with it where reality still fits — it is the driver's chosen plan, updated by where they actually are, never argued for.
@@ -1857,6 +1934,8 @@ async function sendMessage(){
 
   const ctx=[
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'Location: Australia',
+    userRego?`Vehicle rego: ${userRego}.`:'',
+    userVan?`Driver's van: ${userVan}.`:'',
     weatherCtx,
     stationsCtx,
     fuelCtx,
