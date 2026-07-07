@@ -240,20 +240,20 @@
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
-  <div class="start-sub">Your AI co-pilot for the road. Jump straight in, or set up your trip so I already know the details.</div>
+  <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
     <div class="start-btn quick" id="resumeBtn" style="display:none;border-color:var(--amber);" onclick="resumeTrip()">
       <div class="start-btn-title" id="resumeTitle">▶ Resume trip</div>
       <div class="start-btn-desc">Pick up where you left off</div>
     </div>
-    <div class="start-btn plan" onclick="openTripSetup()">
-      <div class="start-btn-title">📋 Plan A Trip</div>
-      <div class="start-btn-desc">Tell me your destination, dates, fuel, and conditions</div>
+    <div style="background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:14px;">
+      <div style="font-size:14px;font-weight:600;color:var(--white);margin-bottom:8px;">Where are you going?</div>
+      <div style="display:flex;gap:8px;">
+        <input class="trip-input" id="whereInput" placeholder="e.g. Cairns... or the shops" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
+        <button class="trip-btn primary" style="flex:0 0 auto;padding:10px 18px;" onclick="whereTo()">Go</button>
+      </div>
     </div>
-    <div class="start-btn quick" onclick="quickStart()">
-      <div class="start-btn-title">⚡ Quick Start</div>
-      <div class="start-btn-desc">Skip setup — just start talking</div>
-    </div>
+    <button class="map-sheet-cancel" style="margin-top:0;" onclick="quickStart()">Just exploring — skip</button>
   </div>
   <div id="savedTripsWrap" style="display:none;width:100%;max-width:320px;margin-top:16px;">
     <div style="font-size:10px;color:var(--gray3);text-align:center;letter-spacing:0.08em;margin-bottom:8px;">REGULAR RUNS</div>
@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 03:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 05:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -640,6 +640,20 @@ let busy = false;
 let selectedMap = 'apple';
 let tripContext = '';
 let currentRunDest = '';
+let pendingTripDest = null;
+
+// 👍 on an answer about a place = adopt it as the trip, no form needed
+function adoptTrip(dest) {
+  currentRunDest = dest;
+  tripContext = `Destination: ${dest}.`;
+  pendingTripDest = null;
+  try {
+    localStorage.removeItem('navigator_trip_plan');
+    localStorage.setItem('navigator_last_trip', tripContext);
+    localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest, fuel:'', cond:'', passengers:'' }));
+  } catch(e) {}
+  plotTripRoute(dest);
+}
 let userName = '';
 let userVehicles = [];
 
@@ -693,6 +707,69 @@ function loadProfile() {
     }
   } catch(e) {
     document.getElementById('profileOverlay').classList.remove('hidden');
+  }
+}
+
+// ── WHERE ARE YOU GOING — one question, the road decides what it is ──────────
+async function whereTo() {
+  const q = document.getElementById('whereInput').value.trim();
+  if (!q) { quickStart(); return; }
+  document.getElementById('startOverlay').classList.add('hidden');
+  addMsg('user', 'Heading to ' + q);
+  showTyping();
+  try {
+    if (!gps) {
+      hideTyping();
+      adoptTrip(q);
+      const msg = `${q} it is — set as your trip. I'll draw the route once I know where you are: tap the 📍 pin to set your location.`;
+      addMsg('nav', msg); speak(msg);
+      return;
+    }
+    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+    const gd = await g.json();
+    if (!gd || !gd.length) {
+      hideTyping();
+      addMsg('nav', `Couldn't place "${q}" — try the town plus state, or just ask me things as you go.`);
+      return;
+    }
+    const dlat = parseFloat(gd[0].lat), dlon = parseFloat(gd[0].lon);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=false`);
+    const rd = await r.json();
+    hideTyping();
+    if (!rd.routes || !rd.routes.length) {
+      addMsg('nav', `Couldn't route to ${q} — ask me anything and we'll work it out as we go.`);
+      return;
+    }
+    const km = Math.round(rd.routes[0].distance / 1000);
+    const rawHrs = rd.routes[0].duration / 3600;
+    // Adjust for what they're driving — a big day towing is bigger
+    const factor = (currentVehicle==='caravan'||currentVehicle==='campervan') ? 1.3 : (currentVehicle==='truck' ? 1.2 : 1.1);
+    const hrs = Math.round(rawHrs * factor * 10) / 10;
+    const vLabel = VEHICLES[currentVehicle].label.toLowerCase();
+    if (hrs >= 9) {
+      // Multi-day run
+      adoptTrip(q);
+      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}: a multi-day run. Set as your trip and the route's on the map. Ask me to plan your days and I'll break it into overnights.`;
+      addMsg('nav', msg); speak(msg);
+    } else if (hrs >= 5) {
+      // A big single day — put the safety choice to the driver
+      adoptTrip(q);
+      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}. That's a big day to do safely in one hit. Tough it out with proper breaks, or want me to find an overnight stop partway?`;
+      addMsg('nav', msg); speak(msg);
+    } else if (hrs >= 3 || km >= 250) {
+      // A solid day trip — full trip treatment
+      adoptTrip(q);
+      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}. Set as your trip and the route's on the map. Ask me for fuel and stops as you go.`;
+      addMsg('nav', msg); speak(msg);
+    } else {
+      // A local run — no ceremony
+      const mins = Math.round(hrs * 60);
+      const msg = `${q} is ${km}km, about ${mins} minutes. Local run — what do you need on the way: fuel, coffee, or straight there?`;
+      addMsg('nav', msg); speak(msg);
+    }
+  } catch(e) {
+    hideTyping();
+    addMsg('nav', 'Routing hiccup — ask me anything and we\'ll sort it as we go.');
   }
 }
 
@@ -765,6 +842,7 @@ function saveTripSetup() {
   // Remember this journey as a regular run (destination is the key)
   if (dest) {
     currentRunDest = dest;
+    try { localStorage.removeItem('navigator_trip_plan'); } catch(e) {}
     plotTripRoute(dest);
     try {
       let runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
@@ -791,6 +869,8 @@ function resumeTrip() {
   try {
     const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
     tripContext = localStorage.getItem('navigator_last_trip') || '';
+    const lockedPlan = localStorage.getItem('navigator_trip_plan');
+    if (lockedPlan) tripContext += ' Agreed plan for this trip: ' + lockedPlan;
     currentRunDest = raw.dest || '';
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
@@ -1437,15 +1517,31 @@ function addMsg(role,text){
         bub.appendChild(star);
       }
     }
-    // Feedback row — quick trust loop
+    // Feedback row — the buttons are decisions, not just notes
     const fbRow=document.createElement('div'); fbRow.className='feedback-row';
-    const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Good answer';
-    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn'; thumbDown.textContent='👎'; thumbDown.title='That was wrong';
-    thumbUp.onclick=()=>{ fbRow.innerHTML='<span class="fb-thanks">Thanks — noted ✓</span>'; };
+    const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Yes — lock it in';
+    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn'; thumbDown.textContent='👎'; thumbDown.title='No — give me another option';
+    const isPlan = /Day 1:/i.test(cleaned);
+    thumbUp.onclick=()=>{
+      if (!currentRunDest && pendingTripDest) {
+        const d = pendingTripDest;
+        adoptTrip(d);
+        fbRow.innerHTML='<span class="fb-thanks">✓ Trip set — ' + d + '. Route on the map; resume any time.</span>';
+      } else if (isPlan && currentRunDest) {
+        try { localStorage.setItem('navigator_trip_plan', cleaned); } catch(e) {}
+        tripContext += ' Agreed plan: ' + cleaned;
+        fbRow.innerHTML='<span class="fb-thanks">✓ Plan locked in — I\'ll remember it for this trip.</span>';
+      } else {
+        fbRow.innerHTML='<span class="fb-thanks">Thanks — noted ✓</span>';
+      }
+    };
     thumbDown.onclick=()=>{
-      const reason=prompt('What was wrong? (e.g. closed, too tight for the van, wrong price)','');
-      fbRow.innerHTML='<span class="fb-thanks">Got it — I\'ll factor that in ✓</span>';
-      console.log('Navigator feedback: NEGATIVE —', cleaned, '— reason:', reason);
+      const reason=prompt('What was wrong? (e.g. too far off route, too dear, wrong direction)','');
+      fbRow.innerHTML='<span class="fb-thanks">↻ Getting you another option...</span>';
+      if (!busy) {
+        document.getElementById('userInput').value = 'No' + (reason ? ' — ' + reason : ', that doesn\'t suit') + '. Give me a different option.';
+        sendMessage();
+      }
     };
     fbRow.appendChild(thumbUp); fbRow.appendChild(thumbDown);
     bub.appendChild(fbRow);
@@ -1490,7 +1586,8 @@ RULES:
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
 - TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
 - If the driver's logged fuel economy appears in context, use it for range and fuel calculations instead of generic estimates.
-- DEVIATIONS: The driver may not follow any plan you gave earlier. Always answer from CURRENT position and CURRENT ROUTE DATA — earlier plans in this conversation are suggestions that reality has superseded, never commitments to enforce.
+- BIG DAY CHOICE: If the driver was asked whether to tough out a big single-day drive or overnight partway — "tough it out" (or similar) means reply using the leg-plan format for today only: named rest stops roughly every two hours at real towns, then the destination. "Find somewhere partway" (or similar) means standard two-sentence format naming the town nearest halfway by driving time that has motels or caravan parks. Solo mode rules apply to both.
+- DEVIATIONS: The driver may not follow any plan you gave earlier. Always answer from CURRENT position and CURRENT ROUTE DATA — earlier plans in this conversation are suggestions that reality has superseded, never commitments to enforce. If an "Agreed plan" appears in the trip context, keep answers consistent with it where reality still fits — it is the driver's chosen plan, updated by where they actually are, never argued for.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -1686,6 +1783,13 @@ async function sendMessage(){
   busy=true; document.getElementById('sendBtn').disabled=true;
   synth?.cancel();
   addMsg('user',text);
+
+  // No active trip and the question names a place? Remember it —
+  // a thumbs-up on the answer adopts it as the trip.
+  if (!currentRunDest) {
+    const m = text.match(/(?:\bto|\btowards?|\bfor)\s+([A-Z][a-zA-Z']+(?:\s+[A-Z][a-zA-Z']+){0,2})/);
+    pendingTripDest = m ? m[1].replace(/[.,!?]+$/,'').trim() : null;
+  }
 
   // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
   // every state) always; LIVE FUEL PRICES only when price is the intent —
