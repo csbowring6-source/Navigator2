@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 12:05 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 12:20 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -908,8 +908,8 @@ function updateSuggestions() {
 let gpsRetries = 0;
 
 function initGPS() {
-  if (!navigator.geolocation) { updateGps('📍 GPS unavailable on this browser'); return; }
-  updateGps('📍 Locating...');
+  if (!navigator.geolocation) { updateGps('📍 No GPS — tap to set manually'); return; }
+  updateGps('📍 Locating... (or tap to set)');
   navigator.geolocation.getCurrentPosition(async pos => {
     gpsRetries = 0;
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
@@ -928,8 +928,8 @@ function initGPS() {
     // Report the REAL reason, not a generic guess
     const messages = {
       1: '📍 Blocked — tap to set manually',
-      2: '📍 Position unavailable — retrying...',
-      3: '📍 Location timed out — retrying...',
+      2: '📍 No fix — tap to set manually',
+      3: '📍 Timed out — tap to set manually',
     };
     updateGps(messages[err.code] || '📍 Location error — retrying...');
     document.getElementById('mapPlaceholderText').textContent = messages[err.code] || 'Location error';
