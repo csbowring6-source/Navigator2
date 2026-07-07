@@ -332,7 +332,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 10:00 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 07 Jul 2026, 11:00 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -357,7 +357,7 @@
     </div>
   </div>
   <div class="alert-strip">
-    <div class="alert-chip gps" id="gpsChip">📍 Locating...</div>
+    <div class="alert-chip gps" id="gpsChip" onclick="openLocSheet()" style="cursor:pointer;">📍 Locating...</div>
     <div class="alert-chip wind" id="windChip">🌬 Wind: —</div>
     <div class="alert-chip fatigue" id="fatigueChip">🕐 0h 0m</div>
   </div>
@@ -480,6 +480,21 @@
     <div class="map-sheet-title">Fuel type</div>
     <div class="map-sheet-options" id="fuelSheetOptions"></div>
     <button class="map-sheet-cancel" onclick="closeFuelSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- MANUAL LOCATION SHEET -->
+<div class="map-sheet" id="locSheet" onclick="closeLocSheet(event)">
+  <div class="map-sheet-inner">
+    <div class="map-sheet-title">Set your location manually</div>
+    <div class="trip-field">
+      <span class="trip-label">Town / suburb — e.g. Canungra QLD</span>
+      <input class="trip-input" id="locInput" placeholder="Type a place...">
+    </div>
+    <div class="trip-btn-row">
+      <button class="trip-btn primary" style="flex:1;" onclick="setManualLocation()">Use this location</button>
+    </div>
+    <button class="map-sheet-cancel" onclick="closeLocSheet()">Cancel</button>
   </div>
 </div>
 
@@ -912,7 +927,7 @@ function initGPS() {
   }, err => {
     // Report the REAL reason, not a generic guess
     const messages = {
-      1: '📍 Location blocked — check browser permission',
+      1: '📍 Blocked — tap to set manually',
       2: '📍 Position unavailable — retrying...',
       3: '📍 Location timed out — retrying...',
     };
@@ -934,6 +949,38 @@ function initGPS() {
 }
 
 function updateGps(text) { document.getElementById('gpsChip').textContent = text; }
+
+// ── MANUAL LOCATION — for blocked laptops and armchair trip planning ─────────
+function openLocSheet() {
+  document.getElementById('locSheet').classList.add('open');
+  setTimeout(() => document.getElementById('locInput').focus(), 300);
+}
+function closeLocSheet(e) {
+  if (!e || e.target === document.getElementById('locSheet')) {
+    document.getElementById('locSheet').classList.remove('open');
+  }
+}
+async function setManualLocation() {
+  const q = document.getElementById('locInput').value.trim();
+  if (!q) return;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+    const d = await r.json();
+    if (d && d.length) {
+      gps = { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
+      gpsAddress = q + ' (manual)';
+      updateGps('📍 ' + gpsAddress);
+      document.getElementById('mapPlaceholderText').textContent = gpsAddress;
+      loadGoogleMaps();
+      fetchWeather();
+      document.getElementById('locSheet').classList.remove('open');
+    } else {
+      alert('Couldn\'t find that place — try town plus state, e.g. "Canungra QLD".');
+    }
+  } catch(e) {
+    alert('Location lookup failed — check your connection and try again.');
+  }
+}
 
 // ── OPENSTREETMAP (free, no API key, no billing) ─────────────────────────────
 function loadGoogleMaps() {
