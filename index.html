@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:00 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:30 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1685,9 +1685,15 @@ function addMsg(role,text){
     const fbRow=document.createElement('div'); fbRow.className='feedback-row';
     const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Yes — lock it in';
     // Is this a fuel-price reply with a shortlist to dial through?
-    const nearestByDist = fuelShortlist.slice().sort((a,b)=>a.km-b.km);
-    const atNearest = fuelDialIdx >= nearestByDist.length - 1;
     const isFuelDial = fuelShortlist.length > 1 && /\$\d|c\/L|litre/i.test(cleaned);
+    // One stable sequence: cheapest first, then the rest strictly nearest-first
+    let dialSeq = [];
+    if (isFuelDial) {
+      const cheapest = fuelShortlist[0];
+      const rest = fuelShortlist.slice(1).sort((a,b)=>a.km-b.km);
+      dialSeq = [cheapest, ...rest];
+    }
+    const atNearest = fuelDialIdx >= dialSeq.length - 1;
     const thumbDown=document.createElement('button'); thumbDown.className='fb-btn';
     if (isFuelDial) {
       thumbDown.textContent = atNearest ? '✓ that\'s the nearest' : '👎 nearer option';
@@ -1715,12 +1721,14 @@ function addMsg(role,text){
     };
     thumbDown.onclick=()=>{
       if (isFuelDial && !atNearest) {
-        // Walk one notch from cheapest toward nearest — no AI round-trip
+        // Step to the next servo in the stable cheapest→nearest sequence
         fuelDialIdx++;
-        const s = nearestByDist[fuelDialIdx];
+        const s = dialSeq[fuelDialIdx];
         const dollars = '$' + (s.price/100).toFixed(2);
-        const last = fuelDialIdx >= nearestByDist.length - 1;
-        addMsg('nav', `${s.name}, ${s.km.toFixed(0)}km, ${dollars} a litre${last ? ' — that\'s your nearest.' : '. Navigating there now.'}`);
+        const last = fuelDialIdx >= dialSeq.length - 1;
+        const dialMsg = `${s.name}, ${s.km.toFixed(0)}km, ${dollars} a litre${last ? ' — that\'s your nearest.' : '. Navigating there now.'}`;
+        addMsg('nav', dialMsg);
+        speak(dialMsg);
         return;
       }
       if (isFuelDial && atNearest) return;
