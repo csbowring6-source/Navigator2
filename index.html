@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 05:05 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 05:30 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1643,19 +1643,42 @@ function addMsg(role,text){
   if (role==='nav') lastNavReply = cleaned;
   const p=document.createElement('p'); p.textContent=cleaned; bub.appendChild(p);
   if(role==='nav'){
-    const dest=parseDest(cleaned);
-    if(dest){
-      const btn=document.createElement('button'); btn.className='nav-btn';
-      const mapNames={apple:'Apple Maps',google:'Google Maps',waze:'Waze','maps.me':'Maps.me'};
-      btn.textContent='📍 Navigate to '+dest+' — '+mapNames[selectedMap];
-      btn.onclick=()=>navigateTo(dest);
-      bub.appendChild(btn);
-      // Star: remember this stop for the active run
+    // Which known real places does this reply mention? Two or more = pick buttons
+    const mentions = knownPlaces
+      .map(nm => ({ nm, i: cleaned.toLowerCase().indexOf(nm.toLowerCase()) }))
+      .filter(x => x.i >= 0)
+      .sort((a,b) => a.i - b.i)
+      .slice(0, 3)
+      .map(x => x.nm);
+    const mapNames={apple:'Apple Maps',google:'Google Maps',waze:'Waze','maps.me':'Maps.me'};
+    if (mentions.length >= 2) {
+      mentions.forEach((nm, idx) => {
+        const btn=document.createElement('button'); btn.className='nav-btn';
+        btn.style.marginTop = idx === 0 ? '8px' : '6px';
+        btn.textContent = '📍 ' + (idx+1) + '. ' + nm;
+        btn.onclick = () => navigateTo(nm);
+        bub.appendChild(btn);
+      });
       if (currentRunDest) {
         const star=document.createElement('button'); star.className='fb-btn'; star.style.marginTop='6px';
         star.textContent='⭐ Save stop for this run';
-        star.onclick=()=>{ saveStopForRun(dest); star.textContent='✓ Saved for '+currentRunDest; star.disabled=true; };
+        star.onclick=()=>{ saveStopForRun(mentions[0]); star.textContent='✓ Saved for '+currentRunDest; star.disabled=true; };
         bub.appendChild(star);
+      }
+    } else {
+      const dest=parseDest(cleaned) || mentions[0];
+      if(dest){
+        const btn=document.createElement('button'); btn.className='nav-btn';
+        btn.textContent='📍 Navigate to '+dest+' — '+mapNames[selectedMap];
+        btn.onclick=()=>navigateTo(dest);
+        bub.appendChild(btn);
+        // Star: remember this stop for the active run
+        if (currentRunDest) {
+          const star=document.createElement('button'); star.className='fb-btn'; star.style.marginTop='6px';
+          star.textContent='⭐ Save stop for this run';
+          star.onclick=()=>{ saveStopForRun(dest); star.textContent='✓ Saved for '+currentRunDest; star.disabled=true; };
+          bub.appendChild(star);
+        }
       }
     }
     // Feedback row — the buttons are decisions, not just notes
@@ -1763,6 +1786,7 @@ async function fetchFuelPrices() {
     const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`);
     const d = await r.json();
     if (d.results && d.results.length) {
+      notePlaces(d.results.slice(0,5).map(s => s.name));
       const list = d.results.slice(0,5).map(s => {
         const km = (s.lat && s.lon) ? `, ${distKm(gps.lat, gps.lon, parseFloat(s.lat), parseFloat(s.lon)).toFixed(0)}km away` : '';
         return `${s.name} (${s.address}): ${s.price} c/L${km}`;
@@ -1786,6 +1810,7 @@ async function fetchCamps() {
     const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=40`);
     const d = await r.json();
     if (d.results && d.results.length) {
+      notePlaces(d.results.slice(0,6).map(s => s.name));
       const list = d.results.slice(0,6).map(s => {
         const km = (s.lat && s.lon) ? `${distKm(gps.lat, gps.lon, s.lat, s.lon).toFixed(0)}km` : '';
         const bits = [s.type, km, s.fee==='no'?'free':'', s.powered&&s.powered!=='no'?'powered':'', s.dump==='yes'?'dump point':''].filter(Boolean).join(', ');
@@ -1808,6 +1833,7 @@ async function fetchStations() {
         .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
         .sort((a,b) => a.km - b.km)
         .slice(0,5);
+      notePlaces(withKm.map(s => s.name));
       const list = withKm.map(s => `${s.name}${s.brand && s.brand !== s.name ? ' ('+s.brand+')' : ''} ${s.km.toFixed(0)}km`).join('; ');
       return `NEARBY FUEL STATIONS (OpenStreetMap ground truth, sorted NEAREST first, no prices): ${list}.`;
     }
@@ -1914,7 +1940,7 @@ async function fetchAccom() {
         .map(s => ({...s, km: (s.lat && s.lon) ? distKm(gps.lat, gps.lon, s.lat, s.lon) : 999}))
         .sort((a,b) => a.km - b.km)
         .slice(0,8)
-        .map(s => `${s.name} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''}, ${s.km.toFixed(0)}km)`)
+        .map(s => { notePlaces([s.name]); return `${s.name} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''}, ${s.km.toFixed(0)}km)`; })
         .join('; ');
       return `NEARBY ACCOMMODATION (OpenStreetMap — real places, no live prices or vacancy): ${list}.`;
     }
@@ -1947,13 +1973,24 @@ async function fetchPoi(kind, label) {
         .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
         .sort((a,b) => a.km - b.km)
         .slice(0,5)
-        .map(s => `${s.name} ${s.km.toFixed(0)}km`)
+        .map(s => { notePlaces([s.name]); return `${s.name} ${s.km.toFixed(0)}km`; })
         .join('; ');
       return `NEARBY ${label} (OpenStreetMap ground truth, sorted NEAREST first): ${list}.`;
     }
     return `NEARBY ${label}: none found within 25km — say so honestly and name the nearest town likely to have one.`;
   } catch(e) {}
   return '';
+}
+
+// Real places the data has served — replies mentioning them get tap-to-pick buttons
+let knownPlaces = [];
+function notePlaces(names) {
+  for (const n of names) {
+    if (n && !knownPlaces.includes(n)) {
+      knownPlaces.push(n);
+      if (knownPlaces.length > 30) knownPlaces.shift();
+    }
+  }
 }
 
 // Ground-truth lists persist between messages — follow-up questions
