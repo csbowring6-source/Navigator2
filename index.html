@@ -258,7 +258,7 @@
     </div>
     <div class="start-btn quick" id="clearTripBtn" style="display:none;border-color:rgba(231,76,60,0.5);" onclick="clearTrip()">
       <div class="start-btn-title" id="clearTitle" style="color:var(--red);">✕ Clear trip</div>
-      <div class="start-btn-desc">Wrap it up — regular runs and stars are kept</div>
+      <div class="start-btn-desc">Regular runs & ⭐ stops kept</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <div class="start-btn quick" style="border-color:rgba(245,166,35,0.5);" onclick="showWhere()">
@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 01:35 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 01:45 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -947,7 +947,7 @@ function renderResumeTrip() {
 }
 
 function clearTrip() {
-  if (!confirm('End this trip? Your regular runs and starred stops are kept.')) return;
+  if (!confirm('End this trip? Regular runs & ⭐ stops are kept.')) return;
   try {
     localStorage.removeItem('navigator_last_trip');
     localStorage.removeItem('navigator_last_trip_raw');
