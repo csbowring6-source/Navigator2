@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 01:45 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 02:05 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -992,16 +992,28 @@ function saveStopForRun(place) {
 function renderSavedTrips() {
   try {
     const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-    if (!runs.length) return;
     const wrap = document.getElementById('savedTripsWrap');
     const list = document.getElementById('savedTripsList');
+    if (!runs.length) { wrap.style.display = 'none'; return; }
     list.innerHTML = runs.map((r, i) => `
-      <button class="start-btn quick" style="padding:12px;text-align:left;" onclick="recallTrip(${i})">
+      <button class="start-btn quick" style="padding:12px;text-align:left;position:relative;" onclick="recallTrip(${i})">
         <div class="start-btn-title" style="font-size:13px;">🔁 ${r.dest}</div>
-        <div class="start-btn-desc">${VEHICLES[r.vehicle] ? VEHICLES[r.vehicle].icon + ' ' + VEHICLES[r.vehicle].label : ''}${r.passengers ? ' · ' + r.passengers : ''}</div>
+        <div class="start-btn-desc">${VEHICLES[r.vehicle] ? VEHICLES[r.vehicle].icon + ' ' + VEHICLES[r.vehicle].label : ''}${r.passengers ? ' · ' + r.passengers : ''}${r.stops && r.stops.length ? ' · ⭐' + r.stops.length : ''}</div>
+        <span onclick="event.stopPropagation();deleteRun(${i})" style="position:absolute;top:8px;right:12px;color:var(--gray3);font-size:14px;padding:4px;">✕</span>
       </button>
     `).join('');
     wrap.style.display = 'block';
+  } catch(e) {}
+}
+
+function deleteRun(i) {
+  try {
+    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
+    if (!runs[i]) return;
+    if (!confirm(`Remove the ${runs[i].dest} run and its ⭐ stops?`)) return;
+    runs.splice(i, 1);
+    localStorage.setItem('navigator_saved_trips', JSON.stringify(runs));
+    renderSavedTrips();
   } catch(e) {}
 }
 
