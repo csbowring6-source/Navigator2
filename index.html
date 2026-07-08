@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 02:45 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 03:15 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1718,7 +1718,7 @@ RULES:
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - No explanations. No suggestions to check other apps. No fluff.
-- NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If a list says none found, say so and name the nearest sizeable town.
+- NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If the driver asks for several ("the 3 nearest gyms"), list up to three from the list with distances in one sentence — that is allowed and expected. Never invent policies such as "one result per reply"; no such rule exists. If a list says none found, say so and name the nearest sizeable town.
 - MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
 - NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
 - FUEL PRICES: If LIVE FUEL PRICES appear in context, they are real and current — but the list is sorted by price, includes distances, and covers only price-reporting states, so nearby stations can be missing from it. Quote actual cents-per-litre when you use it. If no live prices are in context, never state or invent a price and never refer the driver to another app — name the best nearby station for the vehicle, and if asked for cheapest, pick the station most likely cheap (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words, nothing more.
@@ -1949,6 +1949,15 @@ async function fetchPoi(kind, label) {
   return '';
 }
 
+// Ground-truth lists persist between messages — follow-up questions
+// ("which is closest?") shouldn't starve just because the keyword's gone.
+const ctxKeep = {};
+function keepCtx(k, v) { if (v) ctxKeep[k] = { v, t: Date.now() }; }
+function getCtx(k) {
+  const e = ctxKeep[k];
+  return (e && Date.now() - e.t < 15 * 60 * 1000) ? e.v : '';
+}
+
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
   unlockAudio();
@@ -1994,6 +2003,15 @@ async function sendMessage(){
   for (const t of poiHits) {
     poiCtx += (poiCtx ? ' ' : '') + await fetchPoi(t.kind, t.label);
   }
+
+  // Remember what was fetched; reuse remembered lists for follow-ups
+  keepCtx('fuel', fuelCtx); keepCtx('stations', stationsCtx);
+  keepCtx('camps', campsCtx); keepCtx('accom', accomCtx); keepCtx('poi', poiCtx);
+  fuelCtx = fuelCtx || getCtx('fuel');
+  stationsCtx = stationsCtx || getCtx('stations');
+  campsCtx = campsCtx || getCtx('camps');
+  accomCtx = accomCtx || getCtx('accom');
+  poiCtx = poiCtx || getCtx('poi');
 
   const driveHrs=((Date.now()-driveStart)/3600000).toFixed(1);
   const isSolo=document.getElementById('soloChip').classList.contains('active');
