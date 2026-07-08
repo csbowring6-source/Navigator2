@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 05:30 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:00 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1684,7 +1684,17 @@ function addMsg(role,text){
     // Feedback row — the buttons are decisions, not just notes
     const fbRow=document.createElement('div'); fbRow.className='feedback-row';
     const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Yes — lock it in';
-    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn'; thumbDown.textContent='👎'; thumbDown.title='No — give me another option';
+    // Is this a fuel-price reply with a shortlist to dial through?
+    const nearestByDist = fuelShortlist.slice().sort((a,b)=>a.km-b.km);
+    const atNearest = fuelDialIdx >= nearestByDist.length - 1;
+    const isFuelDial = fuelShortlist.length > 1 && /\$\d|c\/L|litre/i.test(cleaned);
+    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn';
+    if (isFuelDial) {
+      thumbDown.textContent = atNearest ? '✓ that\'s the nearest' : '👎 nearer option';
+      thumbDown.title = 'Show a closer servo';
+    } else {
+      thumbDown.textContent='👎'; thumbDown.title='No — give me another option';
+    }
     const isPlan = /Day 1:/i.test(cleaned);
     const isQuestion = /\?\s*$/.test(cleaned);
     thumbUp.onclick=()=>{
@@ -1704,6 +1714,16 @@ function addMsg(role,text){
       }
     };
     thumbDown.onclick=()=>{
+      if (isFuelDial && !atNearest) {
+        // Walk one notch from cheapest toward nearest — no AI round-trip
+        fuelDialIdx++;
+        const s = nearestByDist[fuelDialIdx];
+        const dollars = '$' + (s.price/100).toFixed(2);
+        const last = fuelDialIdx >= nearestByDist.length - 1;
+        addMsg('nav', `${s.name}, ${s.km.toFixed(0)}km, ${dollars} a litre${last ? ' — that\'s your nearest.' : '. Navigating there now.'}`);
+        return;
+      }
+      if (isFuelDial && atNearest) return;
       const reason=prompt('What was wrong? (e.g. too far off route, too dear, wrong direction)','');
       fbRow.innerHTML='<span class="fb-thanks">↻ Getting you another option...</span>';
       if (!busy) {
@@ -1787,6 +1807,11 @@ async function fetchFuelPrices() {
     const d = await r.json();
     if (d.results && d.results.length) {
       notePlaces(d.results.slice(0,5).map(s => s.name));
+      // Shortlist for the 👎 dial: cheapest is result[0]; the rest ranked by distance
+      fuelShortlist = d.results
+        .filter(s => s.lat && s.lon)
+        .map(s => ({ name: s.name, price: s.price, km: distKm(gps.lat, gps.lon, parseFloat(s.lat), parseFloat(s.lon)) }));
+      fuelDialIdx = 0;
       const list = d.results.slice(0,5).map(s => {
         const km = (s.lat && s.lon) ? `, ${distKm(gps.lat, gps.lon, parseFloat(s.lat), parseFloat(s.lon)).toFixed(0)}km away` : '';
         return `${s.name} (${s.address}): ${s.price} c/L${km}`;
@@ -1984,6 +2009,8 @@ async function fetchPoi(kind, label) {
 
 // Real places the data has served — replies mentioning them get tap-to-pick buttons
 let knownPlaces = [];
+let fuelShortlist = [];   // stations for the cheapest→nearest dial
+let fuelDialIdx = 0;
 function notePlaces(names) {
   for (const n of names) {
     if (n && !knownPlaces.includes(n)) {
