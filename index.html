@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:25 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:45 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -663,6 +663,7 @@ let gpsAddress = null;
 let weatherCtx = '';
 let messages = [];
 let busy = false;
+let lastNavReply = '';
 let selectedMap = 'apple';
 let tripContext = '';
 let currentRunDest = '';
@@ -1639,6 +1640,7 @@ function addMsg(role,text){
   const av=document.createElement('div'); av.className='msg-avatar'; av.textContent=role==='user'?'👤':'🧭';
   const bub=document.createElement('div'); bub.className='msg-bubble';
   const cleaned=cleanText(text);
+  if (role==='nav') lastNavReply = cleaned;
   const p=document.createElement('p'); p.textContent=cleaned; bub.appendChild(p);
   if(role==='nav'){
     const dest=parseDest(cleaned);
@@ -1981,30 +1983,35 @@ async function sendMessage(){
     pendingTripDest = m ? m[1].replace(/[.,!?]+$/,'').trim() : null;
   }
 
+  // "Yes" answers a question — inherit the topic from Navigator's own words,
+  // so confirming "did you mean gyms?" actually fetches gyms.
+  const affirm = /^(yes|yeah|yep|yup|correct|that's right|sure|ok(ay)?|please do|go ahead)\b/i.test(text.trim());
+  const scanText = (affirm && lastNavReply) ? text + ' ' + lastNavReply : text;
+
   // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
   // every state) always; LIVE FUEL PRICES only when price is the intent —
   // near a border the price list anchors the AI on far-away stations.
   let fuelCtx = '';
   let stationsCtx = '';
-  const fuelQuery = /fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(text);
-  const nearestOnly = /nearest|closest/i.test(text) && !/cheap|price|cost|cents/i.test(text);
+  const fuelQuery = /fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(scanText);
+  const nearestOnly = /nearest|closest/i.test(scanText) && !/cheap|price|cost|cents/i.test(scanText);
   if (fuelQuery) {
     stationsCtx = await fetchStations();
     if (!nearestOnly) fuelCtx = await fetchFuelPrices();
   }
   // Stay-related question? Grab real nearby camps and parks
   let campsCtx = '';
-  if (/camp|caravan park|powered site|dump point|free camp/i.test(text)) {
+  if (/camp|caravan park|powered site|dump point|free camp/i.test(scanText)) {
     campsCtx = await fetchCamps();
   }
   // Roof-over-our-heads question? Grab hotels, motels, backpackers
   let accomCtx = '';
-  if (/hotel|motel|hostel|backpacker|resort|accommodation|a room|cabin|b ?& ?b|bnb|luxury|treat ourselves|somewhere (nice|comfortable|to sleep)|stay tonight|overnight/i.test(text)) {
+  if (/hotel|motel|hostel|backpacker|resort|accommodation|a room|cabin|b ?& ?b|bnb|luxury|treat ourselves|somewhere (nice|comfortable|to sleep)|stay tonight|overnight/i.test(scanText)) {
     accomCtx = await fetchAccom();
   }
   // Everyday places? Ground-truth up to two categories per question
   let poiCtx = '';
-  const poiHits = POI_TRIGGERS.filter(t => t.re.test(text)).slice(0, 2);
+  const poiHits = POI_TRIGGERS.filter(t => t.re.test(scanText)).slice(0, 2);
   for (const t of poiHits) {
     poiCtx += (poiCtx ? ' ' : '') + await fetchPoi(t.kind, t.label);
   }
