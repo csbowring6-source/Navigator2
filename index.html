@@ -382,7 +382,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>08:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>09:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -1921,7 +1921,39 @@ async function fetchFuelPrices() {
         .filter(s => s.prog > myProg + 0.01 && s.detour <= 10)
         .sort((a,b) => a.price - b.price)   // cheapest first — the whole point
         .slice(0, 3);                        // top 3 only — fewer road-distance calls
-      if (!ahead.length) return '';
+      if (!ahead.length) {
+        // Nothing priced ahead in range — a fuel-data thin patch. Be honest and
+        // friendly: name the nearest actual servo, and tell them when to ask again.
+        try {
+          const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=25`);
+          const sd = await sr.json();
+          let nearName = '', nearKm = 0;
+          if (sd.results && sd.results.length) {
+            const n = sd.results.map(s=>({name:s.name, km:distKm(gps.lat,gps.lon,s.lat,s.lon)})).sort((a,b)=>a.km-b.km)[0];
+            nearName = n.name; nearKm = n.km;
+          }
+          // Find a landmark ~40km up the route — genuinely "a bit up the road",
+          // not a percentage of a 1700km trip (which lands hours away).
+          const path = window._tripRoute.path;
+          const startI = Math.floor(path.length * myProg);
+          let landmark = 'up the road';
+          let accum = 0, targetI = startI;
+          for (let i = startI + 1; i < path.length; i++) {
+            accum += distKm(path[i-1].lat, path[i-1].lon, path[i].lat, path[i].lon);
+            targetI = i;
+            if (accum >= 40) break;   // ~40km ahead
+          }
+          const aheadPt = path[targetI];
+          try {
+            const gr = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${aheadPt.lat}&lon=${aheadPt.lon}&format=json&zoom=12`,{headers:{'Accept-Language':'en'}});
+            const gd = await gr.json();
+            const t = gd.address && (gd.address.town||gd.address.city||gd.address.village||gd.address.suburb||gd.address.county);
+            if (t) landmark = 'around ' + t;
+          } catch(e) {}
+          notePlaces(nearName ? [nearName] : []);
+          return `FUEL-DATA THIN SPOT on the way to ${currentRunDest}: no confirmed prices nearby.${nearName ? ` Nearest servo is ${nearName}, ${nearKm.toFixed(0)}km — fill up there if you're getting low.` : ''} Tell the driver warmly that prices are patchy right here, and to ask again ${landmark} where live prices should kick in.`;
+        } catch(e) { return ''; }
+      }
       notePlaces(ahead.map(s => s.name));
       // Road distance only for the 3 finalists — one small, fast call
       const roads = await roadDistances(gps.lat, gps.lon, ahead);
