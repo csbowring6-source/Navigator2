@@ -358,7 +358,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 03:40 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:00 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -609,7 +609,7 @@ const VEHICLES = {
     range: 50,
     rangeLabel: '50km',
     suggestions: [
-      { icon:'⛽', label:'Cheapest fuel',    desc:'next 50km',           query:'Cheapest fuel in the next 50km' },
+      { icon:'⛽', label:'Servo',    desc:'check options',           query:'Cheapest fuel in the next 50km' },
       { icon:'☕', label:'Coffee stop',       desc:'near me',             query:'Find me a coffee stop near me' },
       { icon:'🛣', label:'Tolls + traffic',   desc:'on this route',       query:'Are there any tolls or traffic I should know about on this route?' },
       { icon:'🗺', label:'Next 20km',         desc:"what's ahead",        query:'What do I need to know about the next 20km?' },
@@ -622,7 +622,7 @@ const VEHICLES = {
     range: 300,
     rangeLabel: '300km',
     suggestions: [
-      { icon:'⛽', label:'Cheapest fuel',    desc:'next 300km',          query:'Cheapest fuel in the next 300km I can get into with the van' },
+      { icon:'⛽', label:'Servo',    desc:'check options',          query:'Cheapest fuel in the next 300km I can get into with the van' },
       { icon:'🏕', label:'Stay tonight',     desc:'powered + dump point', query:'Find somewhere to stay tonight — powered site and dump point for the van' },
       { icon:'🌬', label:'Wind impact',      desc:'on my range',         query:'How is the wind affecting my range today?' },
       { icon:'🗺', label:'Next 200km',       desc:"what's ahead",        query:'What do I need to know about the next 200km?' },
@@ -635,7 +635,7 @@ const VEHICLES = {
     range: 200,
     rangeLabel: '200km',
     suggestions: [
-      { icon:'⛽', label:'Cheapest fuel',    desc:'next 200km',          query:'Cheapest fuel in the next 200km for a campervan' },
+      { icon:'⛽', label:'Servo',    desc:'check options',          query:'Cheapest fuel in the next 200km for a campervan' },
       { icon:'🏕', label:'Free camp',        desc:'tonight nearby',      query:'Find somewhere to free camp tonight — self-contained campervan' },
       { icon:'🌬', label:'Wind impact',      desc:'on my range',         query:'How is the wind affecting my range today?' },
       { icon:'🗺', label:'Next 150km',       desc:"what's ahead",        query:'What do I need to know about the next 150km?' },
@@ -648,7 +648,7 @@ const VEHICLES = {
     range: 400,
     rangeLabel: '400km',
     suggestions: [
-      { icon:'⛽', label:'Cheapest diesel',  desc:'next 400km',          query:'Cheapest diesel in the next 400km suitable for a truck' },
+      { icon:'⛽', label:'Servo',    desc:'check options',    query:'Cheapest diesel in the next 400km suitable for a truck' },
       { icon:'🛑', label:'Rest break',       desc:'compliance + facilities', query:'I need a compliant rest break — find me a truck stop with facilities' },
       { icon:'🌉', label:'Low bridges',      desc:'+ weight limits',     query:'Are there any low bridges or weight restrictions on this route?' },
       { icon:'🗺', label:'Next 300km',       desc:"what's ahead",        query:'What do I need to know about the next 300km for a truck?' },
@@ -1164,6 +1164,7 @@ function updateSuggestions() {
     <div class="suggestion" onclick="suggest('${s.query.replace(/'/g,"\\'")}')">
       <span class="sug-icon">${s.icon}</span>
       <span class="sug-label">${s.label}</span>
+      ${s.desc ? `<span class="sug-desc">${s.desc}</span>` : ''}
     </div>
   `).join('');
 }
