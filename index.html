@@ -22,8 +22,8 @@
   .logo-icon{width:28px;height:28px;background:var(--amber);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .logo-text{font-size:16px;font-weight:600;letter-spacing:-0.3px;}
   .header-right{display:flex;align-items:center;gap:8px;}
-  .sos-btn{background:#E7202A;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:800;cursor:pointer;letter-spacing:0.3px;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;}
-  .sos-btn:hover,.sos-btn:active{transform:scale(1.05);background:#c81820;}
+  .sos-btn{background:#E7202A;border:none;border-radius:10px;width:40px;height:40px;font-size:20px;cursor:pointer;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;order:99;margin-left:6px;}
+  .sos-btn:hover,.sos-btn:active{transform:scale(1.08);}
   .sos-overlay{position:fixed;inset:0;background:rgba(4,10,20,0.92);z-index:2000;display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;}
   .sos-overlay.open{display:flex;}
   .sos-panel{background:var(--navy2);border:2px solid #E7202A;border-radius:16px;max-width:460px;width:100%;padding:20px;margin-top:30px;}
@@ -378,8 +378,8 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <button class="sos-btn" onclick="openSOS()" title="Emergency help">🆘 SOS</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:15 PM AEST</div>
+    <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -2223,21 +2223,30 @@ async function openSOS() {
   // Nearest hospital and police — best-effort, never blocks the location readout
   helpEl.innerHTML = '<div class="sos-help-dist">Searching for nearest hospital and police...</div>';
   try {
-    const q = `[out:json][timeout:12];(node["amenity"~"hospital|police"](around:60000,${gps.lat},${gps.lon});way["amenity"~"hospital|police"](around:60000,${gps.lat},${gps.lon}););out center tags 30;`;
+    // Wide net: regional areas tag hospitals as hospital, clinic, or healthcare=hospital
+    const q = `[out:json][timeout:15];(node["amenity"="hospital"](around:80000,${gps.lat},${gps.lon});way["amenity"="hospital"](around:80000,${gps.lat},${gps.lon});node["healthcare"="hospital"](around:80000,${gps.lat},${gps.lon});way["healthcare"="hospital"](around:80000,${gps.lat},${gps.lon});node["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});way["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});node["amenity"="police"](around:60000,${gps.lat},${gps.lon});way["amenity"="police"](around:60000,${gps.lat},${gps.lon}););out center tags 60;`;
     const r = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:'data='+encodeURIComponent(q) });
     const d = await r.json();
-    const places = (d.elements||[]).map(e=>{
+    let places = (d.elements||[]).map(e=>{
       const t=e.tags||{}; const plat=e.lat||(e.center&&e.center.lat); const plon=e.lon||(e.center&&e.center.lon);
-      if(!plat||!plon||!t.amenity) return null;
-      return { name:t.name||(t.amenity==='hospital'?'Hospital':'Police'), type:t.amenity, km:distKm(gps.lat,gps.lon,plat,plon) };
+      if(!plat||!plon) return null;
+      const isPolice = t.amenity==='police';
+      const isHosp = t.amenity==='hospital' || t.healthcare==='hospital' || t.amenity==='clinic';
+      if(!isPolice && !isHosp) return null;
+      return { name:t.name||(isPolice?'Police':'Hospital'), type:isPolice?'police':'hospital',
+               lat:plat, lon:plon, crow:distKm(gps.lat,gps.lon,plat,plon) };
     }).filter(Boolean);
-    const hosp = places.filter(p=>p.type==='hospital').sort((a,b)=>a.km-b.km)[0];
-    const pol  = places.filter(p=>p.type==='police').sort((a,b)=>a.km-b.km)[0];
-    let html='';
-    const row=(label,p)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${label}: ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km away</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}')">Navigate</button></div>` : `<div class="sos-help-row"><div class="sos-help-name">${label}: none within 60km</div></div>`;
-    html += row('🏥 Hospital', hosp);
-    html += row('🚓 Police', pol);
-    helpEl.innerHTML = html;
+
+    // Take the 4 nearest of each by crow-flies, then get TRUE road distance for those
+    const byType = t => places.filter(p=>p.type===t).sort((a,b)=>a.crow-b.crow).slice(0,4);
+    const shortlist = [...byType('hospital'), ...byType('police')];
+    const roads = await roadDistances(gps.lat, gps.lon, shortlist);
+    shortlist.forEach((p,i)=>{ p.km = (roads[i]!=null)?roads[i]:p.crow; });
+    const hosp = shortlist.filter(p=>p.type==='hospital').sort((a,b)=>a.km-b.km)[0];
+    const pol  = shortlist.filter(p=>p.type==='police').sort((a,b)=>a.km-b.km)[0];
+
+    const row=(label,p)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${label}: ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km by road</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}')">Navigate</button></div>` : `<div class="sos-help-row"><div class="sos-help-name">${label}: none within range</div></div>`;
+    helpEl.innerHTML = row('🏥 Hospital', hosp) + row('🚓 Police', pol);
   } catch(e) {
     helpEl.innerHTML = '<div class="sos-help-dist">Couldn\'t search right now — call 000 and read them your location above.</div>';
   }
