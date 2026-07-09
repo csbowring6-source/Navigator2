@@ -359,7 +359,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:15 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:35 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -665,6 +665,7 @@ let weatherCtx = '';
 let messages = [];
 let busy = false;
 let lastNavReply = '';
+let lastSpoken = '';
 let selectedMap = 'apple';
 let tripContext = '';
 let currentRunDest = '';
@@ -1644,7 +1645,7 @@ function addMsg(role,text){
   const av=document.createElement('div'); av.className='msg-avatar'; av.textContent=role==='user'?'👤':'🧭';
   const bub=document.createElement('div'); bub.className='msg-bubble';
   const cleaned=cleanText(text);
-  if (role==='nav') lastNavReply = cleaned;
+  if (role==='nav') { lastNavReply = cleaned; lastSpoken = cleaned; }
   const p=document.createElement('p'); p.textContent=cleaned; bub.appendChild(p);
   if(role==='nav'){
     // Which known real places does this reply mention? Two or more = pick buttons
@@ -1687,6 +1688,9 @@ function addMsg(role,text){
     }
     // Feedback row — the buttons are decisions, not just notes
     const fbRow=document.createElement('div'); fbRow.className='feedback-row';
+    const replay=document.createElement('button'); replay.className='fb-btn'; replay.textContent='🔊'; replay.title='Say that again';
+    replay.onclick=()=>{ speak(cleaned); };
+    fbRow.appendChild(replay);
     const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Yes — lock it in';
     // Is this a fuel-price reply with a shortlist to dial through?
     // fuelShortlist is already frozen in cheapest-then-nearest order — just read it.
@@ -1728,6 +1732,7 @@ function addMsg(role,text){
         const last = nextIdx >= fuelShortlist.length - 1;
         const dialMsg = `${s.name}, ${s.km.toFixed(0)}km by road, ${dollars} a litre${last ? ' — that\'s your nearest.' : '. Navigating there now.'}`;
         addMsg('nav', dialMsg);
+        lastSpoken = dialMsg;
         speak(dialMsg);
         return;
       }
@@ -2114,6 +2119,14 @@ async function sendMessage(){
   const inp=document.getElementById('userInput');
   const text=inp.value.trim();
   if(!text||busy) return;
+
+  // "Say again" / "repeat" — re-speak the last reply, no AI round-trip
+  if (/^(say again|say that again|repeat( that)?|come again|what did you say|pardon|again please|can you repeat)\b/i.test(text)) {
+    inp.value=''; inp.style.height='auto';
+    if (lastSpoken) { synth?.cancel(); speak(lastSpoken); }
+    return;
+  }
+
   inp.value=''; inp.style.height='auto';
   busy=true; document.getElementById('sendBtn').disabled=true;
   synth?.cancel();
