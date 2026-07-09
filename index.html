@@ -22,8 +22,12 @@
   .logo-icon{width:28px;height:28px;background:var(--amber);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .logo-text{font-size:16px;font-weight:600;letter-spacing:-0.3px;}
   .header-right{display:flex;align-items:center;gap:8px;}
-  .sos-btn{background:#E7202A;border:none;border-radius:10px;width:40px;height:40px;font-size:20px;cursor:pointer;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;order:99;margin-left:6px;}
+  .sos-btn{background:#E7202A;border:none;border-radius:10px;width:40px;height:40px;font-size:20px;cursor:pointer;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;flex-shrink:0;}
   .sos-btn:hover,.sos-btn:active{transform:scale(1.08);}
+  @media (max-width:520px){
+    .map-label-text{display:none;}
+    .build-stamp{font-size:9px;max-width:88px;}
+  }
   .sos-overlay{position:fixed;inset:0;background:rgba(4,10,20,0.92);z-index:2000;display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;}
   .sos-overlay.open{display:flex;}
   .sos-panel{background:var(--navy2);border:2px solid #E7202A;border-radius:16px;max-width:460px;width:100%;padding:20px;margin-top:30px;}
@@ -41,7 +45,7 @@
   .sos-btn-copy{background:var(--amber);color:var(--navy1);border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px;}
   .sos-nav{background:var(--navy2);border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
   .sos-close{display:block;width:100%;background:none;border:none;color:var(--gray2);font-size:14px;padding:10px;cursor:pointer;margin-top:4px;}
-  .build-stamp{font-size:9px;color:var(--gray3);white-space:nowrap;letter-spacing:0.01em;}
+  .build-stamp{font-size:9px;color:var(--gray3);letter-spacing:0.01em;text-align:right;line-height:1.25;max-width:90px;white-space:normal;}
   .status-pill{display:flex;align-items:center;gap:5px;background:rgba(46,204,113,0.12);border:1px solid rgba(46,204,113,0.3);border-radius:20px;padding:3px 9px;font-size:11px;color:var(--green);font-weight:500;}
   .status-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
@@ -378,11 +382,10 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 06:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>07:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
-        <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
+        <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
       </button>
       <div class="map-dropdown" id="mapDropdown">
         <div class="map-option selected" onclick="selectMap('apple','🗺','Apple Maps')">🗺 Apple Maps</div>
@@ -391,7 +394,7 @@
         <div class="map-option" onclick="selectMap('maps.me','🧭','Maps.me')">🧭 Maps.me</div>
       </div>
     </div>
-    <div class="status-pill"><div class="status-dot"></div>Ready</div>
+    <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
   </div>
 </div>
 
