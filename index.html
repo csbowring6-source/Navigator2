@@ -71,10 +71,11 @@
 
   /* QUICK SUGGESTION ROW */
   .suggestion-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px;}
-  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px;}
+  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;}
   .suggestion:hover,.suggestion:active{border-color:var(--amber);background:rgba(245,166,35,0.06);}
-  .sug-icon{font-size:18px;}
-  .sug-label{font-size:11px;font-weight:600;color:var(--amber);line-height:1.2;}
+  .sug-icon{font-size:26px;line-height:1;}
+  .sug-label{font-size:10px;font-weight:600;color:var(--amber);line-height:1.2;}
+  .sug-desc{font-size:10px;font-weight:400;color:var(--gray2);line-height:1.2;}
 
   /* MESSAGES */
   .msg{display:flex;gap:8px;max-width:640px;}
@@ -358,7 +359,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 04:15 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
