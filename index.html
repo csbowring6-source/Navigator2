@@ -382,7 +382,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>07:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>08:00 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -402,7 +402,9 @@
 <div class="sos-overlay" id="sosOverlay" onclick="closeSOS(event)">
   <div class="sos-panel">
     <div class="sos-title">🆘 Emergency</div>
-    <div class="sos-sub">In any emergency, call <b>000</b>. Navigator helps you tell them exactly where you are.</div>
+    <div class="sos-sub">In any emergency, call <b>000</b>. Navigator helps you tell them exactly where you are — <b>000 knows which hospital is open and able to help tonight.</b></div>
+
+    <div id="sosSignal" style="display:none;background:rgba(231,32,42,0.15);border:1px solid #E7202A;border-radius:10px;padding:12px;font-size:13px;color:#fff;line-height:1.45;margin-bottom:12px;"></div>
 
     <a class="sos-btn-big" href="tel:000">📞 Call 000</a>
 
@@ -2200,58 +2202,83 @@ async function openSOS() {
   const coordsEl = document.getElementById('sosCoords');
   const copyBtn = document.getElementById('sosCopyBtn');
   const helpEl = document.getElementById('sosHelp');
+  const signalEl = document.getElementById('sosSignal');
+
+  // CONNECTIVITY FIRST — the most important thing out bush is knowing if this works
+  const online = navigator.onLine;
+  if (!online) {
+    signalEl.style.display = 'block';
+    signalEl.innerHTML = '⚠ <b>No signal detected.</b> If you have a satellite phone, Starlink, or your phone supports satellite SOS, use it to call <b>000</b> and read them your location below. Newer phones can send an emergency SOS by satellite with no mobile towers — check your phone\'s Emergency SOS setting.';
+  } else {
+    signalEl.style.display = 'none';
+  }
 
   if (!gps) {
-    here.textContent = 'Location not set — tap the 📍 pin on the map, or tell 000 the last town you passed.';
+    here.textContent = 'Location not set — tap the 📍 pin on the map, or tell 000 the last town or road sign you passed.';
     coordsEl.textContent = '';
     copyBtn.style.display = 'none';
     helpEl.innerHTML = '<div class="sos-help-dist">Set your location to find nearest help.</div>';
     return;
   }
 
-  // Coordinates are instant and reliable — show them first, always
+  // Coordinates are instant, offline-safe, and the thing 000 needs most
   const lat = gps.lat.toFixed(5), lon = gps.lon.toFixed(5);
   coordsEl.textContent = `${lat}, ${lon}`;
   here.textContent = gpsAddress ? gpsAddress.replace(' (manual)','') : 'Locating nearest address...';
   copyBtn.style.display = 'inline-block';
+  sosLocationText = `My location: ${here.textContent}. GPS coordinates: ${lat}, ${lon}.`;
 
-  // Try to enrich with a precise address (best-effort; coords already shown)
+  // Everything below needs the internet — skip cleanly if offline
+  if (!online) {
+    here.textContent = gpsAddress ? gpsAddress.replace(' (manual)','') : `${lat}, ${lon}`;
+    helpEl.innerHTML = '<div class="sos-help-dist">Offline — can\'t search for facilities. Call 000; they\'ll direct you to the nearest open hospital.</div>';
+    return;
+  }
+
+  // Enrich address (best-effort; coords already shown)
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gps.lat}&lon=${gps.lon}&format=json&zoom=18`,{headers:{'Accept-Language':'en'}});
     const d = await r.json();
-    if (d.display_name) here.textContent = d.display_name;
+    if (d.display_name) { here.textContent = d.display_name; sosLocationText = `My location: ${d.display_name}. GPS coordinates: ${lat}, ${lon}.`; }
   } catch(e) {}
-  sosLocationText = `My location: ${here.textContent}. Coordinates: ${lat}, ${lon}.`;
 
-  // Nearest hospital and police — best-effort, never blocks the location readout
-  helpEl.innerHTML = '<div class="sos-help-dist">Searching for nearest hospital and police...</div>';
+  // Nearest facilities — honest about TYPE, never claiming capability we can't verify
+  helpEl.innerHTML = '<div class="sos-help-dist">Searching for nearest facilities...</div>';
   try {
-    // Wide net: regional areas tag hospitals as hospital, clinic, or healthcare=hospital
-    const q = `[out:json][timeout:15];(node["amenity"="hospital"](around:80000,${gps.lat},${gps.lon});way["amenity"="hospital"](around:80000,${gps.lat},${gps.lon});node["healthcare"="hospital"](around:80000,${gps.lat},${gps.lon});way["healthcare"="hospital"](around:80000,${gps.lat},${gps.lon});node["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});way["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});node["amenity"="police"](around:60000,${gps.lat},${gps.lon});way["amenity"="police"](around:60000,${gps.lat},${gps.lon}););out center tags 60;`;
+    const q = `[out:json][timeout:15];(node["amenity"="hospital"](around:100000,${gps.lat},${gps.lon});way["amenity"="hospital"](around:100000,${gps.lat},${gps.lon});node["healthcare"="hospital"](around:100000,${gps.lat},${gps.lon});way["healthcare"="hospital"](around:100000,${gps.lat},${gps.lon});node["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});way["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});node["amenity"="police"](around:60000,${gps.lat},${gps.lon});way["amenity"="police"](around:60000,${gps.lat},${gps.lon}););out center tags 60;`;
     const r = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:'data='+encodeURIComponent(q) });
     const d = await r.json();
     let places = (d.elements||[]).map(e=>{
       const t=e.tags||{}; const plat=e.lat||(e.center&&e.center.lat); const plon=e.lon||(e.center&&e.center.lon);
       if(!plat||!plon) return null;
       const isPolice = t.amenity==='police';
-      const isHosp = t.amenity==='hospital' || t.healthcare==='hospital' || t.amenity==='clinic';
-      if(!isPolice && !isHosp) return null;
-      return { name:t.name||(isPolice?'Police':'Hospital'), type:isPolice?'police':'hospital',
+      const isHospital = t.amenity==='hospital' || t.healthcare==='hospital';
+      const isClinic = t.amenity==='clinic';
+      if(!isPolice && !isHospital && !isClinic) return null;
+      return { name:t.name||(isPolice?'Police':(isClinic?'Medical centre':'Hospital')),
+               kind: isPolice?'police':(isClinic?'clinic':'hospital'),
+               hasED: t.emergency==='yes',
                lat:plat, lon:plon, crow:distKm(gps.lat,gps.lon,plat,plon) };
     }).filter(Boolean);
 
-    // Take the 4 nearest of each by crow-flies, then get TRUE road distance for those
-    const byType = t => places.filter(p=>p.type===t).sort((a,b)=>a.crow-b.crow).slice(0,4);
-    const shortlist = [...byType('hospital'), ...byType('police')];
+    const byKind = k => places.filter(p=>p.kind===k).sort((a,b)=>a.crow-b.crow).slice(0,4);
+    const shortlist = [...byKind('hospital'), ...byKind('clinic'), ...byKind('police')];
     const roads = await roadDistances(gps.lat, gps.lon, shortlist);
     shortlist.forEach((p,i)=>{ p.km = (roads[i]!=null)?roads[i]:p.crow; });
-    const hosp = shortlist.filter(p=>p.type==='hospital').sort((a,b)=>a.km-b.km)[0];
-    const pol  = shortlist.filter(p=>p.type==='police').sort((a,b)=>a.km-b.km)[0];
 
-    const row=(label,p)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${label}: ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km by road</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}')">Navigate</button></div>` : `<div class="sos-help-row"><div class="sos-help-name">${label}: none within range</div></div>`;
-    helpEl.innerHTML = row('🏥 Hospital', hosp) + row('🚓 Police', pol);
+    const hosp   = shortlist.filter(p=>p.kind==='hospital').sort((a,b)=>a.km-b.km)[0];
+    const clinic = shortlist.filter(p=>p.kind==='clinic').sort((a,b)=>a.km-b.km)[0];
+    const pol    = shortlist.filter(p=>p.kind==='police').sort((a,b)=>a.km-b.km)[0];
+
+    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}')">Navigate</button></div>` : '';
+    let html = '';
+    if (hosp)   html += row('🏥', hosp, hosp.hasED ? ' · listed with emergency dept' : ' · hospital');
+    if (clinic && (!hosp || clinic.km < hosp.km)) html += row('➕', clinic, ' · medical centre, may be daytime only');
+    if (pol)    html += row('🚓', pol, ' · police');
+    if (!html)  html = '<div class="sos-help-dist">None found nearby — call 000; they\'ll direct you.</div>';
+    helpEl.innerHTML = html;
   } catch(e) {
-    helpEl.innerHTML = '<div class="sos-help-dist">Couldn\'t search right now — call 000 and read them your location above.</div>';
+    helpEl.innerHTML = '<div class="sos-help-dist">Couldn\'t search — call 000 and read them your location above.</div>';
   }
 }
 
