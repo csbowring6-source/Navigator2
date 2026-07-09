@@ -382,7 +382,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>08:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>08:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -1861,20 +1861,24 @@ async function roadDistances(fromLat, fromLon, points) {
   try {
     const coords = [`${fromLon},${fromLat}`, ...points.map(p => `${p.lon},${p.lat}`)].join(';');
     const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=distance`;
-    const r = await fetch(url);
+    // Patient but bounded — a good partial beats a late-or-hung perfect answer
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
     const d = await r.json();
     if (d.code === 'Ok' && d.distances && d.distances[0]) {
-      // distances[0] = from source(0) to every point; [0] is self, skip it
       return d.distances[0].slice(1).map(m => (m == null ? null : m / 1000));
     }
   } catch(e) {}
-  return points.map(() => null); // signal fallback needed
+  return points.map(() => null); // signal fallback to crow-flies
 }
 
 // Distance from a point to the nearest vertex of the route path (rough corridor test)
 function distToRoute(lat, lon, path) {
   let min = Infinity;
-  for (let i = 0; i < path.length; i += 2) { // every 2nd point is plenty
+  const step = Math.max(1, Math.floor(path.length / 120)); // coarse is plenty
+  for (let i = 0; i < path.length; i += step) {
     const dk = distKm(lat, lon, path[i].lat, path[i].lon);
     if (dk < min) min = dk;
   }
@@ -1884,7 +1888,8 @@ function distToRoute(lat, lon, path) {
 // How far along the route is this point? (fraction 0=start, 1=destination)
 function progressAlongRoute(lat, lon, path) {
   let bestI = 0, best = Infinity;
-  for (let i = 0; i < path.length; i++) {
+  const step = Math.max(1, Math.floor(path.length / 120));
+  for (let i = 0; i < path.length; i += step) {
     const dk = distKm(lat, lon, path[i].lat, path[i].lon);
     if (dk < best) { best = dk; bestI = i; }
   }
@@ -1898,7 +1903,8 @@ async function fetchFuelPrices() {
     const onJourney = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
 
     if (onJourney) {
-      // CHEAPEST AHEAD ON ROUTE — grab a wide net, keep only what's on the corridor ahead
+      // CHEAPEST AHEAD ON ROUTE — rank cheaply first, road-distance only the finalists.
+      // Human's in the loop: a good answer fast beats a perfect one slow (they'll dial).
       const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=100`);
       const d = await r.json();
       if (!d.results || !d.results.length) return '';
@@ -1911,13 +1917,13 @@ async function fetchFuelPrices() {
           return { name: s.name, address: s.address, price: s.price, lat, lon,
                    detour: distToRoute(lat, lon, path), prog: progressAlongRoute(lat, lon, path) };
         })
-        // on the road ahead (not behind), and a sane detour off the highway
-        .filter(s => s.prog > myProg && s.detour <= 15)
+        // genuinely ahead on the road (not behind), detour ≤10km = actually "on the way"
+        .filter(s => s.prog > myProg + 0.01 && s.detour <= 10)
         .sort((a,b) => a.price - b.price)   // cheapest first — the whole point
-        .slice(0, 6);
+        .slice(0, 3);                        // top 3 only — fewer road-distance calls
       if (!ahead.length) return '';
       notePlaces(ahead.map(s => s.name));
-      // Road distance from here to each (via the servo), one call
+      // Road distance only for the 3 finalists — one small, fast call
       const roads = await roadDistances(gps.lat, gps.lon, ahead);
       ahead.forEach((s,i) => { s.km = (roads[i] != null) ? roads[i] : distKm(gps.lat, gps.lon, s.lat, s.lon); });
       fuelShortlist = ahead.map(s => ({ name: s.name, price: s.price, km: s.km }));
@@ -2313,6 +2319,7 @@ async function sendMessage(){
   busy=true; document.getElementById('sendBtn').disabled=true;
   synth?.cancel();
   addMsg('user',text);
+  showTyping();  // show "working" during the (sometimes slow) data-gathering, not just the AI call
 
   // No active trip and the question names a place? Remember it —
   // a thumbs-up on the answer adopts it as the trip.
@@ -2407,8 +2414,6 @@ async function sendMessage(){
   ].filter(Boolean).join(' ');
 
   messages.push({role:'user',content:`[Context: ${ctx}]\n\n${text}`});
-  showTyping();
-
   try{
     const res=await fetch(API_URL,{
       method:'POST',
