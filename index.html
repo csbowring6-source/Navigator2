@@ -359,7 +359,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 05:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 08 Jul 2026, 05:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -1905,8 +1905,42 @@ async function fetchFuelPrices() {
       const picks = [cheapest];
       for (const s of nearest) { if (picks.length >= 3) break; if (!picks.includes(s)) picks.push(s); }
       const list = picks.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${s.km.toFixed(0)}km by road`).join('; ');
-      return `LOCAL FUEL (within 20km) — first is CHEAPEST, the others are NEAREST, all distances by ROAD, price-reporting states only: ${list}. Offer the cheapest, then note a closer option if it saves a real drive; keep it to the point.`;
+
+      // COUNTRY CASE: if the nearest PRICED servo is a real drive away (>12km),
+      // check for any closer servo at all (price or not) via the OSM station list.
+      let closerNote = '';
+      const nearestPricedKm = nearest.length ? nearest[0].km : 999;
+      if (nearestPricedKm > 12) {
+        try {
+          const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=20`);
+          const sd = await sr.json();
+          if (sd.results && sd.results.length) {
+            const withKm = sd.results
+              .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+              .filter(s => s.km < nearestPricedKm - 3) // meaningfully closer
+              .sort((a,b) => a.km - b.km);
+            if (withKm.length) {
+              const c = withKm[0];
+              closerNote = ` A CLOSER servo exists but isn't reporting a price: ${c.name}, about ${c.km.toFixed(0)}km — mention it as the near option, price unconfirmed.`;
+            }
+          }
+        } catch(e) {}
+      }
+      return `LOCAL FUEL (within 20km) — first is CHEAPEST, the others are NEAREST, all distances by ROAD, price-reporting states only: ${list}.${closerNote} Lead with the cheapest; if a closer servo is noted, offer it as the no-detour alternative.`;
     }
+    // Thin area: nothing reporting a price within 20km. Offer the nearest actual servo.
+    try {
+      const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=25`);
+      const sd = await sr.json();
+      if (sd.results && sd.results.length) {
+        const near = sd.results
+          .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+          .sort((a,b) => a.km - b.km).slice(0, 3);
+        notePlaces(near.map(s => s.name));
+        const list = near.map(s => `${s.name}, ${s.km.toFixed(0)}km`).join('; ');
+        return `NO PRICED SERVOS NEARBY (thin area) — nearest actual servos, no live prices: ${list}. Name the closest, say prices aren't reported out here, and add "price unconfirmed".`;
+      }
+    } catch(e) {}
   } catch(e) {}
   return '';
 }
