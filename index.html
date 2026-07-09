@@ -382,7 +382,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>09:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Jul 2026<br>09:45 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -1951,7 +1951,7 @@ async function fetchFuelPrices() {
             if (t) landmark = 'around ' + t;
           } catch(e) {}
           notePlaces(nearName ? [nearName] : []);
-          return `FUEL-DATA THIN SPOT on the way to ${currentRunDest}: no confirmed prices nearby.${nearName ? ` Nearest servo is ${nearName}, ${nearKm.toFixed(0)}km — fill up there if you're getting low.` : ''} Tell the driver warmly that prices are patchy right here, and to ask again ${landmark} where live prices should kick in.`;
+          return `FUEL-DATA THIN SPOT on the way to ${currentRunDest}: no confirmed prices nearby.${nearName ? ` Nearest servo: ${nearName}, ${nearKm.toFixed(0)}km.` : ''} Say warmly that prices are patchy right here, name that nearest servo as the best bet if low, and tell them to ask again "${landmark}". Use that exact place name "${landmark}" — do NOT substitute a different town from your own knowledge.`;
         } catch(e) { return ''; }
       }
       notePlaces(ahead.map(s => s.name));
