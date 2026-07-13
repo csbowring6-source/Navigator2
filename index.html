@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 11:30 AM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 12:20 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -2131,9 +2131,10 @@ RULES:
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, common need — treat it matter-of-factly, no coyness. Give the nearest with its distance. In Solo mode, prefer staffed or well-lit locations (servos, shopping centres, cafés) over isolated roadside stops, and say why briefly if it means a slightly longer drive.
-- ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup for what they asked is marked DATA UNAVAILABLE, say you can't check that right now — do NOT substitute a different category you happen to have information about.
+- ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
 - NEVER mention your context, lists, data, sources, tools, maps or how you know things. BANNED phrases include: "your café list", "in your list", "on your map", "already on your map", "my data", "the data shows", "isn't in the list". Speak as though you simply know the area. The driver can see the map themselves — don't narrate it.
-- NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one. If a lookup is marked DATA UNAVAILABLE, say plainly that you can't check right now and to try again shortly — name nothing.
+- NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
+- WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
 - Never tell the driver to use another app, website, or service under ANY circumstances.
 - No explanations. No suggestions to check other apps. No fluff.
 - NEAREST MEANS NEAREST: When the driver wants a coffee, a chemist, a gym — they want the CLOSEST decent one, not the most scenic or interesting. Lead with the nearest from the list. Never send someone half an hour up a mountain for a cuppa. Only mention somewhere further if the driver asked for something specific (a view, a proper meal, a particular chain).
@@ -2448,7 +2449,7 @@ async function fetchFuelPrices() {
 
     return `${header}: ${list}.${guide}`;
   } catch(e) {
-    return `DATA UNAVAILABLE — couldn't reach the fuel service. Tell the driver you can't check prices right now and to try again shortly. Do NOT name any servo, price or distance.`;
+    return `LOOKUP FAILED — ${navigator.onLine ? 'the fuel data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Name no servo, price or distance.`;
   }
 }
 
@@ -2486,7 +2487,7 @@ async function fetchCamps() {
       return `NEARBY CAMPS/PARKS (real sites, nearest first by ROAD, all pinned on the driver's map; tag data may be incomplete): ${list}.`;
     }
   } catch(e) {
-    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check camps/parks right now and to try again shortly. Do NOT name any places, distances or times.`;
+    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check camps/parks. Name nothing, invent nothing.`;
   }
 }
 
@@ -2506,7 +2507,7 @@ async function fetchStations() {
       return `NEARBY FUEL STATIONS (OpenStreetMap ground truth, sorted NEAREST first, no prices): ${list}.`;
     }
   } catch(e) {
-    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check stations right now and to try again shortly. Do NOT name any places, distances or times.`;
+    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check stations. Name nothing, invent nothing.`;
   }
 }
 
@@ -2623,7 +2624,7 @@ async function fetchAccom() {
       return `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
     }
   } catch(e) {
-    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check accommodation right now and to try again shortly. Do NOT name any places, distances or times.`;
+    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check accommodation. Name nothing, invent nothing.`;
   }
 }
 
@@ -2640,16 +2641,16 @@ const POI_TRIGGERS = [
   { re: /toilets?|\bloos?\b|restrooms?|dunny|\bwee\b|bathroom/i, kind: 'toilets', label: 'PUBLIC TOILETS' },
   { re: /\batms?\b|\bbanks?\b|cash out|cash ?point|withdraw/i, kind: 'atm', label: 'ATMS & BANKS' },
   { re: /mechanics?|tyres?|car repair|service the car|breakdown/i, kind: 'mechanic', label: 'MECHANICS' },
-  { re: /hairdress|barbers?|haircut|\bsalon\b/i, kind: 'hairdresser', label: 'HAIRDRESSERS' },
-  { re: /post ?office|postage|\bstamps?\b|parcel/i, kind: 'post', label: 'POST OFFICES' },
-  { re: /hardware|bunnings|\btools?\b/i, kind: 'hardware', label: 'HARDWARE STORES' },
-  { re: /\bvets?\b|veterinar/i, kind: 'vet', label: 'VETS' },
   // FOOD — the big one. Anything about eating lands here.
-  { re: /\bfood\b|\beat\b|eating|hungry|restaurants?|\bdinner\b|\blunch\b|\bbreakfast\b|\bmeal\b|somewhere to eat|places? to eat|bite to eat|feed\b|takeaway|take ?away|fish and chips|burgers?/i, kind: 'restaurant', label: 'FOOD & RESTAURANTS' },
+  { re: /\bfood\b|\beat\b|eating|hungry|restaurants?|\bdinner\b|\blunch\b|\bbreakfast\b|\bmeal\b|somewhere to eat|places? to eat|bite to eat|feed\b|takeaway|take ?away|fish and chips|burgers?/i, kind: 'cafe', label: 'FOOD & PLACES TO EAT' },
 ];
 
 async function fetchPoi(kind, label) {
   if (!gps) return '';
+  // No connection at all? That's a different problem — and the driver can act on it.
+  if (!navigator.onLine) {
+    return `NO SIGNAL — the phone has no internet connection right now, so nothing can be looked up. Tell the driver plainly that you've lost signal and you'll be able to help once they're back in range. Name nothing.`;
+  }
   try {
     const r = await fetch(`${API_URL}poi?lat=${gps.lat}&lon=${gps.lon}&kind=${kind}&radius=25`);
     const d = await r.json();
@@ -2689,11 +2690,15 @@ async function fetchPoi(kind, label) {
     }
     // Data source said "no" — could be genuinely empty, or the service is down
     if (d.unavailable || d.error) {
-      return `DATA UNAVAILABLE — the places service isn't responding right now. Tell the driver you can't look that up at the moment and to try again shortly. Do NOT name any places, distances or times.`;
+      return `PLACES SERVICE DOWN — the map data service isn't responding (it's a free public service and gets busy). Tell the driver exactly that: the places service is playing up, not their signal, and it usually comes good within a minute or two. Name nothing.`;
     }
     return `NEARBY ${label}: none mapped within 25km — say so honestly and name the nearest sizeable town likely to have one. Do NOT invent distances or travel times.`;
   } catch(e) {
-    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't look that up right now and to try again shortly. Do NOT name any places, distances or times.`;
+    // A thrown error usually means the request never got through
+    const reason = navigator.onLine
+      ? `the map data service isn't responding — tell the driver it's the service playing up, not their signal, and it usually comes good in a minute`
+      : `the phone has lost internet — tell the driver you'll be able to help once they're back in range`;
+    return `LOOKUP FAILED — ${reason}. Name nothing, invent nothing.`;
   }
 }
 
@@ -2924,7 +2929,9 @@ async function sendMessage(silent){
   }
   // Everyday places? Ground-truth up to two categories per question
   let poiCtx = '';
-  const poiHits = POI_TRIGGERS.filter(t => t.re.test(scanText)).slice(0, 2);
+  const poiHits = POI_TRIGGERS.filter(t => t.re.test(scanText))
+    .filter((t, i, arr) => arr.findIndex(x => x.kind === t.kind) === i)   // one lookup per kind
+    .slice(0, 2);
   for (const t of poiHits) {
     const got = await fetchPoi(t.kind, t.label);
     if (got) {
