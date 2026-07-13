@@ -23,6 +23,8 @@
   .logo-text{font-size:16px;font-weight:600;letter-spacing:-0.3px;}
   .header-right{display:flex;align-items:center;gap:8px;}
   .sos-btn{background:#E7202A;border:none;border-radius:10px;width:40px;height:40px;font-size:20px;cursor:pointer;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;flex-shrink:0;}
+  .option-pin{cursor:pointer;}
+  .leaflet-popup-content{margin:10px 12px;font-size:13px;}
   .sos-btn:hover,.sos-btn:active{transform:scale(1.08);}
   @media (max-width:520px){
     .map-label-text{display:none;}
@@ -382,7 +384,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>09:15 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>09:35 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -1141,15 +1143,22 @@ function showOptionPins(places) {
     const isTop = i === 0;
     const bg = isTop ? '#F5A623' : '#5A6C80';
     const icon = L.divIcon({
-      html: `<div style="width:26px;height:26px;background:${bg};border:2px solid #0A1628;border-radius:50%;
-             display:flex;align-items:center;justify-content:center;color:#0A1628;font-weight:800;font-size:13px;
-             box-shadow:0 2px 6px rgba(0,0,0,0.4);">${i+1}</div>`,
-      className: '', iconSize: [26,26], iconAnchor: [13,13],
+      html: `<div style="width:28px;height:28px;background:${bg};border:2px solid #0A1628;border-radius:50%;
+             display:flex;align-items:center;justify-content:center;color:#0A1628;font-weight:800;font-size:14px;
+             box-shadow:0 2px 6px rgba(0,0,0,0.4);pointer-events:none;">${i+1}</div>`,
+      className: 'option-pin', iconSize: [28,28], iconAnchor: [14,14], popupAnchor: [0,-14],
     });
-    const m = L.marker([p.lat, p.lon], { icon }).addTo(window._navMap);
-    const priceTxt = p.price ? `$${(p.price/100).toFixed(2)}/L` : 'price unconfirmed';
-    const kmTxt = (p.km != null) ? ` · ${p.km.toFixed(0)}km` : '';
-    m.bindPopup(`<b>${i+1}. ${p.name}</b><br>${priceTxt}${kmTxt}`);
+    const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
+    const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
+    const kmTxt = (p.km != null) ? `${p.km.toFixed(0)}km away` : '';
+    const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:130px;">
+        <b>${i+1}. ${p.name}</b><br>
+        <span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
+        <span style="color:#555;">${kmTxt}</span>
+      </div>`;
+    m.bindPopup(popupHtml, { closeButton: true, autoPan: true });
+    // Explicit tap handler — divIcons on touch don't always fire the default popup
+    m.on('click', function(){ this.openPopup(); });
     optionPins.push(m);
     pts.push([p.lat, p.lon]);
   });
