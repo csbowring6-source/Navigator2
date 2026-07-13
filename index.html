@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 06:30 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 07:20 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -1179,6 +1179,14 @@ function clearOptionPins() {
 }
 
 // places: [{name, km, price, lat, lon}] — first is the "pick" (amber), rest muted
+// Accumulate pins across one question — "gym then coffee" pins both
+function addPendingPins(pins) {
+  if (!window._pendingPins) window._pendingPins = [];
+  pins.forEach(p => {
+    if (!window._pendingPins.some(x => x.name === p.name)) window._pendingPins.push(p);
+  });
+}
+
 function showOptionPins(places) {
   if (!window._navMap || !window.L || !places || !places.length) return;
   clearOptionPins();
@@ -1199,10 +1207,16 @@ function showOptionPins(places) {
     const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
     const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
     const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${p.mins} min` : '')) : '';
-    const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:130px;">
+    const safeName = p.name.replace(/'/g, "").replace(/"/g, '');
+    const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:155px;">
         <b>${i+1}. ${p.name}</b><br>
         <span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
         <span style="color:#555;">${kmTxt}</span>
+        <button onclick="navigateTo('${safeName}', ${p.lat}, ${p.lon})"
+          style="margin-top:8px;width:100%;background:#F5A623;color:#0A1628;border:none;
+                 border-radius:6px;padding:9px 10px;font-weight:700;font-size:13px;cursor:pointer;">
+          Navigate here
+        </button>
       </div>`;
     m.bindPopup(popupHtml, { closeButton: true, autoPan: true });
     // Explicit tap handler — divIcons on touch don't always fire the default popup
@@ -1569,9 +1583,11 @@ function getMapUrl(dest) {
 // This approach works reliably on all mobile browsers including Safari
 let currentNavDest = '';
 
-function navigateTo(dest) {
+function navigateTo(dest, lat, lon) {
   currentNavDest = dest;
-  // Preference already saved at setup — go straight to their map app, no re-asking
+  // Exact coordinates when we have them (map pins) — far more reliable than a
+  // name search, which can find the wrong "Mobil" three towns over.
+  currentNavCoords = (lat != null && lon != null) ? { lat, lon } : null;
   openInMap(selectedMap);
 }
 
@@ -1581,9 +1597,13 @@ function closeMapSheet(e) {
   }
 }
 
+let currentNavCoords = null;
+
 function openInMap(app) {
   const dest = currentNavDest;
-  const q    = encodeURIComponent(dest + ' Australia');
+  const c = currentNavCoords;
+  // Coordinates beat a name search every time
+  const q = c ? `${c.lat},${c.lon}` : encodeURIComponent(dest + ' Australia');
   const android = /Android/i.test(navigator.userAgent);
   // Mid-trip stop? Google can navigate via the stop to the trip destination in one route
   const finalDest = (currentRunDest && currentRunDest.toLowerCase() !== dest.toLowerCase())
@@ -1952,6 +1972,7 @@ RULES:
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
 - NEVER mention your context, lists, data sources, tools, or how you know things — speak as though you simply know. Never tell the driver to use another app, website, or service under ANY circumstances, including when you lack data: if nothing is mapped nearby, say "none mapped within [X]km — nearest likely in [town]" and stop.
 - No explanations. No suggestions to check other apps. No fluff.
+- THE MAP SHOWS EVERYTHING: Whatever you name from a NEARBY list is already pinned on the driver's map — they can see it and tap it to navigate. So summarise, don't recite. Lead with the best option and its driving time; mention one alternative if it's genuinely useful. Never read out a long list.
 - NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If the driver asks for several ("the 3 nearest gyms"), list up to three from the list with distances in one sentence — that is allowed and expected. Never invent policies such as "one result per reply"; no such rule exists. If a list says none found, say so and name the nearest sizeable town.
 - MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
 - NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
@@ -2178,9 +2199,9 @@ async function fetchFuelPrices() {
 
     // ═══ THE MAP IS THE PRIMARY OUTPUT ═════════════════════════════════════
     // Pin everything we found. Solid = price confirmed. Hollow = no price.
-    window._pendingPins = all.slice(0, 6).map(s => ({
+    addPendingPins(all.slice(0, 6).map(s => ({
       name: s.name, price: s.price, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
-    }));
+    })));
     notePlaces(all.slice(0, 6).map(s => s.name));
 
     // The 👎 dial walks the priced ones, cheapest → nearest
@@ -2237,13 +2258,25 @@ async function fetchCamps() {
     const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=40`);
     const d = await r.json();
     if (d.results && d.results.length) {
-      notePlaces(d.results.slice(0,6).map(s => s.name));
-      const list = d.results.slice(0,6).map(s => {
-        const km = (s.lat && s.lon) ? `${distKm(gps.lat, gps.lon, s.lat, s.lon).toFixed(0)}km` : '';
-        const bits = [s.type, km, s.fee==='no'?'free':'', s.powered&&s.powered!=='no'?'powered':'', s.dump==='yes'?'dump point':''].filter(Boolean).join(', ');
-        return `${s.name} (${bits})`;
+      const cands = d.results
+        .filter(s => s.lat && s.lon)
+        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+        .sort((a,b) => a.crow - b.crow)
+        .slice(0, 6);
+      if (!cands.length) return '';
+      const roads = await roadDistances(gps.lat, gps.lon, cands);
+      cands.forEach((c,i) => {
+        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
+        c.mins = roads[i] ? roads[i].mins : null;
+      });
+      cands.sort((a,b) => a.km - b.km);
+      notePlaces(cands.map(s => s.name));
+      addPendingPins(cands.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
+      const list = cands.map(s => {
+        const bits = [s.type, s.fee==='no'?'free':'', s.powered&&s.powered!=='no'?'powered':'', s.dump==='yes'?'dump point':''].filter(Boolean).join(', ');
+        return `${s.name} — ${distTime(s)} (${bits})`;
       }).join('; ');
-      return `NEARBY CAMPS/PARKS (OpenStreetMap, real sites but data may be incomplete): ${list}.`;
+      return `NEARBY CAMPS/PARKS (real sites, nearest first by ROAD, all pinned on the driver's map; tag data may be incomplete): ${list}.`;
     }
   } catch(e) {}
   return '';
@@ -2363,13 +2396,22 @@ async function fetchAccom() {
     const r = await fetch(`${API_URL}accom?lat=${gps.lat}&lon=${gps.lon}&radius=30`);
     const d = await r.json();
     if (d.results && d.results.length) {
-      const list = d.results
-        .map(s => ({...s, km: (s.lat && s.lon) ? distKm(gps.lat, gps.lon, s.lat, s.lon) : 999}))
-        .sort((a,b) => a.km - b.km)
-        .slice(0,8)
-        .map(s => { notePlaces([s.name]); return `${s.name} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''}, ${s.km.toFixed(0)}km)`; })
-        .join('; ');
-      return `NEARBY ACCOMMODATION (OpenStreetMap — real places, no live prices or vacancy): ${list}.`;
+      const cands = d.results
+        .filter(s => s.lat && s.lon)
+        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+        .sort((a,b) => a.crow - b.crow)
+        .slice(0, 6);
+      if (!cands.length) return '';
+      const roads = await roadDistances(gps.lat, gps.lon, cands);
+      cands.forEach((c,i) => {
+        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
+        c.mins = roads[i] ? roads[i].mins : null;
+      });
+      cands.sort((a,b) => a.km - b.km);
+      notePlaces(cands.map(s => s.name));
+      addPendingPins(cands.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
+      const list = cands.map(s => `${s.name} — ${distTime(s)} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''})`).join('; ');
+      return `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
     }
   } catch(e) {}
   return '';
@@ -2386,8 +2428,13 @@ const POI_TRIGGERS = [
   { re: /doctors?|hospitals?|medical|clinics?/i, kind: 'medical', label: 'MEDICAL' },
   { re: /laundr|washing machine/i, kind: 'laundry', label: 'LAUNDRIES' },
   { re: /toilets?|\bloos?\b|restrooms?/i, kind: 'toilets', label: 'PUBLIC TOILETS' },
-  { re: /\batms?\b|\bbanks?\b|cash out/i, kind: 'atm', label: 'ATMS & BANKS' },
+  { re: /\batms?\b|\bbanks?\b|cash out|cash ?point/i, kind: 'atm', label: 'ATMS & BANKS' },
   { re: /mechanics?|tyres?|car repair|service the car/i, kind: 'mechanic', label: 'MECHANICS' },
+  { re: /hairdress|barbers?|haircut|\bsalon\b/i, kind: 'hairdresser', label: 'HAIRDRESSERS' },
+  { re: /post ?office|postage|\bstamps?\b|parcel/i, kind: 'post', label: 'POST OFFICES' },
+  { re: /hardware|bunnings|\btools?\b/i, kind: 'hardware', label: 'HARDWARE STORES' },
+  { re: /\bvets?\b|veterinar/i, kind: 'vet', label: 'VETS' },
+  { re: /restaurants?|\bdinner\b|\bmeal\b|somewhere to eat|places? to eat/i, kind: 'restaurant', label: 'RESTAURANTS' },
 ];
 
 async function fetchPoi(kind, label) {
@@ -2396,13 +2443,26 @@ async function fetchPoi(kind, label) {
     const r = await fetch(`${API_URL}poi?lat=${gps.lat}&lon=${gps.lon}&kind=${kind}&radius=25`);
     const d = await r.json();
     if (d.results && d.results.length) {
-      const list = d.results
-        .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
-        .sort((a,b) => a.km - b.km)
-        .slice(0,5)
-        .map(s => { notePlaces([s.name]); return `${s.name} ${s.km.toFixed(0)}km`; })
-        .join('; ');
-      return `NEARBY ${label} (OpenStreetMap ground truth, sorted NEAREST first): ${list}.`;
+      // Same model as fuel: shortlist by crow-flies, then TRUE road distance & time
+      const cands = d.results
+        .filter(s => s.lat && s.lon)
+        .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+        .sort((a,b) => a.crow - b.crow)
+        .slice(0, 6);
+      if (!cands.length) return '';
+      const roads = await roadDistances(gps.lat, gps.lon, cands);
+      cands.forEach((c,i) => {
+        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
+        c.mins = roads[i] ? roads[i].mins : null;
+      });
+      cands.sort((a,b) => a.km - b.km);
+      notePlaces(cands.map(s => s.name));
+      // Pin them on the map — the map is the interface, for everything
+      addPendingPins(cands.slice(0,5).map(s => ({
+        name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
+      })));
+      const list = cands.slice(0,5).map(s => `${s.name} — ${distTime(s)}`).join('; ');
+      return `NEARBY ${label} (real places, nearest first by ROAD; all pinned on the driver's map): ${list}.`;
     }
     return `NEARBY ${label}: none found within 25km — say so honestly and name the nearest town likely to have one.`;
   } catch(e) {}
@@ -2508,7 +2568,7 @@ async function openSOS() {
     const clinic = shortlist.filter(p=>p.kind==='clinic').sort((a,b)=>a.km-b.km)[0];
     const pol    = shortlist.filter(p=>p.kind==='police').sort((a,b)=>a.km-b.km)[0];
 
-    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? ', about ' + p.mins + ' min' : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}')">Navigate</button></div>` : '';
+    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? ', about ' + p.mins + ' min' : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
     let html = '';
     if (hosp)   html += row('🏥', hosp, hosp.hasED ? ' · listed with emergency dept' : ' · hospital');
     if (clinic && (!hosp || clinic.km < hosp.km)) html += row('➕', clinic, ' · medical centre, may be daytime only');
