@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 10:45 AM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 11:30 AM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -2129,6 +2129,7 @@ RULES:
 - CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
+- OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, common need — treat it matter-of-factly, no coyness. Give the nearest with its distance. In Solo mode, prefer staffed or well-lit locations (servos, shopping centres, cafés) over isolated roadside stops, and say why briefly if it means a slightly longer drive.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup for what they asked is marked DATA UNAVAILABLE, say you can't check that right now — do NOT substitute a different category you happen to have information about.
 - NEVER mention your context, lists, data, sources, tools, maps or how you know things. BANNED phrases include: "your café list", "in your list", "on your map", "already on your map", "my data", "the data shows", "isn't in the list". Speak as though you simply know the area. The driver can see the map themselves — don't narrate it.
@@ -2178,6 +2179,47 @@ function distTime(s) {
 
 // ── ROAD DISTANCE & TIME — true driving km and minutes via OSRM, one call ─────
 // Falls back to straight-line if routing is unavailable, so a lookup never breaks.
+// ── OFF-ROAD CHECK — are we somewhere the routing engine actually knows? ──────
+// On a farm track, bush camp, or station road, OSRM snaps you to the nearest
+// mapped road — which can be kilometres away and in the wrong direction. Every
+// distance and time then comes out wrong. Detect it and be honest about it.
+let snapInfo = { checked: false, metres: 0, poor: false, at: null };
+
+async function checkRoadSnap() {
+  if (!gps) return snapInfo;
+  // Re-check only if we've moved a fair way since last time
+  if (snapInfo.checked && snapInfo.at && distKm(gps.lat, gps.lon, snapInfo.at.lat, snapInfo.at.lon) < 1) {
+    return snapInfo;
+  }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    const r = await fetch(`https://router.project-osrm.org/nearest/v1/driving/${gps.lon},${gps.lat}`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    const d = await r.json();
+    if (d.code === 'Ok' && d.waypoints && d.waypoints[0]) {
+      const m = d.waypoints[0].distance;   // metres from your position to the nearest road
+      snapInfo = {
+        checked: true,
+        metres: Math.round(m),
+        poor: m > 300,                      // >300m off a mapped road = unreliable
+        at: { lat: gps.lat, lon: gps.lon },
+        roadName: d.waypoints[0].name || '',
+      };
+      return snapInfo;
+    }
+  } catch(e) {}
+  snapInfo = { checked: true, metres: 0, poor: false, at: { lat: gps.lat, lon: gps.lon } };
+  return snapInfo;
+}
+
+// The honest note to hand the AI when we're off the mapped road network
+function offRoadNote(snap) {
+  if (!snap || !snap.poor) return '';
+  const km = (snap.metres / 1000).toFixed(1);
+  return ` OFF THE MAPPED ROAD: the driver is about ${km}km from the nearest road the maps know (${snap.roadName || 'unnamed'}). Distances and travel times from here are UNRELIABLE — they're measured from that road, not from where the driver actually is. Tell them plainly: they're off the mapped network, the times shown are rough, and for accurate results they should ask again once they're back on a proper road. Give the options anyway, but say the distances are approximate.`;
+}
+
 async function roadDistances(fromLat, fromLon, points) {
   // points: [{lat, lon}, ...] — returns [{km, mins}] aligned to points (null if unavailable)
   if (!points.length) return [];
@@ -2927,8 +2969,13 @@ async function sendMessage(silent){
     routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${window._tripRoute.hours} driving hours at car pace.`;
   }
 
+  // Are we somewhere the maps actually know? If not, every distance is suspect.
+  const snap = await checkRoadSnap();
+  const offRoadCtx = offRoadNote(snap);
+
   const ctx=[
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'NO LOCATION FIX — do not name or guess specific nearby places; ask the driver to tap the 📍 pin to set their location first.',
+    offRoadCtx,
     userRego?`Vehicle rego: ${userRego}.`:'',
     userVan?`Driver's van: ${userVan}.`:'',
     weatherCtx,
