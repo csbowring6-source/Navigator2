@@ -382,7 +382,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>08:30 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>09:15 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -1002,6 +1002,7 @@ function clearTrip() {
   window._tripRoute = null;
   if (routeLine && window._navMap) { window._navMap.removeLayer(routeLine); routeLine = null; }
   if (routeDestMarker && window._navMap) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
+  clearOptionPins();
   document.getElementById('resumeBtn').style.display = 'none';
   document.getElementById('clearTripBtn').style.display = 'none';
 }
@@ -1120,6 +1121,46 @@ const synth = window.speechSynthesis;
 
 // ── TRIP ROUTE ON THE MAP (OSRM over OpenStreetMap roads) ────────────────────
 let routeLine = null;
+
+// ── OPTION PINS — show the servos/places we just offered, numbered, on the map ──
+let optionPins = [];
+
+function clearOptionPins() {
+  if (!window._navMap) { optionPins = []; return; }
+  optionPins.forEach(p => { try { window._navMap.removeLayer(p); } catch(e) {} });
+  optionPins = [];
+}
+
+// places: [{name, km, price, lat, lon}] — first is the "pick" (amber), rest muted
+function showOptionPins(places) {
+  if (!window._navMap || !window.L || !places || !places.length) return;
+  clearOptionPins();
+  const pts = [];
+  places.slice(0, 3).forEach((p, i) => {
+    if (!p.lat || !p.lon) return;
+    const isTop = i === 0;
+    const bg = isTop ? '#F5A623' : '#5A6C80';
+    const icon = L.divIcon({
+      html: `<div style="width:26px;height:26px;background:${bg};border:2px solid #0A1628;border-radius:50%;
+             display:flex;align-items:center;justify-content:center;color:#0A1628;font-weight:800;font-size:13px;
+             box-shadow:0 2px 6px rgba(0,0,0,0.4);">${i+1}</div>`,
+      className: '', iconSize: [26,26], iconAnchor: [13,13],
+    });
+    const m = L.marker([p.lat, p.lon], { icon }).addTo(window._navMap);
+    const priceTxt = p.price ? `$${(p.price/100).toFixed(2)}/L` : 'price unconfirmed';
+    const kmTxt = (p.km != null) ? ` · ${p.km.toFixed(0)}km` : '';
+    m.bindPopup(`<b>${i+1}. ${p.name}</b><br>${priceTxt}${kmTxt}`);
+    optionPins.push(m);
+    pts.push([p.lat, p.lon]);
+  });
+  // Auto-fit so all options AND the driver are visible
+  if (pts.length && gps) {
+    pts.push([gps.lat, gps.lon]);
+    try {
+      window._navMap.fitBounds(L.latLngBounds(pts), { padding: [40,40], maxZoom: 14 });
+    } catch(e) {}
+  }
+}
 let routeDestMarker = null;
 
 async function plotTripRoute(dest) {
@@ -1994,6 +2035,8 @@ async function fetchFuelPrices() {
       ahead.forEach((s,i) => { s.km = (roads[i] != null) ? roads[i] : distKm(gps.lat, gps.lon, s.lat, s.lon); });
       fuelShortlist = ahead.map(s => ({ name: s.name, price: s.price, km: s.km }));
       fuelDialIdx = 0;
+      // Options to pin on the map — cheapest first
+      window._pendingPins = ahead.slice(0,3).map(s => ({ name: s.name, price: s.price, km: s.km, lat: s.lat, lon: s.lon }));
       const list = ahead.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${s.km.toFixed(0)}km ahead, ${s.detour.toFixed(0)}km off route`).join('; ');
 
       // Are we sitting at a servo right now? Say so — don't send them past it.
@@ -2025,6 +2068,8 @@ async function fetchFuelPrices() {
       const nearest = cands.slice().sort((a,b) => a.km - b.km);
       const picks = [cheapest];
       for (const s of nearest) { if (picks.length >= 3) break; if (!picks.includes(s)) picks.push(s); }
+      // Options to pin on the map — cheapest first
+      window._pendingPins = picks.map(s => ({ name: s.name, price: s.price, km: s.km, lat: s.lat, lon: s.lon }));
       const list = picks.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${s.km.toFixed(0)}km by road`).join('; ');
 
       // A closer servo may exist that simply doesn't report a price — always check,
@@ -2397,6 +2442,8 @@ async function sendMessage(){
   synth?.cancel();
   addMsg('user',text);
   showTyping();  // show "working" during the (sometimes slow) data-gathering, not just the AI call
+  clearOptionPins();          // new question — old option pins go
+  window._pendingPins = null;
 
   // No active trip and the question names a place? Remember it —
   // a thumbs-up on the answer adopts it as the trip.
@@ -2503,6 +2550,10 @@ async function sendMessage(){
     messages.push({role:'assistant',content:reply});
     addMsg('nav',reply);
     speak(reply);
+    // Pin the options we offered onto the map — pictorial reference at a glance
+    if (window._pendingPins && window._pendingPins.length) {
+      showOptionPins(window._pendingPins);
+    }
   }catch(e){
     hideTyping();
     addMsg('nav','Connection issue — check your internet and try again.');
