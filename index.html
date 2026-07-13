@@ -279,7 +279,8 @@
       </div>
     </div>
     <div class="trip-btn-row">
-      <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Let's go</button>
+      <button class="trip-btn secondary" style="flex:0 0 auto;" onclick="cancelSetup()">← Back</button>
+      <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Save & go</button>
     </div>
   </div>
 </div>
@@ -309,9 +310,10 @@
       </div>
     </div>
     <div id="whereWrap" style="display:none;background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:12px;">
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;align-items:center;">
         <input class="trip-input" id="whereInput" placeholder="e.g. Cairns" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
         <button class="trip-btn primary" style="flex:0 0 auto;padding:10px 18px;" onclick="whereTo()">Go</button>
+        <button class="trip-btn secondary" style="flex:0 0 auto;padding:10px 12px;" onclick="hideWhere()" title="Cancel">✕</button>
       </div>
     </div>
     <div class="start-btn quick" onclick="editSetup()" style="padding:11px 14px;">
@@ -396,7 +398,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>01:20 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>01:40 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -779,6 +781,21 @@ function toggleProfileVehicle(el) {
   el.classList.toggle('selected');
 }
 
+// Back out of setup without saving — returns to the start screen.
+// On first run there's no profile yet, so a minimal one is created rather than
+// leaving the app with nothing.
+function cancelSetup() {
+  const hasProfile = (() => { try { return !!localStorage.getItem('navigator_profile'); } catch(e) { return false; } })();
+  if (!hasProfile) {
+    userName = userName || 'there';
+    userVehicles = userVehicles.length ? userVehicles : ['car'];
+    try { localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego:'', van:'', fuel: selectedFuel })); } catch(e) {}
+    applyProfile();
+  }
+  document.getElementById('profileOverlay').classList.add('hidden');
+  document.getElementById('startOverlay').classList.remove('hidden');
+}
+
 function pickProfileFuel(el) {
   document.querySelectorAll('#profileFuelChips .trip-chip').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
@@ -859,6 +876,12 @@ function showWhere() {
   const w = document.getElementById('whereWrap');
   w.style.display = 'block';
   setTimeout(() => document.getElementById('whereInput').focus(), 150);
+}
+
+function hideWhere() {
+  const w = document.getElementById('whereWrap');
+  w.style.display = 'none';
+  document.getElementById('whereInput').value = '';
 }
 
 async function whereTo() {
