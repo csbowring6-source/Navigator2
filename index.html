@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 08:00 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 08:30 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -2017,7 +2017,9 @@ RULES:
 - CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
-- NEVER mention your context, lists, data sources, tools, or how you know things — speak as though you simply know. Never tell the driver to use another app, website, or service under ANY circumstances, including when you lack data: if nothing is mapped nearby, say "none mapped within [X]km — nearest likely in [town]" and stop.
+- NEVER mention your context, lists, data, sources, tools, maps or how you know things. BANNED phrases include: "your café list", "in your list", "on your map", "already on your map", "my data", "the data shows", "isn't in the list". Speak as though you simply know the area. The driver can see the map themselves — don't narrate it.
+- NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one. If a lookup is marked DATA UNAVAILABLE, say plainly that you can't check right now and to try again shortly — name nothing.
+- Never tell the driver to use another app, website, or service under ANY circumstances.
 - No explanations. No suggestions to check other apps. No fluff.
 - NEAREST MEANS NEAREST: When the driver wants a coffee, a chemist, a gym — they want the CLOSEST decent one, not the most scenic or interesting. Lead with the nearest from the list. Never send someone half an hour up a mountain for a cuppa. Only mention somewhere further if the driver asked for something specific (a view, a proper meal, a particular chain).
 - THE MAP SHOWS EVERYTHING: Whatever you name from a NEARBY list is already pinned on the driver's map — they can see it and tap it to navigate. So summarise, don't recite. Lead with the best option and its driving time; mention one alternative if it's genuinely useful. Never read out a long list.
@@ -2289,8 +2291,9 @@ async function fetchFuelPrices() {
     if (!cheapestConfirmed) guide = ' No confirmed prices here — name the nearest servo, say prices are patchy in this area, and suggest asking again further along.';
 
     return `${header}: ${list}.${guide}`;
-  } catch(e) {}
-  return '';
+  } catch(e) {
+    return `DATA UNAVAILABLE — couldn't reach the fuel service. Tell the driver you can't check prices right now and to try again shortly. Do NOT name any servo, price or distance.`;
+  }
 }
 
 // ── NEARBY CAMPS & CARAVAN PARKS (via Worker /camps route — OpenStreetMap) ───
@@ -2326,8 +2329,9 @@ async function fetchCamps() {
       }).join('; ');
       return `NEARBY CAMPS/PARKS (real sites, nearest first by ROAD, all pinned on the driver's map; tag data may be incomplete): ${list}.`;
     }
-  } catch(e) {}
-  return '';
+  } catch(e) {
+    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check camps/parks right now and to try again shortly. Do NOT name any places, distances or times.`;
+  }
 }
 
 // ── NEARBY FUEL STATIONS — proximity ground truth (OSM, all brands, no prices) ─
@@ -2345,8 +2349,9 @@ async function fetchStations() {
       const list = withKm.map(s => `${s.name}${s.brand && s.brand !== s.name ? ' ('+s.brand+')' : ''} ${s.km.toFixed(0)}km`).join('; ');
       return `NEARBY FUEL STATIONS (OpenStreetMap ground truth, sorted NEAREST first, no prices): ${list}.`;
     }
-  } catch(e) {}
-  return '';
+  } catch(e) {
+    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check stations right now and to try again shortly. Do NOT name any places, distances or times.`;
+  }
 }
 
 // ── FUEL LOG — grey nomad data collection ─────────────────────────────────────
@@ -2461,8 +2466,9 @@ async function fetchAccom() {
       const list = cands.map(s => `${s.name} — ${distTime(s)} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''})`).join('; ');
       return `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
     }
-  } catch(e) {}
-  return '';
+  } catch(e) {
+    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't check accommodation right now and to try again shortly. Do NOT name any places, distances or times.`;
+  }
 }
 
 // ── EVERYDAY PLACES — gyms, cafes, chemists... proximity ground truth (OSM) ──
@@ -2512,9 +2518,14 @@ async function fetchPoi(kind, label) {
       const list = cands.slice(0,5).map(s => `${s.name} — ${distTime(s)}`).join('; ');
       return `NEARBY ${label} (real places, nearest first by ROAD; all pinned on the driver's map): ${list}.`;
     }
-    return `NEARBY ${label}: none found within 25km — say so honestly and name the nearest town likely to have one.`;
-  } catch(e) {}
-  return '';
+    // Data source said "no" — could be genuinely empty, or the service is down
+    if (d.unavailable || d.error) {
+      return `DATA UNAVAILABLE — the places service isn't responding right now. Tell the driver you can't look that up at the moment and to try again shortly. Do NOT name any places, distances or times.`;
+    }
+    return `NEARBY ${label}: none mapped within 25km — say so honestly and name the nearest sizeable town likely to have one. Do NOT invent distances or travel times.`;
+  } catch(e) {
+    return `DATA UNAVAILABLE — couldn't reach the places service. Tell the driver you can't look that up right now and to try again shortly. Do NOT name any places, distances or times.`;
+  }
 }
 
 // Real places the data has served — replies mentioning them get tap-to-pick buttons
