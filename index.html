@@ -144,6 +144,8 @@
   #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
   #userInput::placeholder{color:var(--gray3);}
   .voice-btn{width:40px;height:40px;border-radius:50%;border:2px solid rgba(245,166,35,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;background:rgba(245,166,35,0.08);color:var(--amber);transition:all 0.2s;flex-shrink:0;}
+  .reset-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;background:transparent;color:var(--gray2);transition:all 0.2s;flex-shrink:0;align-self:center;}
+  .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
   .voice-btn.listening{background:var(--red);border-color:var(--red);color:var(--white);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
@@ -394,7 +396,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>12:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>12:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -483,6 +485,7 @@
     <div class="input-row" id="inputRow">
       <textarea id="userInput" placeholder="Or type here..." rows="1"
         onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
       <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙</button>
       <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
     </div>
@@ -2510,6 +2513,27 @@ function copyLocation() {
     .catch(()=>alert(sosLocationText));
 }
 
+// ── START AGAIN — clear the conversation, keep the trip and settings ──────────
+function resetConversation() {
+  synth?.cancel();
+  try { if (recognition && isListening) recognition.stop(); } catch(e) {}
+  messages.length = 0;              // forget the exchange
+  lastNavReply = ''; lastSpoken = '';
+  knownPlaces = [];
+  fuelShortlist = []; fuelDialIdx = 0;
+  Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
+  clearOptionPins();
+  window._pendingPins = null;
+  document.getElementById('userInput').value = '';
+  document.getElementById('chatArea').innerHTML = '';     // wipe the visible chat
+  busy = false;
+  document.getElementById('sendBtn').disabled = false;
+  const msg = currentRunDest
+    ? `Fresh start — still on your ${currentRunDest} trip. What do you need?`
+    : 'Fresh start. What do you need?';
+  addMsg('nav', msg);
+}
+
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
   unlockAudio();
@@ -2521,6 +2545,13 @@ async function sendMessage(){
   if (/^(say again|say that again|repeat( that)?|come again|what did you say|pardon|again please|can you repeat)\b/i.test(text)) {
     inp.value=''; inp.style.height='auto';
     if (lastSpoken) { synth?.cancel(); speak(lastSpoken); }
+    return;
+  }
+
+  // "Start again" / "forget that" — wipe the conversation, keep the trip
+  if (/^(start again|start over|forget (that|it|all that)|reset|scrap that|clear (that|this)|let'?s start again)\b/i.test(text)) {
+    inp.value=''; inp.style.height='auto';
+    resetConversation();
     return;
   }
 
