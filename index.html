@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 05:40 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 06:30 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -1955,11 +1955,9 @@ RULES:
 - NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If the driver asks for several ("the 3 nearest gyms"), list up to three from the list with distances in one sentence — that is allowed and expected. Never invent policies such as "one result per reply"; no such rule exists. If a list says none found, say so and name the nearest sizeable town.
 - MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
 - NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
-- FUEL AHEAD ON ROUTE: If CHEAPEST FUEL AHEAD ON ROUTE appears in context, the driver is on a journey — give the cheapest servo ahead on their route, its price in dollars per litre, how far ahead, and the detour off the highway. Frame a worthwhile saving as a good little side-trip; if the cheapest is a big detour, say so and offer the nearest-ahead as the no-fuss alternative.
+- SERVOS: The context lists every servo around the driver, nearest first by road, each with its driving time and either a confirmed price or "price unconfirmed". EVERY ONE of these is already pinned on the driver's map — they can see them. Your job is to summarise, not to list. Lead with the cheapest CONFIRMED price and its driving time ("Metro Beaudesert, 25 minutes, $1.54 a litre"). If a different servo is meaningfully closer, offer it as the no-detour alternative by name with its time, saying "price unconfirmed" if that's the case. Never invent a price. Never lump servos together ("three servos at X") — name them. If the driver is AT a servo, say so first.
 - DISTANCE AND TIME: Context gives both road distance and driving time. Lead with whichever a driver would find more useful: for anything nearby (under about 20 minutes) TIME is what matters — "Liberty Beaudesert, 17 minutes, $1.54 a litre". For longer hauls give both — "Gympie, 180 km, about two hours". Never give both for a short hop; it's a mouthful spoken aloud. Round times naturally: "about 20 minutes", "just under an hour", "a bit over two hours".
 - SPOKEN ALOUD: Your reply is read aloud by a voice. Write distances as words the voice can say properly — "300 metres" not "300m", "20 kilometres" or "20 km" not "20km" jammed together. Same for prices: "$1.54 a litre".
-- SERVOS RIGHT HERE: If the context says the driver is AT a servo, say so ("you're at one now"). If it lists NEARBY SERVOS instead, they are close but the driver is NOT in them — say "there are two right here, Ampol and BP, both about 300 metres" or similar. Never claim someone is at a servo when they are merely near one — a stranger in town would look around and see nothing. Either way, give the cheapest confirmed as the alternative so they can choose.
-- FUEL PRICES: If LOCAL FUEL or LIVE FUEL PRICES appear in context, they are real and current — the first is the cheapest, distances are true ROAD distances, and only price-reporting states are covered so nearby stations can be missing. Lead with the cheapest — name it, its price in dollars per litre the way people say it ("$1.79 a litre", converting 179.9 = $1.79), and its road distance. If a listed station is notably closer for a similar price, add it as a quick alternative in the second sentence. Never invent a price; if none are in context, name the best likely-cheap nearby station (independents and roadhouse chains over motorway servos) and add "price unconfirmed" — two words.
 - CAMPS/PARKS: If NEARBY CAMPS/PARKS data appears in context, prefer naming real sites from it, blended with your own knowledge of well-known parks — the data is real but may be incomplete. Solo mode filters still apply.
 - ACCOMMODATION: If NEARBY ACCOMMODATION data appears in context, match the tier to the request — "treat ourselves"/luxury = highest stars or best-known quality property; "cheap"/backpackers = hostels and budget motels; otherwise the best-fit nearest. Never state a price or vacancy — you don't have them. Blend with your own knowledge of well-known properties. Solo mode filters still apply.
 - FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
@@ -2117,150 +2115,111 @@ async function fetchFuelPrices() {
     const code = FUEL_CODE[selectedFuel] || 'U91';
     const onJourney = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
 
+    // ═══ ONE LIST, ONE TRUTH ═══════════════════════════════════════════════
+    // 1. Every servo around us (OSM) — this is the ground truth of what EXISTS.
+    // 2. Every price we can confirm (govt feed) — this tells us what we KNOW.
+    // 3. Join them. Rank by road distance. Pin them ALL. Words describe the map.
+    // No separate paths, no thresholds — the map and the words cannot disagree.
+
+    const radius = onJourney ? 100 : 25;
+    const [stationsRes, pricesRes] = await Promise.all([
+      fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=${Math.min(radius, 60)}`).then(r => r.json()).catch(() => ({})),
+      fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`).then(r => r.json()).catch(() => ({})),
+    ]);
+
+    // Confirmed prices, freshness-filtered (a week-old price is a rumour)
+    const priced = freshPrices(pricesRes.results || []).filter(s => s.lat && s.lon);
+
+    // Build the single list: every servo we know of, priced or not
+    const seen = new Map();
+    const key = (lat, lon) => `${(+lat).toFixed(3)},${(+lon).toFixed(3)}`;
+
+    priced.forEach(s => {
+      seen.set(key(s.lat, s.lon), {
+        name: s.name, address: s.address || '',
+        price: s.price, lat: +s.lat, lon: +s.lon,
+      });
+    });
+    (stationsRes.results || []).forEach(s => {
+      const k = key(s.lat, s.lon);
+      if (!seen.has(k)) {
+        seen.set(k, { name: s.name, address: '', price: null, lat: +s.lat, lon: +s.lon });
+      }
+    });
+
+    let all = Array.from(seen.values());
+    if (!all.length) return '';
+
+    // Rank by crow-flies first (free), keep the plausible ones, then get TRUE
+    // road distance and time for those. One routing call.
+    all.forEach(s => { s.crow = distKm(gps.lat, gps.lon, s.lat, s.lon); });
+    all.sort((a, b) => a.crow - b.crow);
+    all = all.slice(0, 10);
+
+    const roads = await roadDistances(gps.lat, gps.lon, all);
+    all.forEach((s, i) => {
+      s.km   = (roads[i] && roads[i].km != null) ? roads[i].km : s.crow;
+      s.mins = roads[i] ? roads[i].mins : null;
+    });
+
+    // On a journey: keep only what's genuinely AHEAD on the route, sane detour.
     if (onJourney) {
-      // CHEAPEST AHEAD ON ROUTE — rank cheaply first, road-distance only the finalists.
-      // Human's in the loop: a good answer fast beats a perfect one slow (they'll dial).
-      const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=100`);
-      const d = await r.json();
-      if (!d.results || !d.results.length) return '';
-      const usable = freshPrices(d.results);   // stale prices are rumours, not prices
       const path = window._tripRoute.path;
       const myProg = progressAlongRoute(gps.lat, gps.lon, path);
-      const ahead = usable
-        .filter(s => s.lat && s.lon)
-        .map(s => {
-          const lat = parseFloat(s.lat), lon = parseFloat(s.lon);
-          return { name: s.name, address: s.address, price: s.price, lat, lon,
-                   detour: distToRoute(lat, lon, path), prog: progressAlongRoute(lat, lon, path) };
-        })
-        // genuinely ahead on the road (not behind), detour ≤10km = actually "on the way"
-        .filter(s => s.prog > myProg + 0.01 && s.detour <= 10)
-        .sort((a,b) => a.price - b.price)   // cheapest first — the whole point
-        .slice(0, 3);                        // top 3 only — fewer road-distance calls
-      if (!ahead.length) {
-        // Nothing priced ahead in range — a fuel-data thin patch. Be honest and
-        // friendly: name the nearest actual servo, and tell them when to ask again.
-        try {
-          const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=25`);
-          const sd = await sr.json();
-          let nearName = '', nearKm = 0;
-          if (sd.results && sd.results.length) {
-            const n = sd.results.map(s=>({name:s.name, km:distKm(gps.lat,gps.lon,s.lat,s.lon)})).sort((a,b)=>a.km-b.km)[0];
-            nearName = n.name; nearKm = n.km;
-          }
-          // Find a landmark ~40km up the route — genuinely "a bit up the road",
-          // not a percentage of a 1700km trip (which lands hours away).
-          const path = window._tripRoute.path;
-          const startI = Math.floor(path.length * myProg);
-          let landmark = 'up the road';
-          let accum = 0, targetI = startI;
-          for (let i = startI + 1; i < path.length; i++) {
-            accum += distKm(path[i-1].lat, path[i-1].lon, path[i].lat, path[i].lon);
-            targetI = i;
-            if (accum >= 40) break;   // ~40km ahead
-          }
-          const aheadPt = path[targetI];
-          try {
-            const gr = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${aheadPt.lat}&lon=${aheadPt.lon}&format=json&zoom=12`,{headers:{'Accept-Language':'en'}});
-            const gd = await gr.json();
-            const t = gd.address && (gd.address.town||gd.address.city||gd.address.village||gd.address.suburb||gd.address.county);
-            if (t) landmark = 'around ' + t;
-          } catch(e) {}
-          notePlaces(nearName ? [nearName] : []);
-          return `FUEL-DATA THIN SPOT on the way to ${currentRunDest}: no confirmed prices nearby.${nearName ? ` Nearest servo: ${nearName}, ${nearKm.toFixed(0)}km.` : ''} Say warmly that prices are patchy right here, name that nearest servo as the best bet if low, and tell them to ask again "${landmark}". Use that exact place name "${landmark}" — do NOT substitute a different town from your own knowledge.`;
-        } catch(e) { return ''; }
-      }
-      notePlaces(ahead.map(s => s.name));
-      // Road distance only for the 3 finalists — one small, fast call
-      const roads = await roadDistances(gps.lat, gps.lon, ahead);
-      ahead.forEach((s,i) => { s.km = (roads[i] && roads[i].km != null) ? roads[i].km : distKm(gps.lat, gps.lon, s.lat, s.lon); s.mins = roads[i] ? roads[i].mins : null; });
-      fuelShortlist = ahead.map(s => ({ name: s.name, price: s.price, km: s.km, mins: s.mins }));
-      fuelDialIdx = 0;
-      // Options to pin on the map — cheapest first
-      window._pendingPins = ahead.slice(0,3).map(s => ({ name: s.name, price: s.price, km: s.km, lat: s.lat, lon: s.lon }));
-      const list = ahead.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${distTime(s)} ahead, ${s.detour.toFixed(0)}km off route`).join('; ');
-
-      // Same city/country logic: only hunt unpriced servos if the cheapest ahead
-      // is a real drive away. If there's a priced servo close ahead, that's enough.
-      const closestAheadKm = Math.min(...ahead.map(s => s.km));
-      let nbRoute = null, underfootNote = '';
-      if (closestAheadKm > 30) {
-        nbRoute = await servosNearby();
-        underfootNote = nearbyServoNote(nbRoute);
-      }
-      // Pin a nearby unpriced servo too, so it's visible not just mentioned
-      if (nbRoute && nbRoute.list && nbRoute.list.length && window._pendingPins) {
-        nbRoute.list.forEach(u => {
-          if (!window._pendingPins.some(p => p.name === u.name)) {
-            window._pendingPins.push({ name: u.name, price: null, km: u.km, lat: u.lat, lon: u.lon });
-          }
-        });
-      }
-
-      return `CHEAPEST FUEL AHEAD ON ROUTE to ${currentRunDest} — cheapest first, distances by road: ${list}.${underfootNote} Mention the detour off the highway; frame a worthwhile saving as a quick side-trip.`;
+      all.forEach(s => {
+        s.detour = distToRoute(s.lat, s.lon, path);
+        s.prog   = progressAlongRoute(s.lat, s.lon, path);
+      });
+      const ahead = all.filter(s => s.prog > myProg + 0.01 && s.detour <= 10);
+      if (ahead.length) all = ahead;   // if nothing ahead, fall back to all nearby
     }
 
-    // NOT on a journey — cheapest LOCALLY (the errand case), with the dial.
-    // 20km is a realistic "nip out for fuel" radius, not a full tank's range.
-    const r = await fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=20`);
-    const d = await r.json();
-    if (d.results && d.results.length) {
-      const usable = freshPrices(d.results);   // stale prices are rumours, not prices
-      notePlaces(usable.slice(0,6).map(s => s.name));
-      const cands = usable.filter(s => s.lat && s.lon).slice(0, 12)
-        .map(s => ({ name: s.name, address: s.address, price: s.price, lat: parseFloat(s.lat), lon: parseFloat(s.lon) }));
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
-      cands.forEach((c, i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : distKm(gps.lat, gps.lon, c.lat, c.lon); c.mins = roads[i] ? roads[i].mins : null; });
-      // Frozen dial: cheapest first, then the rest by true road distance
-      const cheapest = cands[0];
-      const rest = cands.slice(1).sort((a,b) => a.km - b.km);
-      fuelShortlist = cheapest ? [{name:cheapest.name, price:cheapest.price, km:cheapest.km, mins:cheapest.mins}, ...rest.map(s=>({name:s.name, price:s.price, km:s.km, mins:s.mins}))] : [];
+    all.sort((a, b) => a.km - b.km);   // nearest by road, always
+
+    // ═══ THE MAP IS THE PRIMARY OUTPUT ═════════════════════════════════════
+    // Pin everything we found. Solid = price confirmed. Hollow = no price.
+    window._pendingPins = all.slice(0, 6).map(s => ({
+      name: s.name, price: s.price, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
+    }));
+    notePlaces(all.slice(0, 6).map(s => s.name));
+
+    // The 👎 dial walks the priced ones, cheapest → nearest
+    const withPrice = all.filter(s => s.price != null);
+    if (withPrice.length) {
+      const cheapest = withPrice.slice().sort((a, b) => a.price - b.price)[0];
+      const rest = withPrice.filter(s => s !== cheapest).sort((a, b) => a.km - b.km);
+      fuelShortlist = [cheapest, ...rest].map(s => ({ name: s.name, price: s.price, km: s.km, mins: s.mins }));
       fuelDialIdx = 0;
-      // Offer up to THREE genuine choices: the cheapest, then the two nearest that aren't it
-      const nearest = cands.slice().sort((a,b) => a.km - b.km);
-      const picks = [cheapest];
-      for (const s of nearest) { if (picks.length >= 3) break; if (!picks.includes(s)) picks.push(s); }
-
-      // CITY vs COUNTRY: if a priced servo is close (under 30km), that's all you need —
-      // don't clutter the answer with unpriced alternatives. Only when the nearest
-      // priced servo is a real drive away does "can I get there" start to matter.
-      const nearestPricedKm = nearest.length ? nearest[0].km : 999;
-      let nb = null, underfootNote = '';
-      if (nearestPricedKm > 30) {
-        nb = await servosNearby();
-        underfootNote = nearbyServoNote(nb);
-      }
-
-      // Options to pin on the map — cheapest first, plus any nearby unpriced servo
-      window._pendingPins = picks.map(s => ({ name: s.name, price: s.price, km: s.km, lat: s.lat, lon: s.lon }));
-      if (nb && nb.list && nb.list.length) {
-        // Pin the nearby unpriced servos too — visible, not just mentioned
-        nb.list.forEach(u => {
-          if (!window._pendingPins.some(p => p.name === u.name)) {
-            window._pendingPins.push({ name: u.name, price: null, km: u.km, lat: u.lat, lon: u.lon });
-          }
-        });
-      }
-      const list = picks.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${distTime(s)} by road`).join('; ');
-
-      return `LOCAL FUEL (within 20km) — first is CHEAPEST, the others are NEAREST, all distances by ROAD, price-reporting states only: ${list}.${underfootNote} Lead with the cheapest; if an unpriced servo is meaningfully closer, offer it as the no-detour alternative.`;
+    } else {
+      fuelShortlist = [];
+      fuelDialIdx = 0;
     }
-    // Thin area: nothing reporting a price within 20km. Offer the nearest actual servos.
-    try {
-      const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=25`);
-      const sd = await sr.json();
-      if (sd.results && sd.results.length) {
-        const near = sd.results
-          .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon), lat: s.lat, lon: s.lon }))
-          .sort((a,b) => a.km - b.km).slice(0, 3);
-        notePlaces(near.map(s => s.name));
-        // Pin them on the map — they're real servos, just without live prices
-        window._pendingPins = near.map(s => ({ name: s.name, price: null, km: s.km, lat: s.lat, lon: s.lon }));
-        const list = near.map(s => `${s.name}, ${s.km < 1 ? Math.round(s.km*1000)+' metres' : s.km.toFixed(0)+' km'}`).join('; ');
-        const atOne = near[0] && near[0].km <= 1.5;
-        return `NO PRICED SERVOS NEARBY — none in this area report live prices. Actual servos here, nearest first: ${list}. ${atOne ? 'The driver is right at the first one — lead with that.' : 'Name the closest.'} Say prices aren't reported around here, add "price unconfirmed", and if there are two or more nearby, mention both so they can choose.`;
-      }
-    } catch(e) {}
+
+    // ═══ THE WORDS DESCRIBE THE MAP ════════════════════════════════════════
+    const fmt = s => {
+      const dist = distTime(s);
+      const price = (s.price != null) ? `$${(s.price / 100).toFixed(2)} a litre` : 'price unconfirmed';
+      const detour = (onJourney && s.detour != null && s.detour > 1) ? `, ${s.detour.toFixed(0)} km off route` : '';
+      return `${s.name} — ${dist}${detour} — ${price}`;
+    };
+    const list = all.slice(0, 6).map(fmt).join('; ');
+
+    const atOne = all[0] && all[0].km <= 0.15;
+    const cheapestConfirmed = withPrice.length
+      ? withPrice.slice().sort((a, b) => a.price - b.price)[0] : null;
+
+    const header = onJourney
+      ? `SERVOS AHEAD ON ROUTE to ${currentRunDest} (all real, nearest first by road; every one is pinned on the driver's map)`
+      : `SERVOS AROUND THE DRIVER (all real, nearest first by road; every one is pinned on the driver's map)`;
+
+    let guide = ' Lead with the cheapest CONFIRMED price and its driving time.';
+    if (cheapestConfirmed && all[0] && all[0] !== cheapestConfirmed) {
+      guide += ` ${all[0].name} is closer${all[0].price == null ? ' but has no confirmed price' : ''} — offer it as the no-detour alternative.`;
+    }
+    if (atOne) guide = ` The driver is right AT ${all[0].name} now — say so first. ` + guide;
+    if (!cheapestConfirmed) guide = ' No confirmed prices here — name the nearest servo, say prices are patchy in this area, and suggest asking again further along.';
+
+    return `${header}: ${list}.${guide}`;
   } catch(e) {}
   return '';
 }
@@ -2656,13 +2615,13 @@ async function sendMessage(silent){
   // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
   // every state) always; LIVE FUEL PRICES only when price is the intent —
   // near a border the price list anchors the AI on far-away stations.
+  // Fuel questions get ONE list: every servo around them, priced or not,
+  // nearest first by road, all pinned on the map. No separate paths.
   let fuelCtx = '';
   let stationsCtx = '';
   const fuelQuery = /fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(scanText);
-  const nearestOnly = /nearest|closest/i.test(scanText) && !/cheap|price|cost|cents/i.test(scanText);
   if (fuelQuery) {
-    stationsCtx = await fetchStations();
-    if (!nearestOnly) fuelCtx = await fetchFuelPrices();
+    fuelCtx = await fetchFuelPrices();
   }
   // Stay-related question? Grab real nearby camps and parks
   let campsCtx = '';
