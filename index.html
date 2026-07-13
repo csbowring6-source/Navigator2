@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 03:10 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 03:30 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -1183,19 +1183,22 @@ function showOptionPins(places) {
   if (!window._navMap || !window.L || !places || !places.length) return;
   clearOptionPins();
   const pts = [];
-  places.slice(0, 3).forEach((p, i) => {
+  places.slice(0, 4).forEach((p, i) => {
     if (!p.lat || !p.lon) return;
     const isTop = i === 0;
-    const bg = isTop ? '#F5A623' : '#5A6C80';
+    const noPrice = (p.price == null);
+    const bg = noPrice ? 'transparent' : (isTop ? '#F5A623' : '#5A6C80');
+    const brd = noPrice ? '#F5A623' : '#0A1628';
+    const txc = noPrice ? '#F5A623' : '#0A1628';
     const icon = L.divIcon({
-      html: `<div style="width:28px;height:28px;background:${bg};border:2px solid #0A1628;border-radius:50%;
-             display:flex;align-items:center;justify-content:center;color:#0A1628;font-weight:800;font-size:14px;
+      html: `<div style="width:28px;height:28px;background:${bg};border:2px solid ${brd};border-radius:50%;
+             display:flex;align-items:center;justify-content:center;color:${txc};font-weight:800;font-size:14px;
              box-shadow:0 2px 6px rgba(0,0,0,0.4);pointer-events:none;">${i+1}</div>`,
       className: 'option-pin', iconSize: [28,28], iconAnchor: [14,14], popupAnchor: [0,-14],
     });
     const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
     const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
-    const kmTxt = (p.km != null) ? `${p.km.toFixed(0)}km away` : '';
+    const kmTxt = (p.km != null) ? (p.km < 1 ? `${Math.round(p.km*1000)} metres away` : `${p.km.toFixed(0)}km away`) : '';
     const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:130px;">
         <b>${i+1}. ${p.name}</b><br>
         <span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
@@ -2159,6 +2162,13 @@ async function fetchFuelPrices() {
       // Are there servos right here? Say so honestly — don't route them past one.
       const nbRoute = await servosNearby();
       const underfootNote = nearbyServoNote(nbRoute);
+      // Pin a nearby unpriced servo too, so it's visible not just mentioned
+      if (nbRoute && nbRoute.list && nbRoute.list.length && window._pendingPins) {
+        const u = nbRoute.list[0];
+        if (!window._pendingPins.some(p => p.name === u.name)) {
+          window._pendingPins.push({ name: u.name, price: null, km: u.km, lat: u.lat, lon: u.lon });
+        }
+      }
 
       return `CHEAPEST FUEL AHEAD ON ROUTE to ${currentRunDest} — cheapest first, distances by road: ${list}.${underfootNote} Mention the detour off the highway; frame a worthwhile saving as a quick side-trip.`;
     }
@@ -2188,8 +2198,15 @@ async function fetchFuelPrices() {
       const nearest = cands.slice().sort((a,b) => a.km - b.km);
       const picks = [cheapest];
       for (const s of nearest) { if (picks.length >= 3) break; if (!picks.includes(s)) picks.push(s); }
-      // Options to pin on the map — cheapest first
+      // Options to pin on the map — cheapest first, plus any nearby unpriced servo
       window._pendingPins = picks.map(s => ({ name: s.name, price: s.price, km: s.km, lat: s.lat, lon: s.lon }));
+      if (nb && nb.list && nb.list.length) {
+        // Add the closest unpriced servo so it's visible, not just mentioned
+        const u = nb.list[0];
+        if (!window._pendingPins.some(p => p.name === u.name)) {
+          window._pendingPins.push({ name: u.name, price: null, km: u.km, lat: u.lat, lon: u.lon });
+        }
+      }
       const list = picks.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${s.km.toFixed(0)}km by road`).join('; ');
 
       // A closer servo may exist that simply doesn't report a price — always check,
