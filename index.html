@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 03:30 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 04:00 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -2065,13 +2065,13 @@ async function servoUnderfoot() {
 async function servosNearby() {
   if (!gps) return null;
   try {
-    const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=5`);
+    const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=15`);
     const sd = await sr.json();
     if (sd.results && sd.results.length) {
       const near = sd.results
         .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon), lat: s.lat, lon: s.lon }))
         .sort((a,b) => a.km - b.km)
-        .filter(s => s.km <= 3)     // within 3km = "around here"
+        .filter(s => s.km <= 15)    // anything within 15km is worth knowing about
         .slice(0, 3);
       if (!near.length) return null;
       return { list: near, atOne: near[0].km <= 0.12 };   // 120m = genuinely at it
@@ -2082,12 +2082,12 @@ async function servosNearby() {
 
 function nearbyServoNote(nb) {
   if (!nb) return '';
-  const fmt = s => `${s.name} (${s.km < 1 ? Math.round(s.km*1000)+' metres' : s.km.toFixed(1)+' km'})`;
+  const fmt = s => `${s.name} (${s.km < 1 ? Math.round(s.km*1000)+' metres' : s.km.toFixed(0)+' km'})`;
   const names = nb.list.map(fmt).join(', ');
   if (nb.atOne) {
     return ` NOTE: the driver is right at ${nb.list[0].name} now. It does NOT report a price. Say they're at one, price unconfirmed, then give the cheapest confirmed as the alternative.`;
   }
-  return ` NEARBY SERVOS (no live prices reported): ${names}. These are close by but the driver is NOT standing in them — say there are servos right here / just up the road, name them with their distance in metres, price unconfirmed, then give the cheapest confirmed as the alternative.`;
+  return ` UNPRICED SERVOS NEARBY (real servos, no live price reported): ${names}. If one of these is meaningfully closer than the cheapest confirmed, offer it as the no-detour alternative with its distance and "price unconfirmed".`;
 }
 
 async function fetchFuelPrices() {
@@ -2209,27 +2209,7 @@ async function fetchFuelPrices() {
       }
       const list = picks.map(s => `${s.name} (${s.address}): ${s.price} c/L, ${s.km.toFixed(0)}km by road`).join('; ');
 
-      // A closer servo may exist that simply doesn't report a price — always check,
-      // and be honest about whether they're AT one or merely near one.
-      let closerNote = underfootNote;
-      const nearestPricedKm = nearest.length ? nearest[0].km : 999;
-      if (!nb) {
-        try {
-          const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=20`);
-          const sd = await sr.json();
-          if (sd.results && sd.results.length) {
-            const withKm = sd.results
-              .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-              .filter(s => s.km < nearestPricedKm - 3) // meaningfully closer
-              .sort((a,b) => a.km - b.km);
-            if (withKm.length) {
-              const c = withKm[0];
-              closerNote = ` A CLOSER servo exists but isn't reporting a price: ${c.name}, about ${c.km.toFixed(0)}km — mention it as the near option, price unconfirmed.`;
-            }
-          }
-        } catch(e) {}
-      }
-      return `LOCAL FUEL (within 20km) — first is CHEAPEST, the others are NEAREST, all distances by ROAD, price-reporting states only: ${list}.${closerNote} Lead with the cheapest; if a closer servo is noted, offer it as the no-detour alternative.`;
+      return `LOCAL FUEL (within 20km) — first is CHEAPEST, the others are NEAREST, all distances by ROAD, price-reporting states only: ${list}.${underfootNote} Lead with the cheapest; if an unpriced servo is meaningfully closer, offer it as the no-detour alternative.`;
     }
     // Thin area: nothing reporting a price within 20km. Offer the nearest actual servos.
     try {
