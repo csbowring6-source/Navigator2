@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 04:00 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 04:20 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -2544,6 +2544,7 @@ function copyLocation() {
 function resetConversation() {
   synth?.cancel();
   try { if (recognition && isListening) recognition.stop(); } catch(e) {}
+  if (convoEnabled) setConvo(false);   // don't leave the mic listening at the front door
   messages.length = 0;              // forget the exchange
   lastNavReply = ''; lastSpoken = '';
   knownPlaces = [];
@@ -2552,15 +2553,17 @@ function resetConversation() {
   clearOptionPins();
   window._pendingPins = null;
   document.getElementById('userInput').value = '';
-  // A fresh start IS the welcome screen — rebuild it, chips and all.
-  // (No greeting message: addMsg would immediately remove the welcome block.)
+  // A fresh start means ALL the way back — the start screen, all doors open.
   document.getElementById('chatArea').innerHTML =
     '<div class="welcome" id="welcome"><div class="suggestion-grid" id="suggestionGrid"></div></div>';
   updateSuggestions();
   busy = false;
   document.getElementById('sendBtn').disabled = false;
-  setVoiceStatus('', currentRunDest ? `Fresh start — still on your ${currentRunDest} trip` : 'Fresh start');
-  setTimeout(()=>setVoiceStatus('',''), 3000);
+  hideWhere();
+  renderResumeTrip();     // Resume/Clear cards reflect any active trip
+  renderSavedTrips();
+  updateGreeting();
+  document.getElementById('startOverlay').classList.remove('hidden');
 }
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
