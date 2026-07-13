@@ -288,6 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 11 Jul 2026, 02:30 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tell me where you're heading — I'll size up the journey.</div>
   <div class="start-btns">
@@ -398,7 +399,6 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>01:40 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -469,11 +469,6 @@
 <div class="bottom-panel">
   <div class="chat-area" id="chatArea">
     <div class="welcome" id="welcome">
-      <div class="welcome-top">
-        <div class="welcome-icon">🧭</div>
-        <h1 id="welcomeHeading">G'day.<br>Your <span>co-pilot</span> is ready.</h1>
-        <p>Tap your vehicle below the map to change it — then tap the mic or a suggestion.</p>
-      </div>
       <div class="suggestion-grid" id="suggestionGrid">
         <!-- Populated by JS based on vehicle -->
       </div>
