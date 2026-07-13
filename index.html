@@ -396,7 +396,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>12:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Jul 2026<br>01:05 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -460,7 +460,7 @@
   <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()" style="display:none;">⛽ U91</div>
   <div class="ctx-chip" id="rangeChip" onclick="setRange()" style="display:none;">🛣 Range</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
-  <div class="ctx-chip" id="logChip" onclick="openFillSheet()">📒 Fill-up</div>
+  <div class="ctx-chip" id="logChip" onclick="openFillSheet()" style="display:none;">📒 Fill-up</div>
 </div>
 
 <!-- BOTTOM -->
@@ -730,6 +730,7 @@ let pendingTripDest = null;
 // 👍 on an answer about a place = adopt it as the trip, no form needed
 function adoptTrip(dest) {
   currentRunDest = dest;
+  updateSuggestions();   // chips announce route-aware mode
   tripContext = `Destination: ${dest}.`;
   pendingTripDest = null;
   try {
@@ -1025,6 +1026,7 @@ function clearTrip() {
   } catch(e) {}
   tripContext = '';
   currentRunDest = '';
+  updateSuggestions();   // back to nearby mode
   window._tripRoute = null;
   if (routeLine && window._navMap) { window._navMap.removeLayer(routeLine); routeLine = null; }
   if (routeDestMarker && window._navMap) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
@@ -1040,6 +1042,7 @@ function resumeTrip() {
     const lockedPlan = localStorage.getItem('navigator_trip_plan');
     if (lockedPlan) tripContext += ' Agreed plan for this trip: ' + lockedPlan;
     currentRunDest = raw.dest || '';
+    updateSuggestions();   // chips announce route-aware mode
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     document.getElementById('startOverlay').classList.add('hidden');
@@ -1277,11 +1280,15 @@ function updateSuggestions() {
   const v = VEHICLES[currentVehicle];
   const grid = document.getElementById('suggestionGrid');
   if (!grid) return;
+  // The sub-label says which brain is running, so the behaviour is never a surprise
+  const onTrip = !!currentRunDest;
+  const modeDesc = { 'Servo': onTrip ? 'ahead on route' : 'nearby',
+                     'Coffee': onTrip ? 'on your way'   : 'nearby' };
   grid.innerHTML = v.suggestions.map(s => `
     <div class="suggestion" onclick="suggest('${s.query.replace(/'/g,"\\'")}')">
       <span class="sug-icon">${s.icon}</span>
       <span class="sug-label">${s.label}</span>
-      ${s.desc ? `<span class="sug-desc">${s.desc}</span>` : ''}
+      <span class="sug-desc">${modeDesc[s.label] || s.desc || ''}</span>
     </div>
   `).join('');
 }
