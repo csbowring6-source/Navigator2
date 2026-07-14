@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 02:30 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 03:15 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -460,6 +460,11 @@
 <!-- MAP -->
 <div class="map-wrap">
   <div id="map">
+    <button id="recentreBtn" onclick="recentreMap()" title="Back to my location"
+      style="display:none;position:absolute;bottom:12px;right:12px;z-index:500;
+             width:40px;height:40px;border-radius:50%;border:2px solid var(--amber);
+             background:rgba(10,22,40,0.92);color:var(--amber);font-size:18px;
+             cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">◎</button>
     <div class="map-placeholder" id="mapPlaceholder" onclick="openLocSheet()" style="cursor:pointer;">
       <div class="map-placeholder-icon">🗺</div>
       <div class="map-placeholder-text" id="mapPlaceholderText">Locating... tap to set manually</div>
@@ -1356,6 +1361,9 @@ function addPendingPins(pins) {
 function showOptionPins(places) {
   if (!window._navMap || !window.L || !places || !places.length) return;
   clearOptionPins();
+  window._userMovedMap = false;   // new answer, new pins — the app takes the wheel again
+  const rb = document.getElementById('recentreBtn');
+  if (rb) rb.style.display = 'none';
   const pts = [];
   places.slice(0, 6).forEach((p, i) => {
     if (!p.lat || !p.lon) return;
@@ -1670,14 +1678,33 @@ function initOSMMap() {
     if (window._pendingRouteDest) { plotTripRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
   }, 500);
 
-  // Keep position updated
+  // Keep position updated — but DON'T yank the map back if the driver has
+  // panned or zoomed to look at something. Their exploration wins.
   navigator.geolocation.watchPosition(pos => {
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     if (window._navMarker) {
-      window._navMarker.setLatLng([gps.lat, gps.lon]);
-      window._navMap.panTo([gps.lat, gps.lon]);
+      window._navMarker.setLatLng([gps.lat, gps.lon]);   // marker always moves
+      if (!window._userMovedMap) {                        // but the VIEW only follows
+        window._navMap.panTo([gps.lat, gps.lon]);         // if they haven't taken control
+      }
     }
   }, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
+
+  // The moment the driver touches the map, it's theirs
+  map.on('dragstart zoomstart', () => {
+    window._userMovedMap = true;
+    const b = document.getElementById('recentreBtn');
+    if (b) b.style.display = 'block';
+  });
+}
+
+// Snap back to the driver's own position
+function recentreMap() {
+  if (!window._navMap || !gps) return;
+  window._userMovedMap = false;
+  window._navMap.setView([gps.lat, gps.lon], 15);
+  const b = document.getElementById('recentreBtn');
+  if (b) b.style.display = 'none';
 }
 
 window.initMap = function() {}; // no-op kept for compatibility
