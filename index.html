@@ -2663,38 +2663,41 @@ async function fetchPoi(kind, label) {
     const r = await fetch(`${API_URL}poi?lat=${gps.lat}&lon=${gps.lon}&kind=${kind}&radius=25`);
     const d = await r.json();
     if (d.results && d.results.length) {
-      // Shortlist by crow-flies, then TRUE road distance & time.
-      // Take a wider net (12) so nearby TOWNS in different directions are seen —
-      // otherwise a cluster in one town crowds out everywhere else.
-      const cands = d.results
+      // The Worker returns places sorted by straight-line distance — but what matters
+      // is DRIVING time. A cluster of cafés in one town can crowd out a town that's
+      // actually quicker to reach. So: pick a geographically SPREAD shortlist first,
+      // then road-distance those and rank by real driving time.
+      const all = d.results
         .filter(s => s.lat && s.lon)
         .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-        .sort((a,b) => a.crow - b.crow)
-        .slice(0, 12);
+        .sort((a,b) => a.crow - b.crow);
+
+      // Spread: take the nearest, then anything >3km from everything already taken.
+      // This guarantees different towns get a seat at the table.
+      const spread = [];
+      for (const c of all) {
+        if (spread.length >= 10) break;
+        if (!spread.length) { spread.push(c); continue; }
+        const isNew = spread.every(p => distKm(c.lat, c.lon, p.lat, p.lon) > 3);
+        if (isNew || spread.length < 4) spread.push(c);   // keep a few close ones too
+      }
+      const cands = spread;
       if (!cands.length) return '';
+
       const roads = await roadDistances(gps.lat, gps.lon, cands);
       cands.forEach((c,i) => {
         c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
         c.mins = roads[i] ? roads[i].mins : null;
       });
-      cands.sort((a,b) => a.km - b.km);
+      cands.sort((a,b) => a.km - b.km);   // now ranked by REAL driving distance
 
-      // Spread the picks: nearest few, then any that are meaningfully elsewhere
-      // (>4km from everything already picked) so both directions get a look-in.
-      const picks = [];
-      for (const c of cands) {
-        if (picks.length >= 6) break;
-        if (picks.length < 3) { picks.push(c); continue; }
-        const isElsewhere = picks.every(p => distKm(c.lat, c.lon, p.lat, p.lon) > 4);
-        if (isElsewhere) picks.push(c);
-      }
-
+      const picks = cands.slice(0, 5);
       notePlaces(picks.map(s => s.name));
-      addPendingPins(picks.slice(0,5).map(s => ({
+      addPendingPins(picks.map(s => ({
         name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
       })));
       const list = picks.map(s => `${s.name} — ${distTime(s)}`).join('; ');
-      return `NEARBY ${label} (real places, nearest first by ROAD; pinned on the driver's map): ${list}. If they're spread across different towns, say so — the driver may prefer one direction.`;
+      return `NEARBY ${label} (real places, nearest first by ROAD; pinned on the driver's map): ${list}. If they're in different towns, say so — the driver may prefer one direction.`;
     }
     // Data source said "no" — could be genuinely empty, or the service is down
     if (d.unavailable || d.error) {
