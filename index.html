@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 12:45 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 01:30 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -2132,7 +2132,7 @@ EXAMPLE of a perfect reply:
 "Gordonvale BP, 22km ahead, $1.68 a litre — easy drive-through for the van. Closest is Edmonton at 8km if you'd rather not push on."
 
 RULES:
-- 30 words maximum across the whole reply. Hard limit — with ONE exception: TRIP LEG PLANNING below.
+- 30 words maximum across the whole reply. Hard limit — with TWO exceptions: TRIP LEG PLANNING below, and offering a genuine CHOICE of two options in different directions (up to 40 words, because the choice is worth the words).
 - TRIP LEG PLANNING (the only exception to the word cap): when the driver asks how long the trip will take, to plan their days or legs, or where to break and sleep along the way — use the ROUTE DATA in context and reply in this compact shape, 80 words maximum, plain sentences: First, total km and realistic driving hours for THIS vehicle (car = route hours plus 10% for stops; caravan or campervan = route hours plus 30%; truck = plus 20% with mandatory rest breaks). Then one line per driving day: "Day 1: [start] to [overnight town] — break at [real town about 4 hours in], overnight at [real town about 8 hours in]." Pick towns by driving time on the actual route, and prefer overnight towns with caravan parks and motels. Finish by offering to navigate the first leg. Solo mode rules apply to every stop named. If no ROUTE DATA is in context, say you need a trip planned first — never guess distances.
 - CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
@@ -2140,7 +2140,7 @@ RULES:
 - OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, common need — treat it matter-of-factly, no coyness. Give the nearest with its distance. In Solo mode, prefer staffed or well-lit locations (servos, shopping centres, cafés) over isolated roadside stops, and say why briefly if it means a slightly longer drive.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
-- NEVER mention your context, lists, data, sources, tools, maps or how you know things. BANNED phrases include: "your café list", "in your list", "on your map", "already on your map", "my data", "the data shows", "isn't in the list". Speak as though you simply know the area. The driver can see the map themselves — don't narrate it.
+- NEVER mention your context, lists, data, sources, tools, or maps. NEVER say the word "map" at all — banned phrases include "on the map", "on your map", "already on your map", "nearest on the map", "your list", "in your list", "my data", "the data shows". The driver can see the map themselves. Speak as though you simply know the area.
 - NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
 - WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
 - Never tell the driver to use another app, website, or service under ANY circumstances.
@@ -2696,8 +2696,15 @@ async function fetchPoi(kind, label) {
       addPendingPins(picks.map(s => ({
         name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
       })));
-      const list = picks.map(s => `${s.name} — ${distTime(s)}`).join('; ');
-      return `NEARBY ${label} (real places, nearest first by ROAD; pinned on the driver's map): ${list}. If they're in different towns, say so — the driver may prefer one direction.`;
+
+      // Which direction is each one? Lets the AI offer a real choice.
+      const bearing = (p) => {
+        const dy = p.lat - gps.lat, dx = p.lon - gps.lon;
+        const ang = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+        return ['north','north-east','east','south-east','south','south-west','west','north-west'][Math.round(ang/45) % 8];
+      };
+      const list = picks.map(s => `${s.name} (${bearing(s)}) — ${distTime(s)}`).join('; ');
+      return `NEARBY ${label} (real places, nearest first by ROAD; pinned on the driver's map): ${list}. IMPORTANT: if the options are in DIFFERENT DIRECTIONS, name at least two — one from each way — with their direction and time, so the driver can choose. They may know about roadworks or traffic you don't.`;
     }
     // Data source said "no" — could be genuinely empty, or the service is down
     if (d.unavailable || d.error) {
