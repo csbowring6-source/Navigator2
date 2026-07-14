@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 01:30 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 02:00 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -2140,7 +2140,7 @@ RULES:
 - OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, common need — treat it matter-of-factly, no coyness. Give the nearest with its distance. In Solo mode, prefer staffed or well-lit locations (servos, shopping centres, cafés) over isolated roadside stops, and say why briefly if it means a slightly longer drive.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
-- NEVER mention your context, lists, data, sources, tools, or maps. NEVER say the word "map" at all — banned phrases include "on the map", "on your map", "already on your map", "nearest on the map", "your list", "in your list", "my data", "the data shows". The driver can see the map themselves. Speak as though you simply know the area.
+- NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
 - NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
 - WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
 - Never tell the driver to use another app, website, or service under ANY circumstances.
@@ -2704,7 +2704,7 @@ async function fetchPoi(kind, label) {
         return ['north','north-east','east','south-east','south','south-west','west','north-west'][Math.round(ang/45) % 8];
       };
       const list = picks.map(s => `${s.name} (${bearing(s)}) — ${distTime(s)}`).join('; ');
-      return `NEARBY ${label} (real places, nearest first by ROAD; pinned on the driver's map): ${list}. IMPORTANT: if the options are in DIFFERENT DIRECTIONS, name at least two — one from each way — with their direction and time, so the driver can choose. They may know about roadworks or traffic you don't.`;
+      return `NEARBY ${label} (real places, nearest first by ROAD): ${list}. Name the best TWO — and if they're in different directions, say so, because the driver may know about roadworks or traffic you don't. There are ${picks.length} options showing; if you name fewer than all of them, finish by saying the others are pinned and they can tap any one to go there.`;
     }
     // Data source said "no" — could be genuinely empty, or the service is down
     if (d.unavailable || d.error) {
