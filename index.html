@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 05:20 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 06:00 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -1691,6 +1691,7 @@ function initOSMMap() {
     map.invalidateSize(true);
     map.setView([gps.lat, gps.lon], 15);
     if (window._pendingRouteDest) { plotTripRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
+    if (window._pendingOptionPins) { showOptionPins(window._pendingOptionPins); window._pendingOptionPins = null; }
   }, 500);
 
   // Keep position updated — but DON'T yank the map back if the driver has
@@ -2058,12 +2059,19 @@ function addMsg(role,text){
       .slice(0, 3)
       .map(x => x.nm);
     const mapNames={apple:'Apple Maps',google:'Google Maps',waze:'Waze','maps.me':'Maps.me'};
+    // Match a mentioned name back to its pinned coordinates — coordinates beat
+    // a name search every time, and stop "Red Rooster" opening the wrong branch.
+    const coordsFor = (nm) => {
+      const pin = (window._pendingPins || []).find(p => p.name === nm);
+      return pin ? { lat: pin.lat, lon: pin.lon } : null;
+    };
     if (mentions.length >= 2) {
       mentions.forEach((nm, idx) => {
         const btn=document.createElement('button'); btn.className='nav-btn';
         btn.style.marginTop = idx === 0 ? '8px' : '6px';
         btn.textContent = '📍 ' + (idx+1) + '. ' + nm;
-        btn.onclick = () => navigateTo(nm);
+        const c = coordsFor(nm);
+        btn.onclick = () => navigateTo(nm, c?.lat, c?.lon);
         bub.appendChild(btn);
       });
       if (currentRunDest) {
@@ -2077,7 +2085,8 @@ function addMsg(role,text){
       if(dest){
         const btn=document.createElement('button'); btn.className='nav-btn';
         btn.textContent='📍 Navigate to '+dest+' — '+mapNames[selectedMap];
-        btn.onclick=()=>navigateTo(dest);
+        const c1 = coordsFor(dest);
+        btn.onclick=()=>navigateTo(dest, c1?.lat, c1?.lon);
         bub.appendChild(btn);
         // Star: remember this stop for the active run
         if (currentRunDest) {
@@ -2964,17 +2973,43 @@ function restoreSession() {
     knownPlaces = s.knownPlaces || [];
     lastSpoken = s.lastSpoken || '';
     if (s.chat) {
-      // Buttons with JS-attached handlers won't work after a reload — strip them
-      // rather than leave dead buttons that do nothing when tapped.
-      const clean = s.chat.replace(/<button(?![^>]*onclick)[^>]*>[\s\S]*?<\/button>/gi, '')
-                          .replace(/<div class="feedback-row">[\s\S]*?<\/div>/gi, '');
+      // Buttons with JS-attached handlers won't survive a reload — strip the
+      // dead ones, but if we have the pinned coordinates, rebuild a REAL
+      // Navigate button rather than just deleting the only useful action.
+      let clean = s.chat.replace(/<button(?![^>]*onclick)[^>]*>[\s\S]*?<\/button>/gi, '')
+                        .replace(/<div class="feedback-row">[\s\S]*?<\/div>/gi, '');
       document.getElementById('chatArea').innerHTML = clean;
+      // Re-attach live Navigate buttons for any pinned place mentioned in the last reply
+      if (s.pins && s.pins.length) {
+        const msgs = document.querySelectorAll('.msg.nav .msg-bubble');
+        const lastBub = msgs[msgs.length - 1];
+        if (lastBub) {
+          const txt = lastBub.textContent.toLowerCase();
+          const relevant = s.pins.filter(p => p.name && txt.includes(p.name.toLowerCase()));
+          relevant.slice(0, 3).forEach((p, idx) => {
+            const btn = document.createElement('button');
+            btn.className = 'nav-btn';
+            btn.style.marginTop = idx === 0 ? '8px' : '6px';
+            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}` : `📍 Navigate to ${p.name}`;
+            btn.onclick = () => navigateTo(p.name, p.lat, p.lon);
+            lastBub.appendChild(btn);
+          });
+        }
+      }
     }
     document.getElementById('startOverlay').classList.add('hidden');
     updateSuggestions();
-    // Redraw the route and pins once the map is ready
-    if (currentRunDest) setTimeout(() => plotTripRoute(currentRunDest), 800);
-    if (s.pins && s.pins.length) setTimeout(() => showOptionPins(s.pins), 1000);
+    // Redraw the route and pins once the map is genuinely ready — not a guessed
+    // delay, which silently failed if the map hadn't finished initialising.
+    if (window._navMap) {
+      // Map's already up — draw straight away
+      if (currentRunDest) plotTripRoute(currentRunDest);
+      if (s.pins && s.pins.length) showOptionPins(s.pins);
+    } else {
+      // Map's still loading — queue for the moment it's ready
+      if (currentRunDest) window._pendingRouteDest = currentRunDest;
+      if (s.pins && s.pins.length) window._pendingOptionPins = s.pins;
+    }
     return true;
   } catch(e) {}
   return false;
