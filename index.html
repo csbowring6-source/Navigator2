@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 06:20 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 07:00 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -1395,7 +1395,7 @@ function showOptionPins(places) {
     });
     const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
     const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
-    const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${p.mins} min` : '')) : '';
+    const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${p.mins}'` : '')) : '';
     const safeName = p.name.replace(/'/g, "").replace(/"/g, '');
     const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:155px;">
         <b>${i+1}. ${p.name}</b><br>
@@ -2063,14 +2063,14 @@ function addMsg(role,text){
     // a name search every time, and stop "Red Rooster" opening the wrong branch.
     const coordsFor = (nm) => {
       const pin = (window._pendingPins || []).find(p => p.name === nm);
-      return pin ? { lat: pin.lat, lon: pin.lon } : null;
+      return pin ? { lat: pin.lat, lon: pin.lon, mins: pin.mins } : null;
     };
     if (mentions.length >= 2) {
       mentions.forEach((nm, idx) => {
         const btn=document.createElement('button'); btn.className='nav-btn';
         btn.style.marginTop = idx === 0 ? '8px' : '6px';
-        btn.textContent = '📍 ' + (idx+1) + '. ' + nm;
         const c = coordsFor(nm);
+        btn.textContent = '📍 ' + (idx+1) + '. ' + nm + (c?.mins ? ` — ${c.mins}'` : '');
         btn.onclick = () => navigateTo(nm, c?.lat, c?.lon);
         bub.appendChild(btn);
       });
@@ -2084,8 +2084,8 @@ function addMsg(role,text){
       const dest=parseDest(cleaned) || mentions[0];
       if(dest){
         const btn=document.createElement('button'); btn.className='nav-btn';
-        btn.textContent='📍 Navigate to '+dest+' — '+mapNames[selectedMap];
         const c1 = coordsFor(dest);
+        btn.textContent='📍 Navigate to '+dest+(c1?.mins ? ` (${c1.mins}')` : '')+' — '+mapNames[selectedMap];
         btn.onclick=()=>navigateTo(dest, c1?.lat, c1?.lon);
         bub.appendChild(btn);
         // Star: remember this stop for the active run
@@ -2876,7 +2876,7 @@ async function openSOS() {
     const clinic = shortlist.filter(p=>p.kind==='clinic').sort((a,b)=>a.km-b.km)[0];
     const pol    = shortlist.filter(p=>p.kind==='police').sort((a,b)=>a.km-b.km)[0];
 
-    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? ', about ' + p.mins + ' min' : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
+    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? `, ${p.mins}'` : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
     let html = '';
     if (hosp)   html += row('🏥', hosp, hosp.hasED ? ' · listed with emergency dept' : ' · hospital');
     if (clinic && (!hosp || clinic.km < hosp.km)) html += row('➕', clinic, ' · medical centre, may be daytime only');
@@ -2995,7 +2995,8 @@ function restoreSession() {
             const btn = document.createElement('button');
             btn.className = 'nav-btn';
             btn.style.marginTop = idx === 0 ? '8px' : '6px';
-            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}` : `📍 Navigate to ${p.name}`;
+            const t = p.mins ? ` — ${p.mins}'` : '';
+            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}${t}` : `📍 Navigate to ${p.name}${t}`;
             btn.onclick = () => navigateTo(p.name, p.lat, p.lon);
             lastBub.appendChild(btn);
           });
@@ -3091,15 +3092,30 @@ async function sendMessage(silent){
   if (fuelQuery) {
     fuelCtx = await fetchFuelPrices();
   }
-  // Stay-related question? Grab real nearby camps and parks
+  // Stay-related question? Grab real nearby camps and parks — but ONLY near
+  // where the driver actually is. If they named a different town, say so
+  // honestly rather than silently searching the wrong place.
   let campsCtx = '';
   if (/camp|caravan park|powered site|dump point|free camp/i.test(scanText)) {
-    campsCtx = await fetchCamps();
+    const namedElsewhere = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
+    const currentTown = (gpsAddress || '').split(',')[0].trim().toLowerCase();
+    if (namedElsewhere && namedElsewhere[1].toLowerCase() !== currentTown) {
+      campsCtx = ` NOTE: the driver asked about "${namedElsewhere[1]}" but is currently nowhere near there — say plainly you can only check places near their CURRENT position right now, and name ${namedElsewhere[1]} back to them so they know you understood. Do not invent or guess anything about ${namedElsewhere[1]}.`;
+    } else {
+      campsCtx = await fetchCamps();
+    }
   }
-  // Roof-over-our-heads question? Grab hotels, motels, backpackers
+  // Roof-over-our-heads question? Grab hotels, motels, backpackers — same
+  // current-position-only honesty as camps above.
   let accomCtx = '';
   if (/hotel|motel|hostel|backpacker|resort|accommodation|a room|cabin|b ?& ?b|bnb|luxury|treat ourselves|somewhere (nice|comfortable|to sleep)|stay tonight|overnight/i.test(scanText)) {
-    accomCtx = await fetchAccom();
+    const namedElsewhereA = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
+    const currentTownA = (gpsAddress || '').split(',')[0].trim().toLowerCase();
+    if (namedElsewhereA && namedElsewhereA[1].toLowerCase() !== currentTownA) {
+      accomCtx = ` NOTE: the driver asked about accommodation "in ${namedElsewhereA[1]}" but is currently nowhere near there — say plainly you can only check places near their CURRENT position right now, and name ${namedElsewhereA[1]} back to them so they know you understood. Do not invent or guess anything about ${namedElsewhereA[1]}.`;
+    } else {
+      accomCtx = await fetchAccom();
+    }
   }
   // Everyday places? Ground-truth up to two categories per question
   let poiCtx = '';
