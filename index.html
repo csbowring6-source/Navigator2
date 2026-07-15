@@ -196,7 +196,7 @@
   .trip-btn{flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif;}
   .trip-btn.primary{background:var(--amber);color:var(--navy);}
   .trip-btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.15);color:var(--gray2);}
-  .start-overlay{display:flex;position:fixed;inset:0;background:var(--navy);z-index:600;align-items:center;justify-content:center;padding:20px;flex-direction:column;}
+  .start-overlay{display:flex;position:fixed;inset:0;background:var(--navy);z-index:600;align-items:flex-start;justify-content:center;padding:20px;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
   .start-overlay.hidden{display:none;}
   .start-logo{font-size:48px;margin-bottom:10px;}
   .start-title{font-size:22px;font-weight:600;margin-bottom:6px;text-align:center;}
@@ -288,52 +288,52 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 04:45 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 05:00 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
 
   <!-- THE TWO MODES — explained plainly, not left as examples to guess from -->
-  <div style="background:var(--navy3);border-radius:12px;padding:12px 14px;margin-bottom:16px;">
-    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;">
-      <span style="font-size:18px;">🗺</span>
-      <div style="font-size:13px;color:var(--gray1);line-height:1.4;">
+  <div style="background:var(--navy3);border-radius:12px;padding:10px 14px;margin-bottom:12px;">
+    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;">
+      <span style="font-size:16px;">🗺</span>
+      <div style="font-size:12px;color:var(--gray1);line-height:1.3;">
         <b style="color:var(--white);">Planning a journey?</b> Tell me where — I'll size up the days, overnight stops, rest breaks and safety along the way.
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-start;">
-      <span style="font-size:18px;">🚗</span>
-      <div style="font-size:13px;color:var(--gray1);line-height:1.4;">
+      <span style="font-size:16px;">🚗</span>
+      <div style="font-size:12px;color:var(--gray1);line-height:1.3;">
         <b style="color:var(--white);">Just driving?</b> Ask me anything nearby — fuel, food, a toilet, whatever you need right now.
       </div>
     </div>
   </div>
 
   <!-- SPEAK OR TYPE — genuine equals, not primary and fallback -->
-  <div style="display:flex;gap:10px;margin-bottom:6px;">
+  <div style="display:flex;gap:10px;margin-bottom:4px;">
     <button id="startMicBtn" onclick="startVoiceStart()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;
-             padding:16px 10px;border-radius:14px;border:2px solid var(--amber);
+      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
              background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:30px;">🎙</span>
-      <span style="font-size:13px;font-weight:700;color:var(--amber);">Tap to speak</span>
+      <span style="font-size:24px;">🎙</span>
+      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to speak</span>
     </button>
     <button onclick="showWhere()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;
-             padding:16px 10px;border-radius:14px;border:2px solid var(--amber);
+      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
              background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:30px;">⌨</span>
-      <span style="font-size:13px;font-weight:700;color:var(--amber);">Tap to type</span>
+      <span style="font-size:24px;">⌨</span>
+      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to type</span>
     </button>
   </div>
-  <div id="startMicStatus" style="font-size:13px;color:var(--amber);margin-top:2px;margin-bottom:14px;min-height:18px;font-weight:600;text-align:center;"></div>
+  <div id="startMicStatus" style="font-size:12px;color:var(--amber);margin-top:2px;margin-bottom:10px;min-height:16px;font-weight:600;text-align:center;"></div>
 
-  <div class="start-btns">
-    <div class="start-btn quick" id="resumeBtn" style="display:none;border-color:var(--amber);" onclick="resumeTrip()">
+  <div class="start-btns" style="gap:8px;">
+    <div class="start-btn quick" id="resumeBtn" style="display:none;border-color:var(--amber);padding:10px 14px;" onclick="resumeTrip()">
       <div class="start-btn-title" id="resumeTitle">▶ Resume trip</div>
       <div class="start-btn-desc">Pick up where you left off</div>
     </div>
-    <div class="start-btn quick" id="clearTripBtn" style="display:none;border-color:rgba(231,76,60,0.5);" onclick="clearTrip()">
+    <div class="start-btn quick" id="clearTripBtn" style="display:none;border-color:rgba(231,76,60,0.5);padding:10px 14px;" onclick="clearTrip()">
       <div class="start-btn-title" id="clearTitle" style="color:var(--red);">✕ Clear trip</div>
       <div class="start-btn-desc">Regular runs & ⭐ stops kept</div>
     </div>
