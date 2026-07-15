@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 03:45 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 04:15 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub">Your AI co-pilot for the road. Tap the mic and just tell me.</div>
   <div id="vehiclePrompt" style="margin:0 0 14px;"></div>
@@ -967,14 +967,17 @@ function routeStartSpeech(text) {
     quickStart();
     return;
   }
-  // A destination? "We're off to Toowoomba", "Going to Cairns"
-  // But NOT a request: "take me to the nearest servo" / "I need breakfast, take me to the nearest"
+  // A destination? "We're off to Toowoomba", "Going to Cairns", "Take me to Cairns"
+  // But NOT a request: "take me to the nearest servo" — "take me to X" is only a
+  // REQUEST when X is a facility word (nearest/closest/a servo), not a place name.
   const looksLikeQuestion =
     /\?$/.test(t) ||
-    /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|take me|get me|i need|i want|need a|need some|looking for|nearest|cheapest|closest)\b/i.test(t) ||
-    /\b(servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist|nearest|closest|cheapest)\b/i.test(t);
+    /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|i need|i want|need a|need some|looking for)\b/i.test(t) ||
+    /\b(the nearest|the closest|a servo|a toilet|a cafe|a chemist|a gym)\b/i.test(t) ||
+    (/^(take me|get me)\b/i.test(t) && /\b(nearest|closest|servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist)\b/i.test(t)) ||
+    (!/^(take me|get me)\b/i.test(t) && /\b(servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist|nearest|closest|cheapest)\b/i.test(t));
 
-  const destMatch = looksLikeQuestion ? null : t.match(/(?:going to|off to|heading (?:to|for)|drive to|driving to|travelling to|we'?re (?:going|off) to|to)\s+([A-Za-z][A-Za-z\s'\-]{2,30}?)(?:\s+(?:for|today|tomorrow|this|next|and)\b|[.,!?]|$)/i);
+  const destMatch = looksLikeQuestion ? null : t.match(/(?:going to|off to|heading (?:to|for)|drive to|driving to|travelling to|take me to|get me to|we'?re (?:going|off) to|plan (?:me )?a (?:journey|trip) to|to)\s+([A-Za-z][A-Za-z\s'\-]{2,30}?)(?:\s+(?:for|today|tomorrow|this|next|and)\b|[.,!?]|$)/i);
   if (destMatch) {
     const dest = destMatch[1].trim();
     // Must look like a real place — not "the nearest", "somewhere", "a servo"
