@@ -129,6 +129,11 @@
   .voice-btn.listening{background:var(--red);border-color:var(--red);color:var(--white);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
+  .wake-bar{margin-bottom:8px;}
+  .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
+  .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
+  .wake-word-btn.active{background:rgba(231,76,60,0.15);border-color:var(--red);color:var(--red);animation:wakePulse 2s infinite;}
+  @keyframes wakePulse{0%,100%{border-color:var(--red);}50%{border-color:rgba(231,76,60,0.3);}}
   .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
   .voice-status.listening-state{color:var(--red);}
   .voice-status.speaking-state{color:var(--amber);}
@@ -239,6 +244,76 @@
   </div>
 </div>
 
+<!-- START OVERLAY -->
+<div class="start-overlay hidden" id="startOverlay">
+  <div class="start-logo">🧭</div>
+  <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
+  <div class="start-sub">Your AI co-pilot for the road. Jump straight in, or set up your trip so I already know the details.</div>
+  <div class="start-btns">
+    <div class="start-btn plan" onclick="openTripSetup()">
+      <div class="start-btn-title">📋 Plan This Trip</div>
+      <div class="start-btn-desc">Tell me your destination, dates, fuel, and conditions</div>
+    </div>
+    <div class="start-btn quick" onclick="quickStart()">
+      <div class="start-btn-title">⚡ Quick Start</div>
+      <div class="start-btn-desc">Skip setup — just start talking</div>
+    </div>
+  </div>
+</div>
+
+<!-- TRIP SETUP MODAL -->
+<div class="modal-overlay" id="tripSetupModal">
+  <div class="trip-modal">
+    <div class="trip-header">
+      <div class="trip-icon">📋</div>
+      <div class="trip-title">Plan This Trip</div>
+      <div class="trip-sub">All optional — fill in what's useful, skip the rest.</div>
+    </div>
+
+    <div class="trip-field">
+      <span class="trip-label">Destination</span>
+      <input class="trip-input" id="tripDestination" placeholder="e.g. Alice Springs via Stuart Highway">
+    </div>
+
+    <div class="trip-row">
+      <div class="trip-field">
+        <span class="trip-label">Departing</span>
+        <input class="trip-input" type="date" id="tripStartDate">
+      </div>
+      <div class="trip-field">
+        <span class="trip-label">Returning</span>
+        <input class="trip-input" type="date" id="tripEndDate">
+      </div>
+    </div>
+
+    <div class="trip-field">
+      <span class="trip-label">Fuel range</span>
+      <input class="trip-input" id="tripFuelRange" placeholder="e.g. 400km">
+    </div>
+
+    <div class="trip-field">
+      <span class="trip-label">Conditions</span>
+      <input class="trip-input" id="tripConditions" placeholder="e.g. hot, dusty, strong headwind">
+    </div>
+
+    <div class="trip-field">
+      <span class="trip-label">Passengers</span>
+      <div class="trip-chip-row" id="passengerChips">
+        <div class="trip-chip" onclick="toggleTripChip(this)">Solo</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Partner</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Kids</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Pets</div>
+        <div class="trip-chip" onclick="toggleTripChip(this)">Elderly</div>
+      </div>
+    </div>
+
+    <div class="trip-btn-row">
+      <button class="trip-btn secondary" onclick="skipTripSetup()">Skip</button>
+      <button class="trip-btn primary" onclick="saveTripSetup()">Start Trip</button>
+    </div>
+  </div>
+</div>
+
 <!-- HEADER -->
 <div class="header">
   <div class="logo">
@@ -246,7 +321,7 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
-    <div class="build-stamp" id="buildStamp" title="Last updated">v 17 Jul 2026, 02:53 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 03 Jul 2026, 07:30 PM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
@@ -300,7 +375,7 @@
       <div class="welcome-top">
         <div class="welcome-icon">🧭</div>
         <h1 id="welcomeHeading">G'day.<br>Your <span>co-pilot</span> is ready.</h1>
-        <p>Select your vehicle above — tap the mic or a suggestion below.</p>
+        <p>Select your vehicle above — then tap mic or a suggestion.</p>
       </div>
       <div class="suggestion-grid" id="suggestionGrid">
         <!-- Populated by JS based on vehicle -->
@@ -309,6 +384,9 @@
   </div>
 
   <div class="input-area">
+    <div class="wake-bar">
+      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Hey Navigator</button>
+    </div>
     <div class="input-row" id="inputRow">
       <textarea id="userInput" placeholder="Or type here..." rows="1"
         onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
@@ -344,7 +422,6 @@
     </div>
   </div>
 </div>
-
 
 <!-- MAP CHOICE SHEET -->
 <div class="map-sheet" id="mapSheet" onclick="closeMapSheet(event)">
@@ -385,8 +462,8 @@ const VEHICLES = {
     rangeLabel: '50km',
     suggestions: [
       { icon:'⛽', label:'Cheapest fuel',    desc:'next 50km',           query:'Cheapest fuel in the next 50km' },
-      { icon:'☕', label:'Coffee stop',       desc:'caravan parking',      query:'Find me a coffee stop with caravan parking nearby' },
-      { icon:'🏕', label:'Campsite',          desc:'tonight nearby',       query:'Find me a campsite or caravan park for tonight' },
+      { icon:'☕', label:'Coffee stop',       desc:'near me',             query:'Find me a coffee stop near me' },
+      { icon:'🛣', label:'Tolls + traffic',   desc:'on this route',       query:'Are there any tolls or traffic I should know about on this route?' },
       { icon:'🗺', label:'Next 20km',         desc:"what's ahead",        query:'What do I need to know about the next 20km?' },
     ],
     systemNote: 'Vehicle: standard car, no towing. Fuel range approximately 50km before next stop needed. Normal parking, any fuel station. Toll roads and traffic congestion are relevant — wind impact is not significant for a car and should not be raised unless conditions are genuinely severe.',
@@ -398,9 +475,9 @@ const VEHICLES = {
     rangeLabel: '300km',
     suggestions: [
       { icon:'⛽', label:'Cheapest fuel',    desc:'next 300km',          query:'Cheapest fuel in the next 300km I can get into with the van' },
-      { icon:'☕', label:'Coffee stop',       desc:'caravan parking',      query:'Find me a coffee stop with caravan parking for the van' },
-      { icon:'🏕', label:'Campsite',          desc:'powered + dump point', query:'Find me a campsite or caravan park tonight with powered site and dump point' },
-      { icon:'🗺', label:'Next 200km',        desc:"what's ahead",        query:'What do I need to know about the next 200km?' },
+      { icon:'🏕', label:'Stay tonight',     desc:'powered + dump point', query:'Find somewhere to stay tonight — powered site and dump point for the van' },
+      { icon:'🌬', label:'Wind impact',      desc:'on my range',         query:'How is the wind affecting my range today?' },
+      { icon:'🗺', label:'Next 200km',       desc:"what's ahead",        query:'What do I need to know about the next 200km?' },
     ],
     systemNote: 'Vehicle: car towing a caravan. All stops must have caravan-accessible forecourts — wide entry, drive-through, no boom gates, room to manoeuvre. Flag any access issues explicitly. Wind significantly affects towing stability and fuel range — always relevant.',
   },
@@ -411,9 +488,9 @@ const VEHICLES = {
     rangeLabel: '200km',
     suggestions: [
       { icon:'⛽', label:'Cheapest fuel',    desc:'next 200km',          query:'Cheapest fuel in the next 200km for a campervan' },
-      { icon:'☕', label:'Coffee stop',       desc:'nearby',               query:'Find me a coffee stop nearby' },
-      { icon:'🏕', label:'Free camp',         desc:'self-contained ok',    query:'Find somewhere to free camp tonight — self-contained campervan' },
-      { icon:'🗺', label:'Next 150km',        desc:"what's ahead",        query:'What do I need to know about the next 150km?' },
+      { icon:'🏕', label:'Free camp',        desc:'tonight nearby',      query:'Find somewhere to free camp tonight — self-contained campervan' },
+      { icon:'🌬', label:'Wind impact',      desc:'on my range',         query:'How is the wind affecting my range today?' },
+      { icon:'🗺', label:'Next 150km',       desc:"what's ahead",        query:'What do I need to know about the next 150km?' },
     ],
     systemNote: 'Vehicle: self-contained campervan. Prioritise free and low-cost camping spots over paid caravan parks where self-contained facilities allow it — this is a key differentiator from caravan mode. Height clearance may be relevant. Range approximately 200km between fuel stops.',
   },
@@ -424,9 +501,9 @@ const VEHICLES = {
     rangeLabel: '400km',
     suggestions: [
       { icon:'⛽', label:'Cheapest diesel',  desc:'next 400km',          query:'Cheapest diesel in the next 400km suitable for a truck' },
-      { icon:'☕', label:'Coffee + break',    desc:'truck stop',           query:'Find me a truck stop with coffee and rest facilities' },
-      { icon:'🌉', label:'Low bridges',       desc:'+ weight limits',      query:'Are there any low bridges or weight restrictions on this route?' },
-      { icon:'🗺', label:'Next 300km',        desc:"what's ahead",        query:'What do I need to know about the next 300km for a truck?' },
+      { icon:'🛑', label:'Rest break',       desc:'compliance + facilities', query:'I need a compliant rest break — find me a truck stop with facilities' },
+      { icon:'🌉', label:'Low bridges',      desc:'+ weight limits',     query:'Are there any low bridges or weight restrictions on this route?' },
+      { icon:'🗺', label:'Next 300km',       desc:"what's ahead",        query:'What do I need to know about the next 300km for a truck?' },
     ],
     systemNote: 'Vehicle: truck. Requires truck-friendly fuel stops with diesel, adequate clearance, and room to manoeuvre. Always flag low bridges and weight restrictions proactively. Driving hour limits are a legal compliance requirement in Australia — when asked about rest breaks, treat this as mandatory, not optional, and reference fatigue management regulations if drive time suggests it is relevant. Range approximately 400km.',
   },
@@ -1039,13 +1116,7 @@ RULES:
 SOLO DRIVER MODE (when flagged in context):
 - Same two sentence format.
 - Weight safety in stop selection — well-lit, staffed, reviewed.
-- Replace navigation sentence with check-in reminder when stopping for the night.
-
-CAMPSITE QUERIES:
-- For caravans: prioritise powered sites with dump points, drive-through access, caravan-friendly.
-- For campervans: prioritise free camps and low-cost options where self-contained is permitted.
-- Always flag if a site has height restrictions or is unsuitable for the vehicle type.
-- Name the campsite, distance, key facilities, and cost if known.`;
+- Replace navigation sentence with check-in reminder when stopping for the night.`;
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(){
