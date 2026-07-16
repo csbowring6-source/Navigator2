@@ -80,12 +80,12 @@
   .welcome p{font-size:11px;color:var(--gray2);line-height:1.5;}
 
   /* 2x2 SUGGESTION GRID */
-  .suggestion-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:0;}
-  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 10px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;}
+  .suggestion-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:0;}
+  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:9px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;}
   .suggestion:hover,.suggestion:active{border-color:var(--amber);background:rgba(245,166,35,0.06);}
   .sug-icon{font-size:20px;}
-  .sug-label{font-size:12px;font-weight:600;color:var(--amber);}
-  .sug-desc{font-size:11px;color:var(--gray2);}
+  .sug-label{font-size:11px;font-weight:600;color:var(--amber);line-height:1.2;}
+  .sug-desc{display:none;}
 
   /* MESSAGES */
   .msg{display:flex;gap:8px;max-width:640px;}
@@ -218,7 +218,10 @@
       <div class="trip-sub">So Navigator can greet you properly. Just once.</div>
     </div>
     <div class="trip-field">
-      <input class="trip-input" id="profileName" placeholder="e.g. Brian" autofocus>
+      <input class="trip-input" id="profileName" placeholder="Your name, e.g. Brian" autofocus>
+    </div>
+    <div class="trip-field">
+      <input class="trip-input" id="profileRego" placeholder="Rego (optional), e.g. 123ABC">
     </div>
     <div class="trip-field">
       <span class="trip-label">Which vehicles do you drive?</span>
@@ -319,7 +322,7 @@
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo">
+  <div class="logo" onclick="editProfile()" style="cursor:pointer;">
     <div class="logo-icon">🧭</div>
     <div><div class="logo-text">Navigator</div></div>
   </div>
@@ -366,6 +369,7 @@
 
 <!-- CONTEXT CHIPS -->
 <div class="context-panel">
+  <div class="ctx-chip" onclick="openTripSetup()" style="border-color:rgba(245,166,35,0.4);color:var(--amber);">📋 Trip</div>
   <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">👩 Solo driver</div>
   <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ Unleaded 91</div>
   <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range: 400km</div>
@@ -460,7 +464,7 @@ const VEHICLES = {
     suggestions: [
       { icon:'⛽', label:'Cheapest fuel',    desc:'next 50km',           query:'Cheapest fuel in the next 50km' },
       { icon:'☕', label:'Coffee stop',       desc:'near me',             query:'Find me a coffee stop near me' },
-      { icon:'🛣', label:'Tolls + traffic',   desc:'on this route',       query:'Are there any tolls or traffic I should know about on this route?' },
+      { icon:'🚻', label:'Rest stop',        desc:'near me',             query:'Find the nearest rest stop or public toilets near me' },
       { icon:'🗺', label:'Next 20km',         desc:"what's ahead",        query:'What do I need to know about the next 20km?' },
     ],
     systemNote: 'Vehicle: standard car, no towing. Fuel range approximately 50km before next stop needed. Normal parking, any fuel station. Toll roads and traffic congestion are relevant — wind impact is not significant for a car and should not be raised unless conditions are genuinely severe.',
@@ -515,6 +519,7 @@ let busy = false;
 let selectedMap = 'apple';
 let tripContext = '';
 let userName = '';
+let userRego = '';
 let userVehicles = [];
 
 // ── PROFILE SETUP (first time only — name + owned vehicles) ──────────────────
@@ -524,18 +529,30 @@ function toggleProfileVehicle(el) {
 
 function saveProfile() {
   const name = document.getElementById('profileName').value.trim();
+  const rego = document.getElementById('profileRego').value.trim().toUpperCase();
   const selected = Array.from(document.querySelectorAll('.profile-vehicle-opt.selected')).map(el => el.dataset.v);
 
   userName = name || 'there';
+  userRego = rego;
   userVehicles = selected.length ? selected : ['car'];
 
   try {
-    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles }));
+    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, rego: userRego, vehicles: userVehicles }));
   } catch(e) {}
 
   document.getElementById('profileOverlay').classList.add('hidden');
   applyProfile();
-  document.getElementById('startOverlay').classList.remove('hidden');
+  quickStart();
+}
+
+// Tap the Navigator logo any time to edit name, rego, and vehicles
+function editProfile() {
+  document.getElementById('profileName').value = userName === 'there' ? '' : userName;
+  document.getElementById('profileRego').value = userRego || '';
+  document.querySelectorAll('.profile-vehicle-opt').forEach(el => {
+    el.classList.toggle('selected', userVehicles.includes(el.dataset.v));
+  });
+  document.getElementById('profileOverlay').classList.remove('hidden');
 }
 
 function applyProfile() {
@@ -563,10 +580,11 @@ function loadProfile() {
     if (saved) {
       const p = JSON.parse(saved);
       userName = p.name;
+      userRego = p.rego || '';
       userVehicles = p.vehicles;
       applyProfile();
       document.getElementById('profileOverlay').classList.add('hidden');
-      document.getElementById('startOverlay').classList.remove('hidden');
+      quickStart();
     } else {
       // First time ever — show profile setup
       document.getElementById('profileOverlay').classList.remove('hidden');
@@ -1139,6 +1157,7 @@ async function sendMessage(){
     `Drive time: ${driveHrs} hours.`,
     condText!=='Conditions'?`Driver reports: ${condText}.`:'',
     isSolo?'SOLO DRIVER MODE ACTIVE.':'',
+    userRego?`Vehicle rego: ${userRego}.`:'',
     tripContext?`Trip plan: ${tripContext}`:'',
   ].filter(Boolean).join(' ');
 
@@ -1184,9 +1203,9 @@ fetch('https://api.github.com/repos/csbowring6-source/Navigator2/commits/main')
 window.addEventListener('load',()=>{
   const g=document.getElementById('mapGreet');
   if(!g)return;
-  setTimeout(()=>g.classList.add('show'),400);
-  setTimeout(()=>g.classList.remove('show'),4900);
-  setTimeout(()=>g.remove(),5700);
+  setTimeout(()=>g.classList.add('show'),6000);
+  setTimeout(()=>g.classList.remove('show'),11000);
+  setTimeout(()=>g.remove(),11800);
 });
 </script>
 </body>
