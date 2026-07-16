@@ -22,32 +22,7 @@
   .logo-icon{width:28px;height:28px;background:var(--amber);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .logo-text{font-size:16px;font-weight:600;letter-spacing:-0.3px;}
   .header-right{display:flex;align-items:center;gap:8px;}
-  .sos-btn{background:#E7202A;border:none;border-radius:10px;width:40px;height:40px;font-size:20px;cursor:pointer;box-shadow:0 0 0 2px rgba(231,32,42,0.25);transition:transform 0.1s;flex-shrink:0;}
-  .option-pin{cursor:pointer;}
-  .leaflet-popup-content{margin:10px 12px;font-size:13px;}
-  .sos-btn:hover,.sos-btn:active{transform:scale(1.08);}
-  @media (max-width:520px){
-    .map-label-text{display:none;}
-    .build-stamp{font-size:9px;max-width:88px;}
-  }
-  .sos-overlay{position:fixed;inset:0;background:rgba(4,10,20,0.92);z-index:2000;display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;}
-  .sos-overlay.open{display:flex;}
-  .sos-panel{background:var(--navy2);border:2px solid #E7202A;border-radius:16px;max-width:460px;width:100%;padding:20px;margin-top:30px;}
-  .sos-title{font-size:20px;font-weight:800;color:#fff;text-align:center;margin-bottom:4px;}
-  .sos-sub{font-size:12px;color:var(--gray2);text-align:center;margin-bottom:18px;line-height:1.4;}
-  .sos-block{background:var(--navy3);border-radius:12px;padding:14px;margin-bottom:12px;}
-  .sos-block-label{font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;}
-  .sos-here{font-size:17px;font-weight:700;color:#fff;line-height:1.35;}
-  .sos-coords{font-size:14px;color:var(--gray1);font-family:monospace;margin-top:4px;}
-  .sos-help-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);}
-  .sos-help-row:last-child{border-bottom:none;}
-  .sos-help-name{font-size:14px;color:#fff;}
-  .sos-help-dist{font-size:12px;color:var(--gray2);}
-  .sos-btn-big{display:block;width:100%;background:#E7202A;color:#fff;border:none;border-radius:12px;padding:16px;font-size:18px;font-weight:800;cursor:pointer;margin-bottom:10px;text-align:center;text-decoration:none;}
-  .sos-btn-copy{background:var(--amber);color:var(--navy1);border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px;}
-  .sos-nav{background:var(--navy2);border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
-  .sos-close{display:block;width:100%;background:none;border:none;color:var(--gray2);font-size:14px;padding:10px;cursor:pointer;margin-top:4px;}
-  .build-stamp{font-size:9px;color:var(--gray3);letter-spacing:0.01em;text-align:right;line-height:1.25;max-width:90px;white-space:normal;}
+  .build-stamp{font-size:9px;color:var(--gray3);white-space:nowrap;letter-spacing:0.01em;}
   .status-pill{display:flex;align-items:center;gap:5px;background:rgba(46,204,113,0.12);border:1px solid rgba(46,204,113,0.3);border-radius:20px;padding:3px 9px;font-size:11px;color:var(--green);font-weight:500;}
   .status-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
@@ -55,11 +30,18 @@
   /* MAP PICKER */
   .map-picker{position:relative;}
   .map-btn{display:flex;align-items:center;gap:4px;background:var(--navy3);border:1px solid rgba(255,255,255,0.12);border-radius:7px;padding:4px 9px;font-size:11px;color:var(--gray1);cursor:pointer;font-family:'Inter',sans-serif;}
-  .map-dropdown{position:fixed;top:52px;right:8px;background:var(--navy2);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:6px;min-width:180px;z-index:2000;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.7);max-height:calc(100vh - 70px);overflow-y:auto;}
+  .map-dropdown{position:fixed;top:52px;right:8px;background:var(--navy2);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:6px;min-width:180px;z-index:300;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.7);max-height:calc(100vh - 70px);overflow-y:auto;}
   .map-dropdown.open{display:block;}
   .map-option{padding:10px 14px;border-radius:8px;font-size:14px;color:var(--gray1);cursor:pointer;display:flex;align-items:center;gap:8px;}
   .map-option:hover,.map-option:active{background:var(--navy3);}
   .map-option.selected{color:var(--amber);}
+
+  /* VEHICLE SELECTOR */
+  .vehicle-bar{background:var(--navy2);border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 14px;display:flex;gap:6px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;}
+  .vehicle-bar::-webkit-scrollbar{display:none;}
+  .v-chip{display:flex;align-items:center;gap:5px;background:var(--navy3);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:5px 12px;font-size:12px;color:var(--gray2);white-space:nowrap;cursor:pointer;flex-shrink:0;transition:all 0.2s;}
+  .v-chip:hover{border-color:rgba(245,166,35,0.4);}
+  .v-chip.active{border-color:var(--amber);color:var(--amber);background:rgba(245,166,35,0.08);}
 
   /* MAP */
   .map-wrap{position:relative;flex:0 0 35vh;overflow:hidden;background:var(--navy3);}
@@ -94,13 +76,13 @@
   .welcome h1 span{color:var(--amber);}
   .welcome p{font-size:11px;color:var(--gray2);line-height:1.5;}
 
-  /* QUICK SUGGESTION ROW */
-  .suggestion-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;}
-  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;}
+  /* 2x2 SUGGESTION GRID */
+  .suggestion-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 10px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;}
   .suggestion:hover,.suggestion:active{border-color:var(--amber);background:rgba(245,166,35,0.06);}
-  .sug-icon{font-size:26px;line-height:1;}
-  .sug-label{font-size:10px;font-weight:600;color:var(--amber);line-height:1.2;}
-  .sug-desc{font-size:10px;font-weight:400;color:var(--gray2);line-height:1.2;}
+  .sug-icon{font-size:20px;}
+  .sug-label{font-size:12px;font-weight:600;color:var(--amber);}
+  .sug-desc{font-size:11px;color:var(--gray2);}
 
   /* MESSAGES */
   .msg{display:flex;gap:8px;max-width:640px;}
@@ -144,16 +126,9 @@
   #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
   #userInput::placeholder{color:var(--gray3);}
   .voice-btn{width:40px;height:40px;border-radius:50%;border:2px solid rgba(245,166,35,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;background:rgba(245,166,35,0.08);color:var(--amber);transition:all 0.2s;flex-shrink:0;}
-  .reset-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;background:transparent;color:var(--gray2);transition:all 0.2s;flex-shrink:0;align-self:center;}
-  .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
   .voice-btn.listening{background:var(--red);border-color:var(--red);color:var(--white);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
-  .wake-bar{margin-bottom:8px;}
-  .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
-  .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
-  .wake-word-btn.active{background:rgba(245,166,35,0.12);border-color:var(--amber);color:var(--amber);animation:wakePulse 2s infinite;}
-  @keyframes wakePulse{0%,100%{border-color:var(--amber);}50%{border-color:rgba(245,166,35,0.3);}}
   .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
   .voice-status.listening-state{color:var(--red);}
   .voice-status.speaking-state{color:var(--amber);}
@@ -196,7 +171,7 @@
   .trip-btn{flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif;}
   .trip-btn.primary{background:var(--amber);color:var(--navy);}
   .trip-btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.15);color:var(--gray2);}
-  .start-overlay{display:flex;position:fixed;inset:0;background:var(--navy);z-index:600;align-items:center;justify-content:center;padding:20px;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .start-overlay{display:flex;position:fixed;inset:0;background:var(--navy);z-index:600;align-items:center;justify-content:center;padding:20px;flex-direction:column;}
   .start-overlay.hidden{display:none;}
   .start-logo{font-size:48px;margin-bottom:10px;}
   .start-title{font-size:22px;font-weight:600;margin-bottom:6px;text-align:center;}
@@ -258,166 +233,8 @@
         </div>
       </div>
     </div>
-    <div class="trip-row">
-      <div class="trip-field">
-        <span class="trip-label">Rego — optional</span>
-        <input class="trip-input" id="profileRego" placeholder="e.g. 123ABC">
-      </div>
-      <div class="trip-field">
-        <span class="trip-label">Caravan / van model — optional</span>
-        <input class="trip-input" id="profileVan" placeholder="e.g. Jayco Starcraft 19ft">
-      </div>
-    </div>
-    <div class="trip-field">
-      <span class="trip-label">Fuel you use</span>
-      <div class="trip-chips" id="profileFuelChips">
-        <div class="trip-chip" data-f="Unleaded 91" onclick="pickProfileFuel(this)">U91</div>
-        <div class="trip-chip" data-f="E10" onclick="pickProfileFuel(this)">E10</div>
-        <div class="trip-chip" data-f="Premium 95" onclick="pickProfileFuel(this)">P95</div>
-        <div class="trip-chip" data-f="Premium 98" onclick="pickProfileFuel(this)">P98</div>
-        <div class="trip-chip" data-f="Diesel" onclick="pickProfileFuel(this)">Diesel</div>
-      </div>
-    </div>
     <div class="trip-btn-row">
-      <button class="trip-btn secondary" style="flex:0 0 auto;" onclick="cancelSetup()">← Back</button>
-      <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Save & go</button>
-    </div>
-  </div>
-</div>
-
-<!-- START OVERLAY -->
-<div class="start-overlay hidden" id="startOverlay">
-  <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 16 Jul 2026, 02:09 PM AEST</div>
-  <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
-  <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
-  <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
-
-  <!-- THE TWO MODES — explained plainly, not left as examples to guess from -->
-  <div style="width:100%;max-width:320px;margin:0 auto 12px;background:var(--navy3);border-radius:12px;padding:10px 14px;">
-    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;">
-      <span style="font-size:16px;">🗺</span>
-      <div style="font-size:12px;color:var(--gray1);line-height:1.3;text-align:left;">
-        <b style="color:var(--white);">Planning a journey?</b> Tell me where — I'll size up the days, overnight stops, rest breaks and safety along the way.
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;align-items:flex-start;">
-      <span style="font-size:16px;">🚗</span>
-      <div style="font-size:12px;color:var(--gray1);line-height:1.3;text-align:left;">
-        <b style="color:var(--white);">Just driving?</b> Ask me anything nearby — fuel, food, a toilet, whatever you need right now.
-      </div>
-    </div>
-  </div>
-
-  <!-- SPEAK OR TYPE — genuine equals, not primary and fallback -->
-  <div style="width:100%;max-width:320px;margin:0 auto;display:flex;gap:10px;margin-bottom:4px;">
-    <button id="startMicBtn" onclick="startVoiceStart()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
-             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
-             background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:24px;">🎙</span>
-      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to speak</span>
-    </button>
-    <button onclick="showWhere()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
-             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
-             background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:24px;">⌨</span>
-      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to type</span>
-    </button>
-  </div>
-  <div id="startMicStatus" style="width:100%;max-width:320px;margin:2px auto 10px;font-size:12px;color:var(--amber);min-height:16px;font-weight:600;text-align:center;"></div>
-
-  <div class="start-btns" style="gap:8px;">
-    <div class="start-btn quick" id="resumeBtn" style="display:none;border-color:var(--amber);padding:10px 14px;" onclick="resumeTrip()">
-      <div class="start-btn-title" id="resumeTitle">▶ Resume trip</div>
-      <div class="start-btn-desc">Pick up where you left off</div>
-    </div>
-    <div class="start-btn quick" id="clearTripBtn" style="display:none;border-color:rgba(231,76,60,0.5);padding:10px 14px;" onclick="clearTrip()">
-      <div class="start-btn-title" id="clearTitle" style="color:var(--red);">✕ Clear trip</div>
-      <div class="start-btn-desc">Regular runs & ⭐ stops kept</div>
-    </div>
-    <div id="whereWrap" style="display:none;background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:12px;">
-      <div style="display:flex;gap:8px;align-items:center;">
-        <input class="trip-input" id="whereInput" placeholder="Type where you're going, or what you need" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
-        <button class="trip-btn primary" style="flex:0 0 auto;padding:10px 18px;" onclick="whereTo()">Go</button>
-        <button class="trip-btn secondary" style="flex:0 0 auto;padding:10px 12px;" onclick="hideWhere()" title="Cancel">✕</button>
-      </div>
-    </div>
-    <button class="start-btn quick" onclick="quickStart()" style="padding:11px 14px;background:none;border:1px solid rgba(255,255,255,0.12);">
-      <div class="start-btn-title" style="font-size:13px;color:var(--gray2);">Skip straight to chat</div>
-    </button>
-    <div class="start-btn quick" onclick="editSetup()" style="padding:11px 14px;">
-      <div class="start-btn-title" style="font-size:13px;">⚙ Edit setup</div>
-      <div class="start-btn-desc">Name · vehicle · rego · van model</div>
-    </div>
-  </div>
-  <div id="savedTripsWrap" style="display:none;width:100%;max-width:320px;margin-top:16px;">
-    <div style="font-size:10px;color:var(--gray3);text-align:center;letter-spacing:0.08em;margin-bottom:8px;">REGULAR RUNS</div>
-    <div id="savedTripsList" style="display:flex;flex-direction:column;gap:8px;"></div>
-  </div>
-</div>
-
-<!-- TRIP SETUP MODAL -->
-<div class="modal-overlay" id="tripSetupModal">
-  <div class="trip-modal">
-    <div class="trip-header">
-      <div class="trip-icon">📋</div>
-      <div class="trip-title">Plan This Trip</div>
-      <div class="trip-sub">All optional — fill in what's useful, skip the rest.</div>
-    </div>
-
-    <div class="trip-field">
-      <span class="trip-label">Destination</span>
-      <input class="trip-input" id="tripDestination" placeholder="e.g. Alice Springs via Stuart Highway">
-    </div>
-
-    <div class="trip-row">
-      <div class="trip-field">
-        <span class="trip-label">Departing — optional</span>
-        <input class="trip-input" type="date" id="tripStartDate" style="color-scheme:dark;" onfocus="try{this.showPicker && this.showPicker()}catch(e){}">
-      </div>
-    </div>
-
-    <div class="trip-field">
-      <span class="trip-label">Fuel range</span>
-      <div class="trip-chip-row" id="tripFuelChips">
-        <div class="trip-chip" onclick="selectOneChip(this)">200km</div>
-        <div class="trip-chip" onclick="selectOneChip(this)">300km</div>
-        <div class="trip-chip" onclick="selectOneChip(this)">400km</div>
-        <div class="trip-chip" onclick="selectOneChip(this)">500km</div>
-        <div class="trip-chip" onclick="selectOneChip(this)">600km</div>
-        <div class="trip-chip" onclick="selectOneChip(this)">700km</div>
-      </div>
-    </div>
-
-    <div class="trip-field">
-      <span class="trip-label">Conditions</span>
-      <div class="trip-chip-row" id="tripCondChips">
-        <div class="trip-chip" onclick="toggleTripChip(this)">Clear</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Hot</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Wet roads</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Strong wind</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Dusty / gravel</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Fog</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Storms</div>
-      </div>
-    </div>
-
-    <div class="trip-field">
-      <span class="trip-label">Passengers</span>
-      <div class="trip-chip-row" id="passengerChips">
-        <div class="trip-chip" onclick="toggleTripChip(this)">Solo</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Partner</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Kids</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Pets</div>
-        <div class="trip-chip" onclick="toggleTripChip(this)">Elderly</div>
-      </div>
-    </div>
-
-    <div class="trip-btn-row">
-      <button class="trip-btn secondary" onclick="skipTripSetup()">Skip</button>
-      <button class="trip-btn primary" onclick="saveTripSetup()">Start Trip</button>
+      <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Let's go</button>
     </div>
   </div>
 </div>
@@ -429,9 +246,10 @@
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
+    <div class="build-stamp" id="buildStamp" title="Last updated">v 17 Jul 2026, 02:53 AM AEST</div>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
-        <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
+        <span id="mapIcon">🗺</span> <span id="mapLabel">Apple Maps</span> ▾
       </button>
       <div class="map-dropdown" id="mapDropdown">
         <div class="map-option selected" onclick="selectMap('apple','🗺','Apple Maps')">🗺 Apple Maps</div>
@@ -440,51 +258,28 @@
         <div class="map-option" onclick="selectMap('maps.me','🧭','Maps.me')">🧭 Maps.me</div>
       </div>
     </div>
-    <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
+    <div class="status-pill"><div class="status-dot"></div>Ready</div>
   </div>
 </div>
 
-<!-- SOS EMERGENCY PANEL -->
-<div class="sos-overlay" id="sosOverlay" onclick="closeSOS(event)">
-  <div class="sos-panel">
-    <div class="sos-title">🆘 Emergency</div>
-    <div class="sos-sub">In any emergency, call <b>000</b>. Navigator helps you tell them exactly where you are — <b>000 knows which hospital is open and able to help tonight.</b></div>
-
-    <div id="sosSignal" style="display:none;background:rgba(231,32,42,0.15);border:1px solid #E7202A;border-radius:10px;padding:12px;font-size:13px;color:#fff;line-height:1.45;margin-bottom:12px;"></div>
-
-    <a class="sos-btn-big" href="tel:000">📞 Call 000</a>
-
-    <div class="sos-block">
-      <div class="sos-block-label">You are here — read this to 000</div>
-      <div class="sos-here" id="sosHere">Finding your location...</div>
-      <div class="sos-coords" id="sosCoords"></div>
-      <button class="sos-btn-copy" id="sosCopyBtn" onclick="copyLocation()" style="display:none;">📋 Copy location</button>
-    </div>
-
-    <div class="sos-block">
-      <div class="sos-block-label">Nearest help</div>
-      <div id="sosHelp"><div class="sos-help-dist">Searching...</div></div>
-    </div>
-
-    <button class="sos-close" onclick="closeSOS()">Close</button>
-  </div>
+<!-- VEHICLE SELECTOR -->
+<div class="vehicle-bar" id="vehicleBar">
+  <div class="v-chip active" id="v-car" onclick="selectVehicle('car')">🚗 Car</div>
+  <div class="v-chip" id="v-caravan" onclick="selectVehicle('caravan')">🚐 Caravan</div>
+  <div class="v-chip" id="v-campervan" onclick="selectVehicle('campervan')">🏕 Campervan</div>
+  <div class="v-chip" id="v-truck" onclick="selectVehicle('truck')">🚛 Truck</div>
 </div>
 
 <!-- MAP -->
 <div class="map-wrap">
   <div id="map">
-    <button id="recentreBtn" onclick="recentreMap()" title="Back to my location"
-      style="display:none;position:absolute;bottom:12px;right:12px;z-index:500;
-             width:40px;height:40px;border-radius:50%;border:2px solid var(--amber);
-             background:rgba(10,22,40,0.92);color:var(--amber);font-size:18px;
-             cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">◎</button>
-    <div class="map-placeholder" id="mapPlaceholder" onclick="openLocSheet()" style="cursor:pointer;">
+    <div class="map-placeholder" id="mapPlaceholder">
       <div class="map-placeholder-icon">🗺</div>
-      <div class="map-placeholder-text" id="mapPlaceholderText">Locating... tap to set manually</div>
+      <div class="map-placeholder-text" id="mapPlaceholderText">Locating...</div>
     </div>
   </div>
   <div class="alert-strip">
-    <div class="alert-chip gps" id="gpsChip" onclick="openLocSheet()" style="cursor:pointer;">📍 Locating...</div>
+    <div class="alert-chip gps" id="gpsChip">📍 Locating...</div>
     <div class="alert-chip wind" id="windChip">🌬 Wind: —</div>
     <div class="alert-chip fatigue" id="fatigueChip">🕐 0h 0m</div>
   </div>
@@ -492,18 +287,21 @@
 
 <!-- CONTEXT CHIPS -->
 <div class="context-panel">
-  <div class="ctx-chip active" id="vehicleChip" onclick="openVehicleSheet()">🚗 Car</div>
-  <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
-  <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()" style="display:none;">⛽ U91</div>
-  <div class="ctx-chip" id="rangeChip" onclick="setRange()" style="display:none;">🛣 Range</div>
+  <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">👩 Solo driver</div>
+  <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()">⛽ Unleaded 91</div>
+  <div class="ctx-chip" id="rangeChip" onclick="setRange()">🛣 Range: 400km</div>
   <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
-  <div class="ctx-chip" id="logChip" onclick="openFillSheet()" style="display:none;">📒 Fill-up</div>
 </div>
 
 <!-- BOTTOM -->
 <div class="bottom-panel">
   <div class="chat-area" id="chatArea">
     <div class="welcome" id="welcome">
+      <div class="welcome-top">
+        <div class="welcome-icon">🧭</div>
+        <h1 id="welcomeHeading">G'day.<br>Your <span>co-pilot</span> is ready.</h1>
+        <p>Select your vehicle above — tap the mic or a suggestion below.</p>
+      </div>
       <div class="suggestion-grid" id="suggestionGrid">
         <!-- Populated by JS based on vehicle -->
       </div>
@@ -511,13 +309,9 @@
   </div>
 
   <div class="input-area">
-    <div class="wake-bar">
-      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
-    </div>
     <div class="input-row" id="inputRow">
       <textarea id="userInput" placeholder="Or type here..." rows="1"
         onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
       <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙</button>
       <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
     </div>
@@ -551,6 +345,7 @@
   </div>
 </div>
 
+
 <!-- MAP CHOICE SHEET -->
 <div class="map-sheet" id="mapSheet" onclick="closeMapSheet(event)">
   <div class="map-sheet-inner">
@@ -566,123 +361,10 @@
   </div>
 </div>
 
-<!-- VEHICLE SHEET -->
-<div class="map-sheet" id="vehicleSheet" onclick="closeVehicleSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">What are you driving?</div>
-    <div class="map-sheet-options">
-      <button class="map-sheet-opt" onclick="chooseVehicle('car')">🚗 Car</button>
-      <button class="map-sheet-opt" onclick="chooseVehicle('caravan')">🚐 Caravan</button>
-      <button class="map-sheet-opt" onclick="chooseVehicle('campervan')">🏕 Campervan</button>
-      <button class="map-sheet-opt" onclick="chooseVehicle('truck')">🚛 Truck</button>
-    </div>
-    <button class="map-sheet-cancel" onclick="closeVehicleSheet()">Cancel</button>
-  </div>
-</div>
-
-<!-- RANGE SHEET -->
-<div class="map-sheet" id="rangeSheet" onclick="closeRangeSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">How far on your current tank?</div>
-    <div class="trip-chip-row" style="justify-content:center;margin-bottom:14px;">
-      <div class="trip-chip" onclick="chooseRange('200km')">200km</div>
-      <div class="trip-chip" onclick="chooseRange('300km')">300km</div>
-      <div class="trip-chip" onclick="chooseRange('400km')">400km</div>
-      <div class="trip-chip" onclick="chooseRange('500km')">500km</div>
-      <div class="trip-chip" onclick="chooseRange('600km')">600km</div>
-      <div class="trip-chip" onclick="chooseRange('700km')">700km</div>
-    </div>
-    <button class="map-sheet-opt" style="justify-content:center;" onclick="chooseRange(null)">Clear — don't track range</button>
-    <button class="map-sheet-cancel" onclick="closeRangeSheet()">Cancel</button>
-  </div>
-</div>
-
-<!-- FUEL SHEET -->
-<div class="map-sheet" id="fuelSheet" onclick="closeFuelSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">Fuel type</div>
-    <div class="map-sheet-options" id="fuelSheetOptions"></div>
-    <button class="map-sheet-cancel" onclick="closeFuelSheet()">Cancel</button>
-  </div>
-</div>
-
-<!-- MANUAL LOCATION SHEET -->
-<div class="map-sheet" id="locSheet" onclick="closeLocSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">Set your location manually</div>
-    <div class="trip-field">
-      <span class="trip-label">Town / suburb — e.g. Canungra QLD</span>
-      <input class="trip-input" id="locInput" placeholder="Type a place..." onkeydown="if(event.key==='Enter'){event.preventDefault();setManualLocation();}">
-    </div>
-    <div class="trip-btn-row">
-      <button class="trip-btn primary" style="flex:1;" onclick="setManualLocation()">Use this location</button>
-    </div>
-    <button class="map-sheet-cancel" onclick="closeLocSheet()">Cancel</button>
-  </div>
-</div>
-
-<!-- FILL-UP SHEET -->
-<div class="map-sheet" id="fillSheet" onclick="closeFillSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">Log a fill-up</div>
-    <div class="trip-field">
-      <span class="trip-label">Station</span>
-      <input class="trip-input" id="fillStation" placeholder="Station name">
-    </div>
-    <div class="trip-row">
-      <div class="trip-field">
-        <span class="trip-label">Litres</span>
-        <input class="trip-input" id="fillLitres" type="number" inputmode="decimal" placeholder="e.g. 62.5">
-      </div>
-      <div class="trip-field">
-        <span class="trip-label">Total $</span>
-        <input class="trip-input" id="fillCost" type="number" inputmode="decimal" placeholder="e.g. 105.40">
-      </div>
-    </div>
-    <div class="trip-field">
-      <span class="trip-label">Odometer — optional, enables L/100km</span>
-      <input class="trip-input" id="fillOdo" type="number" inputmode="numeric" placeholder="e.g. 84120">
-    </div>
-    <div class="trip-btn-row">
-      <button class="trip-btn secondary" onclick="showFuelLog()">History</button>
-      <button class="trip-btn primary" onclick="saveFill()">Save</button>
-    </div>
-    <button class="map-sheet-cancel" onclick="closeFillSheet()">Cancel</button>
-  </div>
-</div>
-
-<!-- FUEL LOG SHEET -->
-<div class="map-sheet" id="fuelLogSheet" onclick="closeFuelLog(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">Fuel log — newest first</div>
-    <div id="fuelLogList" style="max-height:40vh;overflow-y:auto;font-size:12px;color:var(--gray1);line-height:1.8;margin-bottom:12px;"></div>
-    <button class="map-sheet-opt" style="justify-content:center;" onclick="copyFuelCsv()">📋 Copy as CSV — paste into any spreadsheet</button>
-    <button class="map-sheet-cancel" onclick="closeFuelLog()">Close</button>
-  </div>
-</div>
-
-<!-- CONDITIONS SHEET -->
-<div class="map-sheet" id="condSheet" onclick="closeCondSheet(event)">
-  <div class="map-sheet-inner">
-    <div class="map-sheet-title">Driving conditions — tap all that apply</div>
-    <div class="trip-chip-row" id="condChipRow" style="justify-content:center;margin-bottom:14px;">
-      <div class="trip-chip" onclick="toggleTripChip(this)">Clear</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Hot</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Wet roads</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Strong wind</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Dusty / gravel</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Fog</div>
-      <div class="trip-chip" onclick="toggleTripChip(this)">Storms</div>
-    </div>
-    <button class="map-sheet-opt" style="justify-content:center;" onclick="applyConditions()">Done</button>
-    <button class="map-sheet-cancel" onclick="closeCondSheet()">Cancel</button>
-  </div>
-</div>
-
 <script>
-// API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
-// (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
-const API_URL = "https://delicate-credit-a17e.csbowring6.workers.dev/";
+const ANTHROPIC_KEY = "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";
+const GMAPS_KEY     = "AIzaSyCaH2RSV31clT9JlzfHODlgtmfGdBLmAUI";
+const WEATHER_KEY   = "5e1f7a4226943fdbe8872d2b7423d38b";
 
 // ── VEHICLE PROFILES ──────────────────────────────────────────────────────────
 // Fuel types available per vehicle
@@ -695,10 +377,6 @@ const FUEL_TYPES = {
 
 let selectedFuel = 'Unleaded 91'; // default
 
-// Chip display abbreviations only — full names used internally and for the AI
-const FUEL_ABBR = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'Diesel','E10':'E10'};
-function fuelChipText() { return `⛽ ${FUEL_ABBR[selectedFuel] || selectedFuel}`; }
-
 const VEHICLES = {
   car: {
     label: 'Car',
@@ -706,9 +384,10 @@ const VEHICLES = {
     range: 50,
     rangeLabel: '50km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel within 20km' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'⛽', label:'Cheapest fuel',    desc:'next 50km',           query:'Cheapest fuel in the next 50km' },
+      { icon:'☕', label:'Coffee stop',       desc:'caravan parking',      query:'Find me a coffee stop with caravan parking nearby' },
+      { icon:'🏕', label:'Campsite',          desc:'tonight nearby',       query:'Find me a campsite or caravan park for tonight' },
+      { icon:'🗺', label:'Next 20km',         desc:"what's ahead",        query:'What do I need to know about the next 20km?' },
     ],
     systemNote: 'Vehicle: standard car, no towing. Fuel range approximately 50km before next stop needed. Normal parking, any fuel station. Toll roads and traffic congestion are relevant — wind impact is not significant for a car and should not be raised unless conditions are genuinely severe.',
   },
@@ -718,9 +397,10 @@ const VEHICLES = {
     range: 300,
     rangeLabel: '300km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'van access', query:'Cheapest fuel in the next 300km I can get into with the van' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat, somewhere I can park the van?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'⛽', label:'Cheapest fuel',    desc:'next 300km',          query:'Cheapest fuel in the next 300km I can get into with the van' },
+      { icon:'☕', label:'Coffee stop',       desc:'caravan parking',      query:'Find me a coffee stop with caravan parking for the van' },
+      { icon:'🏕', label:'Campsite',          desc:'powered + dump point', query:'Find me a campsite or caravan park tonight with powered site and dump point' },
+      { icon:'🗺', label:'Next 200km',        desc:"what's ahead",        query:'What do I need to know about the next 200km?' },
     ],
     systemNote: 'Vehicle: car towing a caravan. All stops must have caravan-accessible forecourts — wide entry, drive-through, no boom gates, room to manoeuvre. Flag any access issues explicitly. Wind significantly affects towing stability and fuel range — always relevant.',
   },
@@ -730,9 +410,10 @@ const VEHICLES = {
     range: 200,
     rangeLabel: '200km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel in the next 200km for a campervan' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'⛽', label:'Cheapest fuel',    desc:'next 200km',          query:'Cheapest fuel in the next 200km for a campervan' },
+      { icon:'☕', label:'Coffee stop',       desc:'nearby',               query:'Find me a coffee stop nearby' },
+      { icon:'🏕', label:'Free camp',         desc:'self-contained ok',    query:'Find somewhere to free camp tonight — self-contained campervan' },
+      { icon:'🗺', label:'Next 150km',        desc:"what's ahead",        query:'What do I need to know about the next 150km?' },
     ],
     systemNote: 'Vehicle: self-contained campervan. Prioritise free and low-cost camping spots over paid caravan parks where self-contained facilities allow it — this is a key differentiator from caravan mode. Height clearance may be relevant. Range approximately 200km between fuel stops.',
   },
@@ -742,9 +423,10 @@ const VEHICLES = {
     range: 400,
     rangeLabel: '400km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'truck diesel', query:'Cheapest diesel in the next 400km suitable for a truck' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Nearest truck-friendly stop for a coffee or a feed, somewhere I can park the rig' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'⛽', label:'Cheapest diesel',  desc:'next 400km',          query:'Cheapest diesel in the next 400km suitable for a truck' },
+      { icon:'☕', label:'Coffee + break',    desc:'truck stop',           query:'Find me a truck stop with coffee and rest facilities' },
+      { icon:'🌉', label:'Low bridges',       desc:'+ weight limits',      query:'Are there any low bridges or weight restrictions on this route?' },
+      { icon:'🗺', label:'Next 300km',        desc:"what's ahead",        query:'What do I need to know about the next 300km for a truck?' },
     ],
     systemNote: 'Vehicle: truck. Requires truck-friendly fuel stops with diesel, adequate clearance, and room to manoeuvre. Always flag low bridges and weight restrictions proactively. Driving hour limits are a legal compliance requirement in Australia — when asked about rest breaks, treat this as mandatory, not optional, and reference fatigue management regulations if drive time suggests it is relevant. Range approximately 400km.',
   },
@@ -756,98 +438,25 @@ let gpsAddress = null;
 let weatherCtx = '';
 let messages = [];
 let busy = false;
-let lastNavReply = '';
-let lastSpoken = '';
 let selectedMap = 'apple';
 let tripContext = '';
-let currentRunDest = '';
-let pendingTripDest = null;
-
-// 👍 on an answer about a place = adopt it as the trip, no form needed
-function adoptTrip(dest) {
-  currentRunDest = dest;
-  updateSuggestions();   // chips announce route-aware mode
-  tripContext = `Destination: ${dest}.`;
-  pendingTripDest = null;
-  try {
-    localStorage.removeItem('navigator_trip_plan');
-    localStorage.setItem('navigator_last_trip', tripContext);
-    localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest, fuel:'', cond:'', passengers:'' }));
-  } catch(e) {}
-  plotTripRoute(dest);
-}
 let userName = '';
 let userVehicles = [];
-let userRego = '';
-let userVan = '';
-
-// ── LIVING GREETING — place, weather, time and name, composed fresh ───────────
-function updateGreeting() {
-  const el = document.getElementById('startTitle');
-  if (!el) return;
-  const name = (userName && userName !== 'there') ? userName : '';
-  const h = new Date().getHours();
-  const tod = h < 12 ? 'morning' : (h < 17 ? 'arvo' : 'evening');
-  let place = '';
-  if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
-  if (place && /^-?\d/.test(place)) place = ''; // raw coordinates are not a place name
-  const wx = window._wx;
-  const ps = place ? '<span>' + place + '</span>' : '';
-  let msg;
-  if (h < 5) {
-    msg = `Burning the midnight oil${name ? ', ' + name : ''} — what are we planning?`;
-  } else if (wx && place) {
-    if (/rain|drizzle|thunder/i.test(wx.desc)) msg = `Wet one in ${ps} today${name ? ', ' + name : ''} — where are we headed?`;
-    else if (wx.temp >= 33) msg = `Scorcher in ${ps} today${name ? ', ' + name : ''} — what's the plan?`;
-    else if (wx.wind >= 30) msg = `Blowy out in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-    else if (/clear|sun/i.test(wx.desc)) msg = `Another beautiful ${tod} in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-    else msg = `G'day${name ? ' ' + name : ''} — ${tod} in ${ps}. What are we up to?`;
-  } else if (place) {
-    msg = `Good ${tod} from ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-  } else {
-    msg = `Good ${tod}${name ? ', ' + name : ''} — what are we up to today?`;
-  }
-  el.innerHTML = msg;
-}
 
 // ── PROFILE SETUP (first time only — name + owned vehicles) ──────────────────
 function toggleProfileVehicle(el) {
   el.classList.toggle('selected');
 }
 
-// Back out of setup without saving — returns to the start screen.
-// On first run there's no profile yet, so a minimal one is created rather than
-// leaving the app with nothing.
-function cancelSetup() {
-  const hasProfile = (() => { try { return !!localStorage.getItem('navigator_profile'); } catch(e) { return false; } })();
-  if (!hasProfile) {
-    userName = userName || 'there';
-    userVehicles = userVehicles.length ? userVehicles : ['car'];
-    try { localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego:'', van:'', fuel: selectedFuel })); } catch(e) {}
-    applyProfile();
-  }
-  document.getElementById('profileOverlay').classList.add('hidden');
-  document.getElementById('startOverlay').classList.remove('hidden');
-}
-
-function pickProfileFuel(el) {
-  document.querySelectorAll('#profileFuelChips .trip-chip').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-}
-
 function saveProfile() {
   const name = document.getElementById('profileName').value.trim();
   const selected = Array.from(document.querySelectorAll('.profile-vehicle-opt.selected')).map(el => el.dataset.v);
-  const fuelEl = document.querySelector('#profileFuelChips .trip-chip.selected');
 
   userName = name || 'there';
   userVehicles = selected.length ? selected : ['car'];
-  userRego = document.getElementById('profileRego').value.trim();
-  userVan = document.getElementById('profileVan').value.trim();
-  if (fuelEl) { selectedFuel = fuelEl.dataset.f; document.getElementById('fuelTypeChip').textContent = fuelChipText(); }
 
   try {
-    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego: userRego, van: userVan, fuel: selectedFuel }));
+    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles }));
   } catch(e) {}
 
   document.getElementById('profileOverlay').classList.add('hidden');
@@ -855,32 +464,23 @@ function saveProfile() {
   document.getElementById('startOverlay').classList.remove('hidden');
 }
 
-// ── EDIT SETUP — reopen the profile, prefilled ────────────────────────────────
-function editSetup() {
-  document.getElementById('profileName').value = userName === 'there' ? '' : userName;
-  document.getElementById('profileRego').value = userRego || '';
-  document.getElementById('profileVan').value = userVan || '';
-  document.querySelectorAll('.profile-vehicle-opt').forEach(el => {
-    el.classList.toggle('selected', userVehicles.includes(el.dataset.v));
-  });
-  document.querySelectorAll('#profileFuelChips .trip-chip').forEach(el => {
-    el.classList.toggle('selected', el.dataset.f === selectedFuel);
-  });
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-  document.getElementById('profileOverlay').classList.remove('hidden');
-}
-
 function applyProfile() {
-  // Personalise greetings — composed live from place, weather and time
-  updateGreeting();
+  // Personalise greetings
+  document.getElementById('startTitle').innerHTML = `Welcome back, <span>${userName}</span>`;
   const wh = document.getElementById('welcomeHeading');
   if (wh) wh.innerHTML = `G'day ${userName}.<br>Your <span>co-pilot</span> is ready.`;
 
-  // First owned vehicle becomes the starting default — all vehicles stay selectable
+  // Filter vehicle bar to only show owned vehicles
+  const bar = document.getElementById('vehicleBar');
+  const allChips = bar.querySelectorAll('.v-chip');
+  allChips.forEach(chip => {
+    const id = chip.id.replace('v-','');
+    chip.style.display = userVehicles.includes(id) ? 'flex' : 'none';
+  });
+  // Select the first owned vehicle as default
   if (userVehicles.length) {
     selectVehicle(userVehicles[0]);
   }
-  renderVehiclePrompt();
 }
 
 function loadProfile() {
@@ -890,252 +490,29 @@ function loadProfile() {
       const p = JSON.parse(saved);
       userName = p.name;
       userVehicles = p.vehicles;
-      userRego = p.rego || '';
-      userVan = p.van || '';
-      if (p.fuel) selectedFuel = p.fuel;
       applyProfile();
       document.getElementById('profileOverlay').classList.add('hidden');
       document.getElementById('startOverlay').classList.remove('hidden');
     } else {
       // First time ever — show profile setup
       document.getElementById('profileOverlay').classList.remove('hidden');
-      stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+      document.getElementById('startOverlay').classList.add('hidden');
     }
   } catch(e) {
     document.getElementById('profileOverlay').classList.remove('hidden');
   }
 }
 
-// ── FRONT-SCREEN VOICE — tap the mic, say anything, it works out what you meant ──
-let startRec = null;
-
-function startVoiceStart() {
-  const btn = document.getElementById('startMicBtn');
-  const status = document.getElementById('startMicStatus');
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    status.textContent = 'Voice not supported here — use the buttons below.';
-    return;
-  }
-  unlockAudio();
-  // Already listening? Stop.
-  if (startRec) { try { startRec.stop(); } catch(e) {} startRec = null; return; }
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  startRec = new SR();
-  startRec.lang = 'en-AU';
-  startRec.continuous = false;
-  startRec.interimResults = true;
-
-  let heard = '';
-  btn.style.background = 'rgba(231,32,42,0.18)';
-  btn.style.borderColor = '#E7202A';
-  btn.style.boxShadow = '0 0 0 8px rgba(231,32,42,0.15)';
-  status.textContent = '🔴 Listening — tell me what you\'re doing';
-
-  startRec.onresult = e => {
-    let full = '';
-    for (let i = 0; i < e.results.length; i++) full += e.results[i][0].transcript + ' ';
-    heard = full.trim();
-    if (heard) status.textContent = '"' + heard + '"';
-  };
-  startRec.onerror = () => { resetStartMic(); };
-  startRec.onend = () => {
-    resetStartMic();
-    if (heard) routeStartSpeech(heard);
-  };
-  try { startRec.start(); } catch(e) { resetStartMic(); }
-}
-
-function stopStartMic() {
-  if (startRec) { try { startRec.onend = null; startRec.stop(); } catch(e) {} startRec = null; }
-  resetStartMic();
-}
-
-function resetStartMic() {
-  const btn = document.getElementById('startMicBtn');
-  const status = document.getElementById('startMicStatus');
-  if (btn) {
-    btn.style.background = 'rgba(245,166,35,0.12)';
-    btn.style.borderColor = 'var(--amber)';
-    btn.style.boxShadow = '0 0 0 0 rgba(245,166,35,0.4)';
-  }
-  if (status) status.textContent = '';
-  startRec = null;
-}
-
-// Work out what they meant and send them the right way
-function routeStartSpeech(text) {
-  const t = text.trim();
-
-  // "Resume" / "continue my trip"
-  if (/^(resume|continue|carry on|pick up|back on)\b/i.test(t) && currentRunDestSaved()) {
-    resumeTrip();
-    return;
-  }
-  // "Just driving" / "nowhere in particular"
-  if (/^(just driving|nowhere|no destination|nothing in particular|just (a )?drive|not sure|dunno)\b/i.test(t)) {
-    quickStart();
-    return;
-  }
-  // A destination? "We're off to Toowoomba", "Going to Cairns", "Take me to Cairns"
-  // But NOT a request: "take me to the nearest servo" — "take me to X" is only a
-  // REQUEST when X is a facility word (nearest/closest/a servo), not a place name.
-  const looksLikeQuestion =
-    /\?$/.test(t) ||
-    /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|i need|i want|need a|need some|looking for)\b/i.test(t) ||
-    /\b(the nearest|the closest|a servo|a toilet|a cafe|a chemist|a gym)\b/i.test(t) ||
-    (/^(take me|get me)\b/i.test(t) && /\b(nearest|closest|servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist)\b/i.test(t)) ||
-    (!/^(take me|get me)\b/i.test(t) && /\b(servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist|nearest|closest|cheapest)\b/i.test(t));
-
-  const destMatch = looksLikeQuestion ? null : t.match(/(?:going to|off to|heading (?:to|for)|drive to|driving to|travelling to|take me to|get me to|we'?re (?:going|off) to|plan (?:me )?a (?:journey|trip) to|to)\s+([A-Za-z][A-Za-z\s'\-]{2,30}?)(?:\s+(?:for|today|tomorrow|this|next|and)\b|[.,!?]|$)/i);
-  if (destMatch) {
-    let dest = destMatch[1].trim();
-    // Strip trailing pleasantries — "Cairns please" must never become the town name
-    dest = dest.replace(/\s+(please|thanks|thank you|mate|cheers|now|eh|okay|ok)\s*$/i, '').trim();
-    // Must look like a real place — not "the nearest", "somewhere", "a servo"
-    const notAPlace = /^(the|a|an|some|any|somewhere|anywhere|nearest|closest|next)\b/i.test(dest);
-    if (dest && !notAPlace) {
-      document.getElementById('whereInput').value = dest;
-      whereTo();
-      return;
-    }
-  }
-  // Anything else — treat it as a question and answer it straight away
-  quickStart();
-  unlockAudio();          // make sure the reply will actually be spoken
-  setTimeout(() => {
-    document.getElementById('userInput').value = t;
-    sendMessage();
-  }, 400);
-}
-
-function currentRunDestSaved() {
-  try { const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); return !!raw.dest; }
-  catch(e) { return false; }
-}
-
-// ── WHERE ARE YOU GOING — one question, the road decides what it is ──────────
-function showWhere() {
-  const w = document.getElementById('whereWrap');
-  w.style.display = 'block';
-  setTimeout(() => document.getElementById('whereInput').focus(), 150);
-}
-
-function hideWhere() {
-  const w = document.getElementById('whereWrap');
-  w.style.display = 'none';
-  document.getElementById('whereInput').value = '';
-}
-
-async function whereTo() {
-  const q = document.getElementById('whereInput').value.trim();
-  if (!q) { quickStart(); return; }
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-  addMsg('user', 'Heading to ' + q);
-  showTyping();
-  try {
-    if (!gps) {
-      hideTyping();
-      adoptTrip(q);
-      const msg = `${q} it is — set as your trip. I'll draw the route once I know where you are: tap the 📍 pin to set your location.`;
-      addMsg('nav', msg); speak(msg);
-      return;
-    }
-    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-    const gd = await g.json();
-    if (!gd || !gd.length) {
-      hideTyping();
-      addMsg('nav', `Couldn't place "${q}" — try the town plus state, or just ask me things as you go.`);
-      return;
-    }
-    const dlat = parseFloat(gd[0].lat), dlon = parseFloat(gd[0].lon);
-    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=false`);
-    const rd = await r.json();
-    hideTyping();
-    if (!rd.routes || !rd.routes.length) {
-      addMsg('nav', `Couldn't route to ${q} — ask me anything and we'll work it out as we go.`);
-      return;
-    }
-    const km = Math.round(rd.routes[0].distance / 1000);
-    const rawHrs = rd.routes[0].duration / 3600;
-    // Adjust for what they're driving — a big day towing is bigger
-    const factor = (currentVehicle==='caravan'||currentVehicle==='campervan') ? 1.3 : (currentVehicle==='truck' ? 1.2 : 1.1);
-    const hrs = Math.round(rawHrs * factor * 10) / 10;
-    const vLabel = VEHICLES[currentVehicle].label.toLowerCase();
-    if (hrs >= 9) {
-      // Multi-day run
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}: a multi-day run. Set as your trip and the route's on the map. Ask me to plan your days and I'll break it into overnights.`;
-      addMsg('nav', msg); speak(msg);
-    } else if (hrs >= 5) {
-      // A big single day — put the safety choice to the driver
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}. That's a big day to do safely in one hit. Tough it out with proper breaks, or want me to find an overnight stop partway?`;
-      addMsg('nav', msg); speak(msg);
-    } else if (hrs >= 3 || km >= 250) {
-      // A solid day trip — full trip treatment
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrs} hours in the ${vLabel}. Set as your trip and the route's on the map. Ask me for fuel and stops as you go.`;
-      addMsg('nav', msg); speak(msg);
-    } else {
-      // A local run — no ceremony
-      const mins = Math.round(hrs * 60);
-      const msg = `${q} is ${km}km, about ${mins} minutes. Local run — what do you need on the way: fuel, coffee, or straight there?`;
-      addMsg('nav', msg); speak(msg);
-    }
-  } catch(e) {
-    hideTyping();
-    addMsg('nav', 'Routing hiccup — ask me anything and we\'ll sort it as we go.');
-  }
-}
-
-// ── WHAT ARE YOU DRIVING? ─────────────────────────────────────────────────────
-// Own one vehicle → state it (no friction, but visible if wrong).
-// Own several → ask, because the wrong vehicle means wrong advice all day.
-function renderVehiclePrompt() {
-  const el = document.getElementById('vehiclePrompt');
-  if (!el) return;
-  const owned = (userVehicles && userVehicles.length) ? userVehicles : ['car'];
-
-  if (owned.length === 1) {
-    const v = VEHICLES[owned[0]];
-    el.innerHTML = `<div style="text-align:center;font-size:13px;color:var(--gray2);">
-        Driving your <b style="color:var(--amber);">${v.icon} ${v.label}</b> today?
-        <span onclick="editSetup()" style="color:var(--gray3);text-decoration:underline;cursor:pointer;margin-left:4px;">change</span>
-      </div>`;
-    return;
-  }
-
-  el.innerHTML = `
-    <div style="text-align:center;font-size:13px;color:var(--gray1);margin-bottom:8px;">What are you driving today?</div>
-    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-      ${owned.map(k => {
-        const v = VEHICLES[k];
-        const on = (k === currentVehicle);
-        return `<button onclick="pickTodaysVehicle('${k}')"
-          style="background:${on ? 'rgba(245,166,35,0.15)' : 'var(--navy3)'};
-                 border:1px solid ${on ? 'var(--amber)' : 'rgba(255,255,255,0.12)'};
-                 color:${on ? 'var(--amber)' : 'var(--gray1)'};
-                 border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">
-          ${v.icon} ${v.label}</button>`;
-      }).join('')}
-    </div>`;
-}
-
-function pickTodaysVehicle(k) {
-  selectVehicle(k);
-  renderVehiclePrompt();
-}
-
 // ── START OVERLAY / TRIP SETUP ────────────────────────────────────────────────
 function quickStart() {
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-  // Restore safety-relevant trip context only — fuel is handled by the fuel tile and chips
+  document.getElementById('startOverlay').classList.add('hidden');
+  // Pull last saved trip context even on Quick Start
   try {
     const lastTrip = localStorage.getItem('navigator_last_trip');
     if (lastTrip) {
       tripContext = lastTrip;
       const parsed = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
+      if (parsed.fuel) document.getElementById('rangeChip').textContent = `⛽ Range: ${parsed.fuel}`;
       if (parsed.cond) document.getElementById('condChip').textContent = `🌤 ${parsed.cond}`;
       if (parsed.passengers && parsed.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     }
@@ -1143,7 +520,7 @@ function quickStart() {
 }
 
 function openTripSetup() {
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+  document.getElementById('startOverlay').classList.add('hidden');
   document.getElementById('tripSetupModal').classList.add('visible');
 }
 
@@ -1155,24 +532,17 @@ function toggleTripChip(el) {
   el.classList.toggle('selected');
 }
 
-function selectOneChip(el) {
-  // Single-select: picking one clears its siblings; tap again to clear
-  const wasSelected = el.classList.contains('selected');
-  el.parentElement.querySelectorAll('.trip-chip').forEach(c => c.classList.remove('selected'));
-  if (!wasSelected) el.classList.add('selected');
-}
-
 function saveTripSetup() {
   const dest = document.getElementById('tripDestination').value.trim();
   const start = document.getElementById('tripStartDate').value;
-  const fuelChip = document.querySelector('#tripFuelChips .trip-chip.selected');
-  const fuel = fuelChip ? fuelChip.textContent : '';
-  const cond = Array.from(document.querySelectorAll('#tripCondChips .trip-chip.selected')).map(c => c.textContent).join(', ');
+  const end = document.getElementById('tripEndDate').value;
+  const fuel = document.getElementById('tripFuelRange').value.trim();
+  const cond = document.getElementById('tripConditions').value.trim();
   const passengers = Array.from(document.querySelectorAll('#passengerChips .trip-chip.selected')).map(c => c.textContent).join(', ');
 
   const parts = [];
   if (dest) parts.push(`Destination: ${dest}.`);
-  if (start) parts.push(`Departed: ${start}.`);
+  if (start || end) parts.push(`Trip dates: ${start || '?'} to ${end || '?'}.`);
   if (fuel) { parts.push(`Fuel range: ${fuel}.`); document.getElementById('rangeChip').textContent = `⛽ Range: ${fuel}`; }
   if (cond) { parts.push(`Conditions: ${cond}.`); document.getElementById('condChip').textContent = `🌤 ${cond}`; }
   if (passengers) parts.push(`Passengers: ${passengers}.`);
@@ -1186,131 +556,12 @@ function saveTripSetup() {
   // Persist for next session's Quick Start
   try {
     localStorage.setItem('navigator_last_trip', tripContext);
-    localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest, fuel, cond, passengers }));
+    localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ fuel, cond, passengers }));
   } catch(e) {}
 
   if (tripContext) {
     addMsg('nav', `Trip noted${dest ? ' — heading to ' + dest : ''}. I'll keep all of this in mind. What do you need?`);
   }
-
-  // Remember this journey as a regular run (destination is the key)
-  if (dest) {
-    currentRunDest = dest;
-    try { localStorage.removeItem('navigator_trip_plan'); } catch(e) {}
-    plotTripRoute(dest);
-    try {
-      let runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-      runs = runs.filter(r => r.dest.toLowerCase() !== dest.toLowerCase());
-      runs.unshift({ dest, passengers, vehicle: currentVehicle });
-      localStorage.setItem('navigator_saved_trips', JSON.stringify(runs.slice(0,5)));
-    } catch(e) {}
-  }
-}
-
-// ── RESUME TRIP — pick up a multi-day trip on any launch ──────────────────────
-function renderResumeTrip() {
-  try {
-    const ctx = localStorage.getItem('navigator_last_trip');
-    const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
-    if (ctx && raw.dest) {
-      document.getElementById('resumeBtn').style.display = 'block';
-      document.getElementById('clearTripBtn').style.display = 'block';
-      document.getElementById('resumeTitle').textContent = '▶ Resume trip: ' + raw.dest;
-      document.getElementById('clearTitle').textContent = '✕ Clear trip: ' + raw.dest;
-    }
-  } catch(e) {}
-}
-
-function clearTrip() {
-  if (!confirm('End this trip? Regular runs & ⭐ stops are kept.')) return;
-  try {
-    localStorage.removeItem('navigator_last_trip');
-    localStorage.removeItem('navigator_last_trip_raw');
-    localStorage.removeItem('navigator_trip_plan');
-  } catch(e) {}
-  tripContext = '';
-  currentRunDest = '';
-  updateSuggestions();   // back to nearby mode
-  window._tripRoute = null;
-  if (routeLine && window._navMap) { window._navMap.removeLayer(routeLine); routeLine = null; }
-  if (routeDestMarker && window._navMap) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
-  clearOptionPins();
-  document.getElementById('resumeBtn').style.display = 'none';
-  document.getElementById('clearTripBtn').style.display = 'none';
-}
-
-function resumeTrip() {
-  try {
-    const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
-    tripContext = localStorage.getItem('navigator_last_trip') || '';
-    const lockedPlan = localStorage.getItem('navigator_trip_plan');
-    if (lockedPlan) tripContext += ' Agreed plan for this trip: ' + lockedPlan;
-    currentRunDest = raw.dest || '';
-    updateSuggestions();   // chips announce route-aware mode
-    if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
-    if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
-    stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-    plotTripRoute(currentRunDest);
-    addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
-  } catch(e) {}
-}
-
-// ── REGULAR RUNS — one-tap recall of saved journeys ───────────────────────────
-function saveStopForRun(place) {
-  if (!currentRunDest) return;
-  try {
-    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-    const r = runs.find(x => x.dest === currentRunDest);
-    if (!r) return;
-    r.stops = [...new Set([...(r.stops || []), place])].slice(-6);
-    localStorage.setItem('navigator_saved_trips', JSON.stringify(runs));
-  } catch(e) {}
-}
-
-function renderSavedTrips() {
-  try {
-    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-    const wrap = document.getElementById('savedTripsWrap');
-    const list = document.getElementById('savedTripsList');
-    if (!runs.length) { wrap.style.display = 'none'; return; }
-    list.innerHTML = runs.map((r, i) => `
-      <button class="start-btn quick" style="padding:12px;text-align:left;position:relative;" onclick="recallTrip(${i})">
-        <div class="start-btn-title" style="font-size:13px;">🔁 ${r.dest}</div>
-        <div class="start-btn-desc">${VEHICLES[r.vehicle] ? VEHICLES[r.vehicle].icon + ' ' + VEHICLES[r.vehicle].label : ''}${r.passengers ? ' · ' + r.passengers : ''}${r.stops && r.stops.length ? ' · ⭐' + r.stops.length : ''}</div>
-        <span onclick="event.stopPropagation();deleteRun(${i})" style="position:absolute;top:8px;right:12px;color:var(--gray3);font-size:14px;padding:4px;">✕</span>
-      </button>
-    `).join('');
-    wrap.style.display = 'block';
-  } catch(e) {}
-}
-
-function deleteRun(i) {
-  try {
-    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-    if (!runs[i]) return;
-    if (!confirm(`Remove the ${runs[i].dest} run and its ⭐ stops?`)) return;
-    runs.splice(i, 1);
-    localStorage.setItem('navigator_saved_trips', JSON.stringify(runs));
-    renderSavedTrips();
-  } catch(e) {}
-}
-
-function recallTrip(i) {
-  try {
-    const runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
-    const r = runs[i];
-    if (!r) return;
-    const parts = [`Destination: ${r.dest}.`];
-    if (r.passengers) parts.push(`Passengers: ${r.passengers}.`);
-    if (r.stops && r.stops.length) parts.push(`Driver's favourite stops on this run: ${r.stops.join(', ')}.`);
-    tripContext = parts.join(' ');
-    currentRunDest = r.dest;
-    if (r.vehicle && VEHICLES[r.vehicle]) selectVehicle(r.vehicle);
-    if (r.passengers && r.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
-    stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-    plotTripRoute(currentRunDest);
-    addMsg('nav', `Back on the ${r.dest} run. Conditions and fuel range are fresh — set them if today's different. What do you need?`);
-  } catch(e) {}
 }
 
 // ── MAP PREFERENCE (remembered per device) ────────────────────────────────────
@@ -1352,149 +603,24 @@ let isListening = false;
 let driveStart = Date.now();
 const synth = window.speechSynthesis;
 
-// ── TRIP ROUTE ON THE MAP (OSRM over OpenStreetMap roads) ────────────────────
-let routeLine = null;
-
-// ── OPTION PINS — show the servos/places we just offered, numbered, on the map ──
-let optionPins = [];
-
-function clearOptionPins() {
-  if (!window._navMap) { optionPins = []; return; }
-  optionPins.forEach(p => { try { window._navMap.removeLayer(p); } catch(e) {} });
-  optionPins = [];
-}
-
-// places: [{name, km, price, lat, lon}] — first is the "pick" (amber), rest muted
-// Accumulate pins across one question — "gym then coffee" pins both
-function addPendingPins(pins) {
-  if (!window._pendingPins) window._pendingPins = [];
-  pins.forEach(p => {
-    if (!window._pendingPins.some(x => x.name === p.name)) window._pendingPins.push(p);
-  });
-}
-
-function showOptionPins(places) {
-  if (!window._navMap || !window.L || !places || !places.length) return;
-  clearOptionPins();
-  window._userMovedMap = false;   // new answer, new pins — the app takes the wheel again
-  const rb = document.getElementById('recentreBtn');
-  if (rb) rb.style.display = 'none';
-  const pts = [];
-  places.slice(0, 6).forEach((p, i) => {
-    if (!p.lat || !p.lon) return;
-    const isTop = i === 0;
-    const noPrice = (p.price == null);
-    const bg = noPrice ? 'transparent' : (isTop ? '#F5A623' : '#5A6C80');
-    const brd = noPrice ? '#F5A623' : '#0A1628';
-    const txc = noPrice ? '#F5A623' : '#0A1628';
-    const icon = L.divIcon({
-      html: `<div style="width:28px;height:28px;background:${bg};border:2px solid ${brd};border-radius:50%;
-             display:flex;align-items:center;justify-content:center;color:${txc};font-weight:800;font-size:14px;
-             box-shadow:0 2px 6px rgba(0,0,0,0.4);pointer-events:none;">${i+1}</div>`,
-      className: 'option-pin', iconSize: [28,28], iconAnchor: [14,14], popupAnchor: [0,-14],
-    });
-    const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
-    const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
-    const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${p.mins}'` : '')) : '';
-    const safeName = p.name.replace(/'/g, "").replace(/"/g, '');
-    const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:155px;">
-        <b>${i+1}. ${p.name}</b><br>
-        <span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
-        <span style="color:#555;">${kmTxt}</span>
-        <button onclick="navigateTo('${safeName}', ${p.lat}, ${p.lon})"
-          style="margin-top:8px;width:100%;background:#F5A623;color:#0A1628;border:none;
-                 border-radius:6px;padding:9px 10px;font-weight:700;font-size:13px;cursor:pointer;">
-          Navigate here
-        </button>
-      </div>`;
-    m.bindPopup(popupHtml, { closeButton: true, autoPan: true });
-    // Explicit tap handler — divIcons on touch don't always fire the default popup
-    m.on('click', function(){ this.openPopup(); });
-    optionPins.push(m);
-    pts.push([p.lat, p.lon]);
-  });
-  // Auto-fit so all options AND the driver are visible
-  if (pts.length && gps) {
-    pts.push([gps.lat, gps.lon]);
-    try {
-      window._navMap.fitBounds(L.latLngBounds(pts), { padding: [40,40], maxZoom: 14 });
-    } catch(e) {}
-  }
-}
-let routeDestMarker = null;
-
-async function plotTripRoute(dest) {
-  if (!dest) return;
-  if (!gps || !window._navMap || !window.L) {
-    window._pendingRouteDest = dest; // map not ready yet — draw when it is
-    return;
-  }
-  try {
-    // Where is the destination? (cached from a previous plot of the same trip)
-    let dlat, dlon;
-    if (window._tripRoute && window._tripRoute.dest === dest && window._tripRoute.dlat) {
-      dlat = window._tripRoute.dlat; dlon = window._tripRoute.dlon;
-    } else {
-      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-      const gd = await g.json();
-      if (!gd || !gd.length) return;
-      dlat = parseFloat(gd[0].lat); dlon = parseFloat(gd[0].lon);
-    }
-    // The driving route
-    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
-    const rd = await r.json();
-    if (!rd.routes || !rd.routes.length) return;
-    // Give the AI the real numbers: distance and car-pace driving time.
-    // Remember where this was computed from, so deviation triggers a refresh.
-    window._tripRoute = {
-      dest: dest,
-      km: Math.round(rd.routes[0].distance / 1000),
-      hours: Math.round((rd.routes[0].duration / 3600) * 10) / 10,
-      originLat: gps.lat, originLon: gps.lon,
-      dlat: dlat, dlon: dlon,
-    };
-    const latlngs = rd.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-    // Keep the road geometry so "cheapest fuel ahead" can filter to the corridor
-    window._tripRoute.path = rd.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lon: c[0] }));
-    if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
-    if (routeDestMarker) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
-    routeLine = L.polyline(latlngs, { color: '#F5A623', weight: 4, opacity: 0.85 }).addTo(window._navMap);
-    routeDestMarker = L.marker([dlat, dlon], { icon: L.divIcon({
-      html: '<div style="width:14px;height:14px;background:#2ECC71;border:3px solid #0A1628;border-radius:50%;box-shadow:0 0 0 3px rgba(46,204,113,0.3);"></div>',
-      className: '', iconSize: [14,14], iconAnchor: [7,7],
-    })}).addTo(window._navMap);
-    window._navMap.fitBounds(routeLine.getBounds(), { padding: [20,20] });
-  } catch(e) {}
-}
-
 // ── VEHICLE SELECTOR ──────────────────────────────────────────────────────────
-function openVehicleSheet() { document.getElementById('vehicleSheet').classList.add('open'); }
-function closeVehicleSheet(e) {
-  if (!e || e.target === document.getElementById('vehicleSheet')) {
-    document.getElementById('vehicleSheet').classList.remove('open');
-  }
-}
-function chooseVehicle(id) {
-  selectVehicle(id);
-  document.getElementById('vehicleSheet').classList.remove('open');
-}
-
 function selectVehicle(id) {
   currentVehicle = id;
-  const v = VEHICLES[id];
-  document.getElementById('vehicleChip').textContent = `${v.icon} ${v.label}`;
-  // Range chip stays as the user set it — vehicle switch doesn't stamp a number
+  document.querySelectorAll('.v-chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('v-'+id).classList.add('active');
+  // Update range chip
+  document.getElementById('rangeChip').textContent = '🛣 Range: ' + VEHICLES[id].rangeLabel;
   // Update fuel type to first available for this vehicle
   const fuels = FUEL_TYPES[id] || FUEL_TYPES.car;
   // Only reset if current fuel not available for new vehicle
   if (!fuels.includes(selectedFuel)) {
     selectedFuel = fuels[0];
-    document.getElementById('fuelTypeChip').textContent = fuelChipText();
+    document.getElementById('fuelTypeChip').textContent = `⛽ ${selectedFuel}`;
   }
   // Truck always gets diesel
   if (id === 'truck') {
     selectedFuel = 'Diesel';
-    document.getElementById('fuelTypeChip').textContent = fuelChipText();
+    document.getElementById('fuelTypeChip').textContent = '⛽ Diesel';
   }
   // Update suggestions
   updateSuggestions();
@@ -1504,16 +630,11 @@ function updateSuggestions() {
   const v = VEHICLES[currentVehicle];
   const grid = document.getElementById('suggestionGrid');
   if (!grid) return;
-  // The sub-label says which brain is running, so the behaviour is never a surprise
-  const onTrip = !!currentRunDest;
-  const modeDesc = onTrip
-    ? { 'Servo':'ahead on route', 'Break':'on your way', 'Toilets':'on your way' }
-    : { 'Servo':'nearby', 'Break':'nearby', 'Toilets':'nearest' };
   grid.innerHTML = v.suggestions.map(s => `
     <div class="suggestion" onclick="suggest('${s.query.replace(/'/g,"\\'")}')">
       <span class="sug-icon">${s.icon}</span>
       <span class="sug-label">${s.label}</span>
-      <span class="sug-desc">${modeDesc[s.label] || s.desc || ''}</span>
+      <span class="sug-desc">${s.desc}</span>
     </div>
   `).join('');
 }
@@ -1522,8 +643,8 @@ function updateSuggestions() {
 let gpsRetries = 0;
 
 function initGPS() {
-  if (!navigator.geolocation) { if (!gpsAddress) updateGps('📍 No GPS — tap to set manually'); return; }
-  if (!gpsAddress) updateGps('📍 Locating... (or tap to set)');
+  if (!navigator.geolocation) { updateGps('📍 GPS unavailable on this browser'); return; }
+  updateGps('📍 Locating...');
   navigator.geolocation.getCurrentPosition(async pos => {
     gpsRetries = 0;
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
@@ -1532,28 +653,18 @@ function initGPS() {
       const d = await r.json();
       const suburb = d.address?.suburb||d.address?.town||d.address?.village||d.address?.county||'';
       const state  = d.address?.state||'';
-      if (suburb) {
-        gpsAddress = `${suburb}, ${state}`;
-      } else if (!gpsAddress || /^📍?\s*-?\d/.test(gpsAddress.replace('📍 ',''))) {
-        // Only fall back to raw numbers if we don't already hold a real name
-        gpsAddress = `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}`;
-      }
-    } catch {
-      if (!gpsAddress) gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`;
-    }
+      gpsAddress = suburb ? `${suburb}, ${state}` : `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}`;
+    } catch { gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`; }
     updateGps('📍 ' + gpsAddress);
     document.getElementById('mapPlaceholderText').textContent = gpsAddress;
-    updateGreeting();
     loadGoogleMaps();
     fetchWeather();
   }, err => {
-    // A remembered manual location beats a failed GPS attempt — leave it be
-    if (gpsAddress && gpsAddress.includes('(manual)')) return;
     // Report the REAL reason, not a generic guess
     const messages = {
-      1: '📍 Blocked — tap to set manually',
-      2: '📍 No fix — tap to set manually',
-      3: '📍 Timed out — tap to set manually',
+      1: '📍 Location blocked — check browser permission',
+      2: '📍 Position unavailable — retrying...',
+      3: '📍 Location timed out — retrying...',
     };
     updateGps(messages[err.code] || '📍 Location error — retrying...');
     document.getElementById('mapPlaceholderText').textContent = messages[err.code] || 'Location error';
@@ -1573,56 +684,6 @@ function initGPS() {
 }
 
 function updateGps(text) { document.getElementById('gpsChip').textContent = text; }
-
-// ── MANUAL LOCATION — for blocked laptops and armchair trip planning ─────────
-function openLocSheet() {
-  document.getElementById('locSheet').classList.add('open');
-  setTimeout(() => document.getElementById('locInput').focus(), 300);
-}
-function closeLocSheet(e) {
-  if (!e || e.target === document.getElementById('locSheet')) {
-    document.getElementById('locSheet').classList.remove('open');
-  }
-}
-async function setManualLocation() {
-  const q = document.getElementById('locInput').value.trim();
-  if (!q) return;
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-    const d = await r.json();
-    if (d && d.length) {
-      gps = { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
-      gpsAddress = q + ' (manual)';
-      try { localStorage.setItem('navigator_manual_loc', JSON.stringify({ lat: gps.lat, lon: gps.lon, label: q })); } catch(e) {}
-      updateGps('📍 ' + gpsAddress);
-      document.getElementById('mapPlaceholderText').textContent = gpsAddress;
-      loadGoogleMaps();
-      fetchWeather();
-      document.getElementById('locSheet').classList.remove('open');
-    } else {
-      alert('Couldn\'t find that place — try town plus state, e.g. "Canungra QLD".');
-    }
-  } catch(e) {
-    alert('Location lookup failed — check your connection and try again.');
-  }
-}
-
-// Restore a remembered manual location instantly at launch —
-// a real GPS fix, if permitted, overrides it moments later.
-function loadManualLocation() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('navigator_manual_loc') || 'null');
-    if (saved && saved.lat) {
-      gps = { lat: saved.lat, lon: saved.lon };
-      gpsAddress = saved.label + ' (manual)';
-      updateGps('📍 ' + gpsAddress);
-      document.getElementById('mapPlaceholderText').textContent = gpsAddress;
-      loadGoogleMaps();
-      fetchWeather();
-      updateGreeting();
-    }
-  } catch(e) {}
-}
 
 // ── OPENSTREETMAP (free, no API key, no billing) ─────────────────────────────
 function loadGoogleMaps() {
@@ -1668,6 +729,7 @@ function initOSMMap() {
     scrollWheelZoom:   false,
   }).setView([gps.lat, gps.lon], 15);
 
+  // CartoDB dark matter — free, no key
   // CartoDB Voyager — light clean style, excellent road visibility, free no key
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     subdomains: 'abcd',
@@ -1690,37 +752,16 @@ function initOSMMap() {
   setTimeout(() => {
     map.invalidateSize(true);
     map.setView([gps.lat, gps.lon], 15);
-    if (window._pendingRouteDest) { plotTripRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
-    if (window._pendingOptionPins) { showOptionPins(window._pendingOptionPins); window._pendingOptionPins = null; }
   }, 500);
 
-  // Keep position updated — but DON'T yank the map back if the driver has
-  // panned or zoomed to look at something. Their exploration wins.
+  // Keep position updated
   navigator.geolocation.watchPosition(pos => {
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     if (window._navMarker) {
-      window._navMarker.setLatLng([gps.lat, gps.lon]);   // marker always moves
-      if (!window._userMovedMap) {                        // but the VIEW only follows
-        window._navMap.panTo([gps.lat, gps.lon]);         // if they haven't taken control
-      }
+      window._navMarker.setLatLng([gps.lat, gps.lon]);
+      window._navMap.panTo([gps.lat, gps.lon]);
     }
   }, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
-
-  // The moment the driver touches the map, it's theirs
-  map.on('dragstart zoomstart', () => {
-    window._userMovedMap = true;
-    const b = document.getElementById('recentreBtn');
-    if (b) b.style.display = 'block';
-  });
-}
-
-// Snap back to the driver's own position
-function recentreMap() {
-  if (!window._navMap || !gps) return;
-  window._userMovedMap = false;
-  window._navMap.setView([gps.lat, gps.lon], 15);
-  const b = document.getElementById('recentreBtn');
-  if (b) b.style.display = 'none';
 }
 
 window.initMap = function() {}; // no-op kept for compatibility
@@ -1729,15 +770,13 @@ window.initMap = function() {}; // no-op kept for compatibility
 async function fetchWeather() {
   if (!gps) return;
   try {
-    const r = await fetch(`${API_URL}weather?lat=${gps.lat}&lon=${gps.lon}`);
+    const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${gps.lat}&lon=${gps.lon}&appid=${WEATHER_KEY}&units=metric`);
     const d = await r.json();
     const wspd = Math.round((d.wind?.speed||0)*3.6);
     const wdir = ['N','NE','E','SE','S','SW','W','NW'][Math.round((d.wind?.deg||0)/45)%8];
     const temp = Math.round(d.main?.temp||0);
-    window._wx = { temp, wind: wspd, desc: (d.weather && d.weather[0] && d.weather[0].main) || '' };
     document.getElementById('windChip').textContent = `🌬 ${wspd}km/h ${wdir} · ${temp}°C`;
     weatherCtx = `Wind: ${wspd}km/h from ${wdir}. Temperature: ${temp}°C.`;
-    updateGreeting();
   } catch {}
 }
 
@@ -1793,12 +832,10 @@ function getMapUrl(dest) {
 // This approach works reliably on all mobile browsers including Safari
 let currentNavDest = '';
 
-function navigateTo(dest, lat, lon) {
+function navigateTo(dest) {
   currentNavDest = dest;
-  // Exact coordinates when we have them (map pins) — far more reliable than a
-  // name search, which can find the wrong "Mobil" three towns over.
-  currentNavCoords = (lat != null && lon != null) ? { lat, lon } : null;
-  openInMap(selectedMap);
+  document.getElementById('mapSheetDest').textContent = dest;
+  document.getElementById('mapSheet').classList.add('open');
 }
 
 function closeMapSheet(e) {
@@ -1807,23 +844,14 @@ function closeMapSheet(e) {
   }
 }
 
-let currentNavCoords = null;
-
 function openInMap(app) {
   const dest = currentNavDest;
-  const c = currentNavCoords;
-  // Coordinates beat a name search every time
-  const q = c ? `${c.lat},${c.lon}` : encodeURIComponent(dest + ' Australia');
-  const android = /Android/i.test(navigator.userAgent);
-  // Mid-trip stop? Google can navigate via the stop to the trip destination in one route
-  const finalDest = (currentRunDest && currentRunDest.toLowerCase() !== dest.toLowerCase())
-    ? encodeURIComponent(currentRunDest + ' Australia') : null;
+  const q    = encodeURIComponent(dest + ' Australia');
+  const iOS  = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   const urls = {
-    apple:    `https://maps.apple.com/?daddr=${q}&dirflg=d`,
-    google:   finalDest
-      ? `https://www.google.com/maps/dir/?api=1&destination=${finalDest}&waypoints=${q}&travelmode=driving`
-      : (android ? `google.navigation:q=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`),
+    apple:    `https://maps.apple.com/?q=${q}`,
+    google:   `https://www.google.com/maps/search/?api=1&query=${q}`,
     waze:     `https://waze.com/ul?q=${q}&navigate=yes`,
     'maps.me':`https://maps.me/?q=${q}`,
   };
@@ -1837,184 +865,92 @@ function openInMap(app) {
 function toggleChip(el) { el.classList.toggle('active'); }
 function setFuelType() {
   const types = FUEL_TYPES[currentVehicle] || FUEL_TYPES.car;
-  document.getElementById('fuelSheetOptions').innerHTML = types.map(t =>
-    `<button class="map-sheet-opt" onclick="chooseFuel('${t}')">⛽ ${t}</button>`
-  ).join('');
-  document.getElementById('fuelSheet').classList.add('open');
-}
-function chooseFuel(t) {
-  selectedFuel = t;
-  document.getElementById('fuelTypeChip').textContent = fuelChipText();
-  document.getElementById('fuelSheet').classList.remove('open');
-}
-function closeFuelSheet(e) {
-  if (!e || e.target === document.getElementById('fuelSheet')) {
-    document.getElementById('fuelSheet').classList.remove('open');
+  const options = types.map((t,i) => `${i+1}. ${t}`).join('\n');
+  const choice = prompt(`Select fuel type:\n${options}\n\nType the number:`, '1');
+  if (choice) {
+    const index = parseInt(choice) - 1;
+    if (types[index]) {
+      selectedFuel = types[index];
+      document.getElementById('fuelTypeChip').textContent = `⛽ ${selectedFuel}`;
+    }
   }
 }
 
-function setRange() { document.getElementById('rangeSheet').classList.add('open'); }
-function chooseRange(r) {
-  document.getElementById('rangeChip').textContent = r ? `🛣 Range: ${r}` : '🛣 Range';
-  document.getElementById('rangeSheet').classList.remove('open');
+function setRange() {
+  const r = prompt('Fuel range in km:', VEHICLES[currentVehicle].range);
+  if (r) document.getElementById('rangeChip').textContent = `🛣 Range: ${r}km`;
 }
-function closeRangeSheet(e) {
-  if (!e || e.target === document.getElementById('rangeSheet')) {
-    document.getElementById('rangeSheet').classList.remove('open');
-  }
-}
-function setCond() { document.getElementById('condSheet').classList.add('open'); }
-function closeCondSheet(e) {
-  if (!e || e.target === document.getElementById('condSheet')) {
-    document.getElementById('condSheet').classList.remove('open');
-  }
-}
-function applyConditions() {
-  const sel = Array.from(document.querySelectorAll('#condChipRow .trip-chip.selected')).map(c => c.textContent).join(', ');
-  document.getElementById('condChip').textContent = sel ? `🌤 ${sel}` : '🌤 Conditions';
-  document.getElementById('condSheet').classList.remove('open');
-}
-
-// ── CONVERSATION MODE — mic reopens after each spoken reply ──────────────────
-// Opt-in. True always-listening wake words beep constantly on Android (OS
-// behaviour, unsuppressable from a browser) — reserved for the native app.
-let convoEnabled = false;
-
-let convoSilentTurns = 0;   // how many times the mic opened and heard nothing
-
-function setConvo(on) {
-  convoEnabled = on;
-  const b = document.getElementById('wakeBtn');
-  if (on) {
-    convoSilentTurns = 0;
-    b.textContent = '🎙 Conversation: On — say "close" when done';
-    b.classList.add('active');
-    unlockAudio();
-  } else {
-    b.textContent = '🎙 Conversation: Off';
-    b.classList.remove('active');
-    try { if (recognition && isListening) recognition.stop(); } catch(e) {}
-  }
-}
-
-function toggleWakeWord() {
-  setConvo(!convoEnabled);
+function setCond() {
+  const c = prompt('Conditions (e.g. hot, dusty, wet, strong headwind):', '');
+  if (c) document.getElementById('condChip').textContent = `🌤 ${c}`;
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
-// iOS blocks speech synthesis unless first triggered by a direct user tap.
-// Fire a silent utterance on the first gesture to unlock the speaker.
-let audioUnlocked = false;
-function unlockAudio() {
-  if (audioUnlocked || !synth) return;
-  try {
-    const u = new SpeechSynthesisUtterance(' ');
-    u.volume = 0;
-    synth.speak(u);
-    audioUnlocked = true;
-  } catch(e) {}
-}
-
-function toggleVoice() { unlockAudio(); isListening ? stopListening() : startListening(); }
-
-let silenceTimer = null;
-let capturedFinal = '';
+function toggleVoice() { isListening ? stopListening() : startListening(); }
 
 function startListening() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('Voice not supported. Try Chrome on Android.'); return;
   }
   synth?.cancel();
-  capturedFinal = '';
-  const isAndroid = /Android/i.test(navigator.userAgent);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
-  recognition.lang='en-AU';
-  // Android's engine re-sends cumulative text, so stitching results repeats the
-  // opening words. On Android: single-shot, final transcript only — its native
-  // pause detection decides when you're done. Elsewhere: continuous + silence timer.
-  recognition.continuous = !isAndroid;
-  recognition.interimResults = !isAndroid;
+  recognition.lang='en-AU'; recognition.continuous=false; recognition.interimResults=true;
   recognition.onstart = () => {
     isListening=true;
     document.getElementById('voiceBtn').classList.add('listening');
     document.getElementById('inputRow').classList.add('listening');
-    setVoiceStatus('listening','🔴 Listening... pause when done');
+    setVoiceStatus('listening','🔴 Listening...');
   };
   recognition.onresult = e => {
-    if (isAndroid) {
-      const last = e.results[e.results.length-1];
-      if (last.isFinal) document.getElementById('userInput').value = last[0].transcript.trim();
-      return;
+    let final='',interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal) final+=e.results[i][0].transcript;
+      else interim+=e.results[i][0].transcript;
     }
-    // Rebuild the whole transcript from scratch every event
-    let full='';
-    for(let i=0;i<e.results.length;i++){ full+=e.results[i][0].transcript+' '; }
-    document.getElementById('userInput').value=full.replace(/\s+/g,' ').trim();
-    // Only send after a genuine pause — don't cut the driver off mid-sentence
-    clearTimeout(silenceTimer);
-    silenceTimer=setTimeout(()=>{ try{if(recognition)recognition.stop();}catch(err){} },1600);
+    document.getElementById('userInput').value=final||interim;
+    if(final&&final.trim().length>1){ stopListening(); sendMessage(); }
   };
   recognition.onerror = e => {
-    if(e.error==='not-allowed'){ resetVoiceUI(); alert('Microphone blocked. Please allow access in browser settings.'); }
+    stopListening();
+    if(e.error==='not-allowed') alert('Microphone blocked. Please allow access in browser settings.');
   };
   recognition.onend = () => {
-    clearTimeout(silenceTimer);
-    resetVoiceUI();
-    // Always send whatever was captured — prevents the mic ending with an unsent command
-    const pending=document.getElementById('userInput').value.trim();
-    if(pending.length>1 && !busy) {
-      convoSilentTurns = 0;      // they spoke — still in the conversation
-      sendMessage();
-    } else if (convoEnabled) {
-      // Mic opened and heard nothing useful — after two of these, go to sleep
-      convoSilentTurns++;
-      if (convoSilentTurns >= 2) {
-        setConvo(false);
-        setVoiceStatus('', '🎙 Conversation ended — tap the mic when you need me');
-        setTimeout(()=>setVoiceStatus('',''), 4000);
-      }
-    }
+    if(isListening) stopListening();
+    // Auto-reset mic button quickly so it's ready for next tap
+    document.getElementById('voiceBtn').classList.remove('listening');
+    document.getElementById('inputRow').classList.remove('listening');
+    isListening = false;
+    setVoiceStatus('','');
   };
-  try { recognition.start(); } catch(e) { resetVoiceUI(); }
+  try { recognition.start(); } catch(e) { stopListening(); }
 }
 
-function resetVoiceUI() {
+function stopListening() {
   isListening=false;
+  try{if(recognition)recognition.stop();}catch(e){}
   recognition=null;
   document.getElementById('voiceBtn').classList.remove('listening');
   document.getElementById('inputRow').classList.remove('listening');
   setVoiceStatus('','');
 }
 
-function stopListening() {
-  // Manual tap while listening — stop the mic; onend sends what was captured
-  try{if(recognition)recognition.stop();}catch(e){}
-}
-
 function speak(text) {
   if(!synth) return;
   synth.cancel();
-  let clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
-  // Speak abbreviations as words — "300m" must not be read as "three hundred em"
-  clean = clean
-    .replace(/(\d)\s*km\b/gi, '$1 kilometres')
-    .replace(/(\d)\s*m\b/g,  '$1 metres')
-    .replace(/(\d)\s*c\/L\b/gi, '$1 cents a litre')
-    .replace(/\bL\/100km\b/gi, 'litres per hundred kilometres');
+  const clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
   const utt=new SpeechSynthesisUtterance(clean);
   utt.lang='en-AU'; utt.rate=0.92; utt.pitch=1.0; utt.volume=1.0;
   const voices=synth.getVoices();
   const v=voices.find(v=>v.lang.startsWith('en-AU'))||voices.find(v=>v.lang.startsWith('en-GB'))||voices.find(v=>v.lang.startsWith('en'));
   if(v) utt.voice=v;
   utt.onstart=()=>setVoiceStatus('speaking','🔊 Navigator speaking...');
+  utt.onend=()=>setVoiceStatus('','Tap 🎙 to reply');
   utt.onerror=()=>setVoiceStatus('','');
   // Clear the hint after 3 seconds
   utt.onend = () => {
     setVoiceStatus('','🎙 Tap to reply');
     setTimeout(()=>setVoiceStatus('',''), 3000);
-    // Conversation mode: your turn — mic reopens by itself
-    if (convoEnabled && !busy && !isListening) setTimeout(startListening, 600);
   };
   synth.speak(utt);
 }
@@ -2028,12 +964,7 @@ function setVoiceStatus(state,text){
 // ── UI ────────────────────────────────────────────────────────────────────────
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,80)+'px';}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
-// Button-fired queries go to the AI but aren't echoed back as a user message —
-// you pressed Servo, you don't need to be told you asked about fuel.
-function suggest(text){
-  document.getElementById('userInput').value = text;
-  sendMessage(true);   // silent: don't show the query bubble
-}
+function suggest(text){document.getElementById('userInput').value=text;sendMessage();}
 function cleanText(t){return t.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').replace(/#{1,6}\s/g,'').trim();}
 function parseDest(text){
   const pp=[/navigating to ([^\.]+)/i,/([A-Z][a-zA-Z\s]+(?:Roadhouse|Caravan Park|Station|Hotel|Motel|Camp|Rest Area|BP|Shell|Ampol|Coles Express|United|Servo|servo|Pub|Truck Stop))/];
@@ -2048,112 +979,25 @@ function addMsg(role,text){
   const av=document.createElement('div'); av.className='msg-avatar'; av.textContent=role==='user'?'👤':'🧭';
   const bub=document.createElement('div'); bub.className='msg-bubble';
   const cleaned=cleanText(text);
-  if (role==='nav') { lastNavReply = cleaned; lastSpoken = cleaned; }
   const p=document.createElement('p'); p.textContent=cleaned; bub.appendChild(p);
   if(role==='nav'){
-    // Which known real places does this reply mention? Two or more = pick buttons
-    const mentions = knownPlaces
-      .map(nm => ({ nm, i: cleaned.toLowerCase().indexOf(nm.toLowerCase()) }))
-      .filter(x => x.i >= 0)
-      .sort((a,b) => a.i - b.i)
-      .slice(0, 3)
-      .map(x => x.nm);
-    const mapNames={apple:'Apple Maps',google:'Google Maps',waze:'Waze','maps.me':'Maps.me'};
-    // Match a mentioned name back to its pinned coordinates — coordinates beat
-    // a name search every time, and stop "Red Rooster" opening the wrong branch.
-    const coordsFor = (nm) => {
-      const pin = (window._pendingPins || []).find(p => p.name === nm);
-      return pin ? { lat: pin.lat, lon: pin.lon, mins: pin.mins } : null;
-    };
-    if (mentions.length >= 2) {
-      mentions.forEach((nm, idx) => {
-        const btn=document.createElement('button'); btn.className='nav-btn';
-        btn.style.marginTop = idx === 0 ? '8px' : '6px';
-        const c = coordsFor(nm);
-        btn.textContent = '📍 ' + (idx+1) + '. ' + nm + (c?.mins ? ` — ${c.mins}'` : '');
-        btn.onclick = () => navigateTo(nm, c?.lat, c?.lon);
-        bub.appendChild(btn);
-      });
-      if (currentRunDest) {
-        const star=document.createElement('button'); star.className='fb-btn'; star.style.marginTop='6px';
-        star.textContent='⭐ Save stop for this run';
-        star.onclick=()=>{ saveStopForRun(mentions[0]); star.textContent='✓ Saved for '+currentRunDest; star.disabled=true; };
-        bub.appendChild(star);
-      }
-    } else {
-      const dest=parseDest(cleaned) || mentions[0];
-      if(dest){
-        const btn=document.createElement('button'); btn.className='nav-btn';
-        const c1 = coordsFor(dest);
-        btn.textContent='📍 Navigate to '+dest+(c1?.mins ? ` (${c1.mins}')` : '')+' — '+mapNames[selectedMap];
-        btn.onclick=()=>navigateTo(dest, c1?.lat, c1?.lon);
-        bub.appendChild(btn);
-        // Star: remember this stop for the active run
-        if (currentRunDest) {
-          const star=document.createElement('button'); star.className='fb-btn'; star.style.marginTop='6px';
-          star.textContent='⭐ Save stop for this run';
-          star.onclick=()=>{ saveStopForRun(dest); star.textContent='✓ Saved for '+currentRunDest; star.disabled=true; };
-          bub.appendChild(star);
-        }
-      }
+    const dest=parseDest(cleaned);
+    if(dest){
+      const btn=document.createElement('button'); btn.className='nav-btn';
+      const mapNames={apple:'Apple Maps',google:'Google Maps',waze:'Waze','maps.me':'Maps.me'};
+      btn.textContent='📍 Navigate to '+dest+' — '+mapNames[selectedMap];
+      btn.onclick=()=>navigateTo(dest);
+      bub.appendChild(btn);
     }
-    // Feedback row — the buttons are decisions, not just notes
+    // Feedback row — quick trust loop
     const fbRow=document.createElement('div'); fbRow.className='feedback-row';
-    const replay=document.createElement('button'); replay.className='fb-btn'; replay.textContent='🔊'; replay.title='Say that again';
-    replay.onclick=()=>{ speak(cleaned); };
-    fbRow.appendChild(replay);
-    const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Yes — lock it in';
-    // Is this a fuel-price reply with a shortlist to dial through?
-    // fuelShortlist is already frozen in cheapest-then-nearest order — just read it.
-    const isFuelDial = fuelShortlist.length > 1 && /\$\d|c\/L|litre/i.test(cleaned);
-    const myDialIdx = fuelDialIdx;               // this reply's position in the dial
-    const atNearest = myDialIdx >= fuelShortlist.length - 1;
-    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn';
-    if (isFuelDial) {
-      thumbDown.textContent = atNearest ? '✓ that\'s the nearest' : '👎 nearer option';
-      thumbDown.title = 'Show a closer servo';
-    } else {
-      thumbDown.textContent='👎'; thumbDown.title='No — give me another option';
-    }
-    const isPlan = /Day 1:/i.test(cleaned);
-    const isQuestion = /\?\s*$/.test(cleaned);
-    thumbUp.onclick=()=>{
-      if (!currentRunDest && pendingTripDest) {
-        const d = pendingTripDest;
-        adoptTrip(d);
-        fbRow.innerHTML='<span class="fb-thanks">✓ Trip set — ' + d + '. Route on the map; resume any time.</span>';
-      } else if (isPlan && currentRunDest) {
-        try { localStorage.setItem('navigator_trip_plan', cleaned); } catch(e) {}
-        tripContext += ' Agreed plan: ' + cleaned;
-        fbRow.innerHTML='<span class="fb-thanks">✓ Plan locked in — I\'ll remember it for this trip.</span>';
-      } else if (isQuestion) {
-        fbRow.innerHTML='<span class="fb-thanks">✓ Yes</span>';
-        if (!busy) { document.getElementById('userInput').value = 'Yes'; sendMessage(); }
-      } else {
-        fbRow.innerHTML='<span class="fb-thanks">Thanks — noted ✓</span>';
-      }
-    };
+    const thumbUp=document.createElement('button'); thumbUp.className='fb-btn'; thumbUp.textContent='👍'; thumbUp.title='Good answer';
+    const thumbDown=document.createElement('button'); thumbDown.className='fb-btn'; thumbDown.textContent='👎'; thumbDown.title='That was wrong';
+    thumbUp.onclick=()=>{ fbRow.innerHTML='<span class="fb-thanks">Thanks — noted ✓</span>'; };
     thumbDown.onclick=()=>{
-      if (isFuelDial && !atNearest) {
-        // Advance from THIS reply's position — never a stale global index
-        const nextIdx = myDialIdx + 1;
-        fuelDialIdx = nextIdx;
-        const s = fuelShortlist[nextIdx];
-        const dollars = '$' + (s.price/100).toFixed(2);
-        const last = nextIdx >= fuelShortlist.length - 1;
-        const dialMsg = `${s.name}, ${s.mins ? s.mins + ' minutes' : s.km.toFixed(0) + ' kilometres'}, ${dollars} a litre${last ? ' — that\'s your nearest.' : '.'}`;
-        addMsg('nav', dialMsg);
-        lastSpoken = dialMsg;
-        speak(dialMsg);
-        return;
-      }
-      if (isFuelDial && atNearest) return;
-      const reason=prompt('What was wrong? (e.g. too far off route, too dear, wrong direction)','');
-      fbRow.innerHTML='<span class="fb-thanks">↻ Getting you another option...</span>';
-      if (!busy) {
-        document.getElementById('userInput').value = 'No' + (reason ? ' — ' + reason : ', that doesn\'t suit') + '. Give me a different option.';
-        sendMessage();
-      }
+      const reason=prompt('What was wrong? (e.g. closed, too tight for the van, wrong price)','');
+      fbRow.innerHTML='<span class="fb-thanks">Got it — I\'ll factor that in ✓</span>';
+      console.log('Navigator feedback: NEGATIVE —', cleaned, '— reason:', reason);
     };
     fbRow.appendChild(thumbUp); fbRow.appendChild(thumbDown);
     bub.appendChild(fbRow);
@@ -2171,47 +1015,19 @@ function showTyping(){
 function hideTyping(){document.getElementById('typing')?.remove();}
 
 // ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
-const SYSTEM=`You are Navigator — an AI co-pilot for Australian road travellers. The driver is moving at highway speed and hears your reply read aloud. Every word costs attention.
+const SYSTEM=`You are Navigator — an AI co-pilot for Australian road travellers.
 
 RESPONSE FORMAT — always exactly this:
-Sentence 1: Best option. Place name, distance, and the price or one key fact relevant to the vehicle.
-Sentence 2: EITHER a genuinely useful alternative or trade-off, OR nothing at all if there's nothing worth adding.
+Sentence 1: Best option. Place name, distance, one key fact relevant to the vehicle.
+Sentence 2: Navigating to [place] now. Say option 2 for an alternative.
 
-NEVER say "Navigating to [place] now" or "Navigating there now" — the driver has a Navigate button right there; saying it is noise. Just give them the information and let them choose.
-
-EXAMPLE of a perfect reply:
-"Gordonvale BP, 22km ahead, $1.68 a litre — easy drive-through for the van. Closest is Edmonton at 8km if you'd rather not push on."
+If driver says option 2:
+Sentence 1: Alternative. Place name, distance, one trade-off.
+Sentence 2: Navigating to [place] now.
 
 RULES:
-- 30 words maximum across the whole reply. Hard limit — with TWO exceptions: TRIP LEG PLANNING below, and offering a genuine CHOICE of two options in different directions (up to 40 words, because the choice is worth the words).
-- TRIP LEG PLANNING (the only exception to the word cap): when the driver asks how long the trip will take, to plan their days or legs, or where to break and sleep along the way — use the ROUTE DATA in context and reply in this compact shape, 80 words maximum, plain sentences: First, total km and realistic driving hours for THIS vehicle (car = route hours plus 10% for stops; caravan or campervan = route hours plus 30%; truck = plus 20% with mandatory rest breaks). Then one line per driving day: "Day 1: [start] to [overnight town] — break at [real town about 4 hours in], overnight at [real town about 8 hours in]." Pick towns by driving time on the actual route, and prefer overnight towns with caravan parks and motels. Finish by offering to navigate the first leg. Solo mode rules apply to every stop named. If no ROUTE DATA is in context, say you need a trip planned first — never guess distances.
-- CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
-- Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
-- BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
-- OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
-- TOILETS: A practical, urgent need — treat it matter-of-factly, no coyness. The list includes public toilets AND servos, cafés and pubs (all of which have toilets and are far better mapped). Give the NEAREST one, whatever kind it is — nobody cares whether it's a park or a servo when they need to go. Say what it is ("the servo at X, 4 minutes"). In Solo mode, prefer staffed or well-lit places over isolated spots.
-- ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
-- NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
-- NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
-- WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
-- Never tell the driver to use another app, website, or service under ANY circumstances.
+- Two sentences maximum. Always. No exceptions.
 - No explanations. No suggestions to check other apps. No fluff.
-- NEAREST MEANS NEAREST: When the driver wants a coffee, a chemist, a gym — they want the CLOSEST decent one, not the most scenic or interesting. Lead with the nearest from the list. Never send someone half an hour up a mountain for a cuppa. Only mention somewhere further if the driver asked for something specific (a view, a proper meal, a particular chain).
-- THE MAP SHOWS EVERYTHING: Whatever you name from a NEARBY list is already pinned on the driver's map — they can see it and tap it to navigate. So summarise, don't recite. Lead with the best option and its driving time; mention one alternative if it's genuinely useful. Never read out a long list.
-- NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If the driver asks for several ("the 3 nearest gyms"), list up to three from the list with distances in one sentence — that is allowed and expected. Never invent policies such as "one result per reply"; no such rule exists. If a list says none found, say so and name the nearest sizeable town.
-- MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
-- NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
-- SERVOS: The context lists every servo around the driver, nearest first by road, each with its driving time and either a confirmed price or "price unconfirmed". EVERY ONE of these is already pinned on the driver's map — they can see them. Your job is to summarise, not to list. Lead with the cheapest CONFIRMED price and its driving time ("Metro Beaudesert, 25 minutes, $1.54 a litre"). If a different servo is meaningfully closer, offer it as the no-detour alternative by name with its time, saying "price unconfirmed" if that's the case. Never invent a price. Never lump servos together ("three servos at X") — name them. If the driver is AT a servo, say so first.
-- DISTANCE AND TIME: Context gives both road distance and driving time. Lead with whichever a driver would find more useful: for anything nearby (under about 20 minutes) TIME is what matters — "Liberty Beaudesert, 17 minutes, $1.54 a litre". For longer hauls give both — "Gympie, 180 km, about two hours". Never give both for a short hop; it's a mouthful spoken aloud. Round times naturally: "about 20 minutes", "just under an hour", "a bit over two hours".
-- SPOKEN ALOUD: Your reply is read aloud by a voice. Write distances as words the voice can say properly — "300 metres" not "300m", "20 kilometres" or "20 km" not "20km" jammed together. Same for prices: "$1.54 a litre".
-- CAMPS/PARKS: If NEARBY CAMPS/PARKS data appears in context, prefer naming real sites from it, blended with your own knowledge of well-known parks — the data is real but may be incomplete. Solo mode filters still apply.
-- ACCOMMODATION: If NEARBY ACCOMMODATION data appears in context, match the tier to the request — "treat ourselves"/luxury = highest stars or best-known quality property; "cheap"/backpackers = hostels and budget motels; otherwise the best-fit nearest. Never state a price or vacancy — you don't have them. Blend with your own knowledge of well-known properties. Solo mode filters still apply.
-- FAVOURITE STOPS: If the trip plan lists the driver's favourite stops on this run, lead with those for overnight suggestions.
-- TRIP FUEL STRATEGY: When the trip plan includes a destination, prefer fuel stops broadly along the route to it, not sideways diversions. If the destination is a capital city, recommend filling the tank full at the last cheaper regional stop before the metro area and say why in three words or fewer (e.g. "Sydney runs dearer").
-- If the driver's van model appears in context, factor its size into site, park and forecourt access advice. If they ask for their rego, just tell them — it's in context.
-- If the driver's logged fuel economy appears in context, use it for range and fuel calculations instead of generic estimates.
-- BIG DAY CHOICE: If the driver was asked whether to tough out a big single-day drive or overnight partway — "tough it out" (or similar) means reply using the leg-plan format for today only: named rest stops roughly every two hours at real towns, then the destination. "Find somewhere partway" (or similar) means standard two-sentence format naming the town nearest halfway by driving time that has motels or caravan parks. Solo mode rules apply to both.
-- DEVIATIONS: The driver may not follow any plan you gave earlier. Always answer from CURRENT position and CURRENT ROUTE DATA — earlier plans in this conversation are suggestions that reality has superseded, never commitments to enforce. If an "Agreed plan" appears in the trip context, keep answers consistent with it where reality still fits — it is the driver's chosen plan, updated by where they actually are, never argued for.
 - Plain sentences only. No markdown.
 - Use GPS location to name real nearby places.
 - Scale search distance to the vehicle type provided in context.
@@ -2220,993 +1036,52 @@ RULES:
 - Fatigue over 4 hours: name a specific rest stop in sentence 1.
 - Warning lights: nearest service and distance in sentence 1. Navigate in sentence 2.
 
-SOLO MODE (when flagged in context):
-- Same two sentence format, same word budget.
-- Recommend only staffed, well-lit, well-reviewed stops — never isolated rest areas, remote free camps, or unattended sites, even if cheaper or closer.
-- For overnight stops: prefer sites with other travellers around, and time arrivals before dark — if current time makes a suggested stop an after-dark arrival, say so and offer a nearer option.
-- When the driver is stopping for the night, replace the navigation sentence with a short reminder to let someone know where they are.
-- If fatigue and solo mode combine, treat the rest recommendation as urgent, not optional.`;
-
-// ── LIVE FUEL PRICES (via Worker /fuel route — NSW & TAS coverage) ───────────
-const FUEL_CODE = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'DL','E10':'E10'};
-
-
-// "16 km, 17 minutes" — or just distance if timing is unavailable
-function distTime(s) {
-  const d = (s.km < 1) ? `${Math.round(s.km*1000)} metres` : `${s.km.toFixed(0)} km`;
-  return s.mins ? `${d}, ${s.mins} minutes` : d;
-}
-
-// ── ROAD DISTANCE & TIME — true driving km and minutes via OSRM, one call ─────
-// Falls back to straight-line if routing is unavailable, so a lookup never breaks.
-// ── OFF-ROAD CHECK — are we somewhere the routing engine actually knows? ──────
-// On a farm track, bush camp, or station road, OSRM snaps you to the nearest
-// mapped road — which can be kilometres away and in the wrong direction. Every
-// distance and time then comes out wrong. Detect it and be honest about it.
-let snapInfo = { checked: false, metres: 0, poor: false, at: null };
-
-async function checkRoadSnap() {
-  if (!gps) return snapInfo;
-  // Re-check only if we've moved a fair way since last time
-  if (snapInfo.checked && snapInfo.at && distKm(gps.lat, gps.lon, snapInfo.at.lat, snapInfo.at.lon) < 1) {
-    return snapInfo;
-  }
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2500);
-    const r = await fetch(`https://router.project-osrm.org/nearest/v1/driving/${gps.lon},${gps.lat}`, { signal: ctrl.signal });
-    clearTimeout(timer);
-    const d = await r.json();
-    if (d.code === 'Ok' && d.waypoints && d.waypoints[0]) {
-      const m = d.waypoints[0].distance;   // metres from your position to the nearest road
-      snapInfo = {
-        checked: true,
-        metres: Math.round(m),
-        poor: m > 300,                      // >300m off a mapped road = unreliable
-        at: { lat: gps.lat, lon: gps.lon },
-        roadName: d.waypoints[0].name || '',
-      };
-      return snapInfo;
-    }
-  } catch(e) {}
-  snapInfo = { checked: true, metres: 0, poor: false, at: { lat: gps.lat, lon: gps.lon } };
-  return snapInfo;
-}
-
-// The honest note to hand the AI when we're off the mapped road network
-function offRoadNote(snap) {
-  if (!snap || !snap.poor) return '';
-  const km = (snap.metres / 1000).toFixed(1);
-  return ` OFF THE MAPPED ROAD: the driver is about ${km}km from the nearest road the maps know (${snap.roadName || 'unnamed'}). Distances and travel times from here are UNRELIABLE — they're measured from that road, not from where the driver actually is. Tell them plainly: they're off the mapped network, the times shown are rough, and for accurate results they should ask again once they're back on a proper road. Give the options anyway, but say the distances are approximate.`;
-}
-
-async function roadDistances(fromLat, fromLon, points) {
-  // points: [{lat, lon}, ...] — returns [{km, mins}] aligned to points (null if unavailable)
-  if (!points.length) return [];
-  try {
-    const coords = [`${fromLon},${fromLat}`, ...points.map(p => `${p.lon},${p.lat}`)].join(';');
-    const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=distance,duration`;
-    // Patient but bounded — a good partial beats a late-or-hung perfect answer
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2500);
-    const r = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    const d = await r.json();
-    if (d.code === 'Ok' && d.distances && d.distances[0]) {
-      const dist = d.distances[0].slice(1);
-      const dur  = (d.durations && d.durations[0]) ? d.durations[0].slice(1) : [];
-      return dist.map((m, i) => ({
-        km:   (m == null) ? null : m / 1000,
-        mins: (dur[i] == null) ? null : Math.round(dur[i] / 60),
-      }));
-    }
-  } catch(e) {}
-  return points.map(() => ({ km: null, mins: null }));
-}
-
-// Distance from a point to the nearest vertex of the route path (rough corridor test)
-function distToRoute(lat, lon, path) {
-  let min = Infinity;
-  const step = Math.max(1, Math.floor(path.length / 120)); // coarse is plenty
-  for (let i = 0; i < path.length; i += step) {
-    const dk = distKm(lat, lon, path[i].lat, path[i].lon);
-    if (dk < min) min = dk;
-  }
-  return min;
-}
-
-// How far along the route is this point? (fraction 0=start, 1=destination)
-function progressAlongRoute(lat, lon, path) {
-  let bestI = 0, best = Infinity;
-  const step = Math.max(1, Math.floor(path.length / 120));
-  for (let i = 0; i < path.length; i += step) {
-    const dk = distKm(lat, lon, path[i].lat, path[i].lon);
-    if (dk < best) { best = dk; bestI = i; }
-  }
-  return bestI / (path.length - 1);
-}
-
-// A price older than this is a rumour, not a price — don't send people chasing it.
-const PRICE_MAX_AGE_HOURS = 72;
-
-function freshPrices(results) {
-  const now = Date.now();
-  const fresh = results.filter(s => {
-    if (!s.updated) return false;
-    const t = Date.parse(s.updated);
-    if (isNaN(t)) return false;
-    return (now - t) / 3600000 <= PRICE_MAX_AGE_HOURS;
-  });
-  // If staleness would leave us with nothing, fall back to all — better than silence,
-  // and the AI is told to flag the age.
-  return fresh.length ? fresh : results;
-}
-
-// Are we practically standing at a servo? (any servo, priced or not)
-async function servoUnderfoot() {
-  if (!gps) return null;
-  try {
-    const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=5`);
-    const sd = await sr.json();
-    if (sd.results && sd.results.length) {
-      const n = sd.results
-        .map(s => ({ name: s.name, km: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-        .sort((a,b) => a.km - b.km)[0];
-      if (n && n.km <= 1.5) return n;   // within 1.5km = you're basically there
-    }
-  } catch(e) {}
-  return null;
-}
-
-// What servos are genuinely close by? Returns the nearest few with honest distances.
-// "At one" means AT one (under ~120m) — not "somewhere within a kilometre".
-async function servosNearby() {
-  if (!gps) return null;
-  try {
-    const sr = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=15`);
-    const sd = await sr.json();
-    if (sd.results && sd.results.length) {
-      // Shortlist by crow-flies (cheap), then get TRUE road distance for those few.
-      // Straight-line is misleading in hill country — a servo "5km away" over the
-      // range can be a 20km drive.
-      const cands = sd.results
-        .map(s => ({ name: s.name, crow: distKm(gps.lat, gps.lon, s.lat, s.lon), lat: s.lat, lon: s.lon }))
-        .sort((a,b) => a.crow - b.crow)
-        .slice(0, 6);
-      if (!cands.length) return null;
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
-      cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
-      const near = cands
-        .filter(s => s.km <= 20)          // within a 20km DRIVE
-        .sort((a,b) => a.km - b.km)       // nearest BY ROAD
-        .slice(0, 3);
-      if (!near.length) return null;
-      return { list: near, atOne: near[0].km <= 0.15 };
-    }
-  } catch(e) {}
-  return null;
-}
-
-function nearbyServoNote(nb) {
-  if (!nb) return '';
-  const names = nb.list.map(s => `${s.name} (${distTime(s)})`).join(', ');
-  if (nb.atOne) {
-    return ` NOTE: the driver is right at ${nb.list[0].name} now. It does NOT report a price. Say they're at one, price unconfirmed, then give the cheapest confirmed as the alternative.`;
-  }
-  return ` UNPRICED SERVOS NEARBY (real servos, no live price, distances and times by ROAD): ${names}. If the closest is meaningfully nearer than the cheapest confirmed, offer it BY NAME with its driving time and "price unconfirmed" — do not lump several together as "three servos at X".`;
-}
-
-async function fetchFuelPrices() {
-  if (!gps) return '';
-  try {
-    const code = FUEL_CODE[selectedFuel] || 'U91';
-    const onJourney = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
-
-    // ═══ ONE LIST, ONE TRUTH ═══════════════════════════════════════════════
-    // 1. Every servo around us (OSM) — this is the ground truth of what EXISTS.
-    // 2. Every price we can confirm (govt feed) — this tells us what we KNOW.
-    // 3. Join them. Rank by road distance. Pin them ALL. Words describe the map.
-    // No separate paths, no thresholds — the map and the words cannot disagree.
-
-    const radius = onJourney ? 100 : 25;
-    const [stationsRes, pricesRes] = await Promise.all([
-      fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=${Math.min(radius, 60)}`).then(r => r.json()).catch(() => ({})),
-      fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`).then(r => r.json()).catch(() => ({})),
-    ]);
-
-    // Confirmed prices, freshness-filtered (a week-old price is a rumour)
-    const priced = freshPrices(pricesRes.results || []).filter(s => s.lat && s.lon);
-
-    // Build the single list: every servo we know of, priced or not
-    const seen = new Map();
-    const key = (lat, lon) => `${(+lat).toFixed(3)},${(+lon).toFixed(3)}`;
-
-    priced.forEach(s => {
-      seen.set(key(s.lat, s.lon), {
-        name: s.name, address: s.address || '',
-        price: s.price, lat: +s.lat, lon: +s.lon,
-      });
-    });
-    (stationsRes.results || []).forEach(s => {
-      const k = key(s.lat, s.lon);
-      if (!seen.has(k)) {
-        seen.set(k, { name: s.name, address: '', price: null, lat: +s.lat, lon: +s.lon });
-      }
-    });
-
-    let all = Array.from(seen.values());
-    if (!all.length) return '';
-
-    // Rank by crow-flies first (free), keep the plausible ones, then get TRUE
-    // road distance and time for those. One routing call.
-    all.forEach(s => { s.crow = distKm(gps.lat, gps.lon, s.lat, s.lon); });
-    all.sort((a, b) => a.crow - b.crow);
-    all = all.slice(0, 10);
-
-    const roads = await roadDistances(gps.lat, gps.lon, all);
-    all.forEach((s, i) => {
-      s.km   = (roads[i] && roads[i].km != null) ? roads[i].km : s.crow;
-      s.mins = roads[i] ? roads[i].mins : null;
-    });
-
-    // On a journey: keep only what's genuinely AHEAD on the route, sane detour.
-    if (onJourney) {
-      const path = window._tripRoute.path;
-      const myProg = progressAlongRoute(gps.lat, gps.lon, path);
-      all.forEach(s => {
-        s.detour = distToRoute(s.lat, s.lon, path);
-        s.prog   = progressAlongRoute(s.lat, s.lon, path);
-      });
-      const ahead = all.filter(s => s.prog > myProg + 0.01 && s.detour <= 10);
-      if (ahead.length) all = ahead;   // if nothing ahead, fall back to all nearby
-    }
-
-    all.sort((a, b) => a.km - b.km);   // nearest by road, always
-
-    // ═══ THE MAP IS THE PRIMARY OUTPUT ═════════════════════════════════════
-    // Pin everything we found. Solid = price confirmed. Hollow = no price.
-    addPendingPins(all.slice(0, 6).map(s => ({
-      name: s.name, price: s.price, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
-    })));
-    notePlaces(all.slice(0, 6).map(s => s.name));
-
-    // The 👎 dial walks the priced ones, cheapest → nearest
-    const withPrice = all.filter(s => s.price != null);
-    if (withPrice.length) {
-      const cheapest = withPrice.slice().sort((a, b) => a.price - b.price)[0];
-      const rest = withPrice.filter(s => s !== cheapest).sort((a, b) => a.km - b.km);
-      fuelShortlist = [cheapest, ...rest].map(s => ({ name: s.name, price: s.price, km: s.km, mins: s.mins }));
-      fuelDialIdx = 0;
-    } else {
-      fuelShortlist = [];
-      fuelDialIdx = 0;
-    }
-
-    // ═══ THE WORDS DESCRIBE THE MAP ════════════════════════════════════════
-    const fmt = s => {
-      const dist = distTime(s);
-      const price = (s.price != null) ? `$${(s.price / 100).toFixed(2)} a litre` : 'price unconfirmed';
-      const detour = (onJourney && s.detour != null && s.detour > 1) ? `, ${s.detour.toFixed(0)} km off route` : '';
-      return `${s.name} — ${dist}${detour} — ${price}`;
-    };
-    const list = all.slice(0, 6).map(fmt).join('; ');
-
-    const atOne = all[0] && all[0].km <= 0.15;
-    const cheapestConfirmed = withPrice.length
-      ? withPrice.slice().sort((a, b) => a.price - b.price)[0] : null;
-
-    const header = onJourney
-      ? `SERVOS AHEAD ON ROUTE to ${currentRunDest} (all real, nearest first by road; every one is pinned on the driver's map)`
-      : `SERVOS AROUND THE DRIVER (all real, nearest first by road; every one is pinned on the driver's map)`;
-
-    let guide = ' Lead with the cheapest CONFIRMED price and its driving time.';
-    if (cheapestConfirmed && all[0] && all[0] !== cheapestConfirmed) {
-      guide += ` ${all[0].name} is closer${all[0].price == null ? ' but has no confirmed price' : ''} — offer it as the no-detour alternative.`;
-    }
-    if (atOne) guide = ` The driver is right AT ${all[0].name} now — say so first. ` + guide;
-    if (!cheapestConfirmed) guide = ' No confirmed prices here — name the nearest servo, say prices are patchy in this area, and suggest asking again further along.';
-
-    return `${header}: ${list}.${guide}`;
-  } catch(e) {
-    return `LOOKUP FAILED — ${navigator.onLine ? 'the fuel data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Name no servo, price or distance.`;
-  }
-}
-
-// ── NEARBY CAMPS & CARAVAN PARKS (via Worker /camps route — OpenStreetMap) ───
-function distKm(lat1, lon1, lat2, lon2) {
-  const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-async function fetchCamps() {
-  if (!gps) return '';
-  try {
-    const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=40`);
-    const d = await r.json();
-    if (d.results && d.results.length) {
-      const cands = d.results
-        .filter(s => s.lat && s.lon)
-        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-        .sort((a,b) => a.crow - b.crow)
-        .slice(0, 6);
-      if (!cands.length) return '';
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
-      cands.forEach((c,i) => {
-        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
-        c.mins = roads[i] ? roads[i].mins : null;
-      });
-      cands.sort((a,b) => a.km - b.km);
-      notePlaces(cands.map(s => s.name));
-      addPendingPins(cands.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
-      const list = cands.map(s => {
-        const bits = [s.type, s.fee==='no'?'free':'', s.powered&&s.powered!=='no'?'powered':'', s.dump==='yes'?'dump point':''].filter(Boolean).join(', ');
-        return `${s.name} — ${distTime(s)} (${bits})`;
-      }).join('; ');
-      return `NEARBY CAMPS/PARKS (real sites, nearest first by ROAD, all pinned on the driver's map; tag data may be incomplete): ${list}.`;
-    }
-  } catch(e) {
-    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check camps/parks. Name nothing, invent nothing.`;
-  }
-}
-
-// ── NEARBY FUEL STATIONS — proximity ground truth (OSM, all brands, no prices) ─
-async function fetchStations() {
-  if (!gps) return '';
-  try {
-    const r = await fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=30`);
-    const d = await r.json();
-    if (d.results && d.results.length) {
-      const withKm = d.results
-        .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
-        .sort((a,b) => a.km - b.km)
-        .slice(0,5);
-      notePlaces(withKm.map(s => s.name));
-      const list = withKm.map(s => `${s.name}${s.brand && s.brand !== s.name ? ' ('+s.brand+')' : ''} ${s.km.toFixed(0)}km`).join('; ');
-      return `NEARBY FUEL STATIONS (OpenStreetMap ground truth, sorted NEAREST first, no prices): ${list}.`;
-    }
-  } catch(e) {
-    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check stations. Name nothing, invent nothing.`;
-  }
-}
-
-// ── FUEL LOG — grey nomad data collection ─────────────────────────────────────
-function getFuelLog() {
-  try { return JSON.parse(localStorage.getItem('navigator_fuel_log') || '[]'); } catch(e) { return []; }
-}
-
-function openFillSheet() {
-  document.getElementById('fillSheet').classList.add('open');
-  const st = document.getElementById('fillStation');
-  st.value = '';
-  // Auto-fill the servo you're standing at
-  if (gps) {
-    fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=10`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.results && d.results.length && !st.value) {
-          const nearest = d.results
-            .map(s => ({...s, km: distKm(gps.lat, gps.lon, s.lat, s.lon)}))
-            .sort((a,b) => a.km - b.km)[0];
-          st.value = nearest.name;
-        }
-      }).catch(()=>{});
-  }
-}
-function closeFillSheet(e) {
-  if (!e || e.target === document.getElementById('fillSheet')) {
-    document.getElementById('fillSheet').classList.remove('open');
-  }
-}
-
-function saveFill() {
-  const station = document.getElementById('fillStation').value.trim() || 'Unknown station';
-  const litres = parseFloat(document.getElementById('fillLitres').value);
-  const cost = parseFloat(document.getElementById('fillCost').value);
-  const odo = parseFloat(document.getElementById('fillOdo').value);
-  const log = getFuelLog();
-  const entry = {
-    date: new Date().toISOString().slice(0,10),
-    station,
-    litres: isNaN(litres) ? null : litres,
-    cost: isNaN(cost) ? null : cost,
-    odo: isNaN(odo) ? null : odo,
-    run: currentRunDest || '',
-    lat: gps ? gps.lat : null,
-    lon: gps ? gps.lon : null,
-  };
-  // Economy since the last odometer entry
-  let econMsg = '';
-  const prev = [...log].reverse().find(x => x.odo);
-  if (prev && entry.odo && entry.litres && entry.odo > prev.odo) {
-    entry.l100 = Math.round((entry.litres / (entry.odo - prev.odo)) * 1000) / 10;
-    econMsg = ` That's ${entry.l100}L/100km since your last fill.`;
-  }
-  log.push(entry);
-  try { localStorage.setItem('navigator_fuel_log', JSON.stringify(log.slice(-100))); } catch(e) {}
-  document.getElementById('fillSheet').classList.remove('open');
-  document.getElementById('fillLitres').value=''; document.getElementById('fillCost').value=''; document.getElementById('fillOdo').value='';
-  const cpl = (entry.cost && entry.litres) ? ` at ${(entry.cost / entry.litres * 100).toFixed(1)}c/L` : '';
-  addMsg('nav', `Fill-up logged — ${station}${entry.litres ? ', ' + entry.litres + 'L' : ''}${cpl}.${econMsg}`);
-}
-
-function showFuelLog() {
-  const log = getFuelLog().slice().reverse();
-  const el = document.getElementById('fuelLogList');
-  el.innerHTML = log.length
-    ? log.map(x => `${x.date} — ${x.station}${x.litres ? ': ' + x.litres + 'L' : ''}${x.cost ? ', $' + x.cost.toFixed(2) : ''}${x.l100 ? ', ' + x.l100 + 'L/100km' : ''}${x.run ? ' (' + x.run + ')' : ''}`).join('<br>')
-    : 'No fill-ups logged yet — tap 📒 Fill-up after your next stop.';
-  document.getElementById('fillSheet').classList.remove('open');
-  document.getElementById('fuelLogSheet').classList.add('open');
-}
-function closeFuelLog(e) {
-  if (!e || e.target === document.getElementById('fuelLogSheet')) {
-    document.getElementById('fuelLogSheet').classList.remove('open');
-  }
-}
-function copyFuelCsv() {
-  const log = getFuelLog();
-  const csv = ['date,station,litres,total_cost,odometer,l_per_100km,run']
-    .concat(log.map(x => [
-      x.date,
-      '"' + (x.station || '').replace(/"/g,'""') + '"',
-      x.litres ?? '', x.cost ?? '', x.odo ?? '', x.l100 ?? '',
-      '"' + (x.run || '').replace(/"/g,'""') + '"',
-    ].join(','))).join('\n');
-  navigator.clipboard.writeText(csv)
-    .then(() => alert('Fuel log copied — paste into any spreadsheet.'))
-    .catch(() => alert('Copy failed on this browser — screenshot the list instead.'));
-}
-
-// ── NEARBY ACCOMMODATION — hotels, motels, backpackers (OSM) ─────────────────
-async function fetchAccom() {
-  if (!gps) return '';
-  try {
-    const r = await fetch(`${API_URL}accom?lat=${gps.lat}&lon=${gps.lon}&radius=30`);
-    const d = await r.json();
-    if (d.results && d.results.length) {
-      const cands = d.results
-        .filter(s => s.lat && s.lon)
-        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-        .sort((a,b) => a.crow - b.crow)
-        .slice(0, 6);
-      if (!cands.length) return '';
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
-      cands.forEach((c,i) => {
-        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
-        c.mins = roads[i] ? roads[i].mins : null;
-      });
-      cands.sort((a,b) => a.km - b.km);
-      notePlaces(cands.map(s => s.name));
-      addPendingPins(cands.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
-      const list = cands.map(s => `${s.name} — ${distTime(s)} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''})`).join('; ');
-      return `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
-    }
-  } catch(e) {
-    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check accommodation. Name nothing, invent nothing.`;
-  }
-}
-
-// ── EVERYDAY PLACES — gyms, cafes, chemists... proximity ground truth (OSM) ──
-const POI_TRIGGERS = [
-  // Restaurants & takeaway — matched ahead of the cafe catch-all below. Deliberately
-  // NOT 'lunch' (stays with cafes) and NOT bare 'eat' (too broad); phrase forms like
-  // "somewhere to eat" still land here.
-  { re: /\bdinner\b|restaurants?|take ?away|somewhere to eat|something to eat|\ba feed\b|\bhungry\b/i, kind: 'food', label: 'RESTAURANTS & TAKEAWAY' },
-  { re: /\bgyms?\b|fitness|work ?out/i, kind: 'gym', label: 'GYMS' },
-  { re: /coffee|\bcafes?\b|caf\u00e9s?|cuppa|flat white|latte|brew/i, kind: 'cafe', label: 'CAFES' },
-  { re: /supermarkets?|groceries|grocery|woolworths|coles|\biga\b|shopping/i, kind: 'supermarket', label: 'SUPERMARKETS' },
-  { re: /chemists?|pharmac|prescription/i, kind: 'pharmacy', label: 'CHEMISTS' },
-  { re: /\bpubs?\b|\bbeers?\b|\bbars?\b|\bale\b/i, kind: 'pub', label: 'PUBS' },
-  { re: /bakery|bakeries|\bpies?\b|bread|pastry/i, kind: 'bakery', label: 'BAKERIES' },
-  { re: /doctors?|hospitals?|medical|clinics?|\bgp\b/i, kind: 'medical', label: 'MEDICAL' },
-  { re: /laundr|washing machine|wash(ing)? clothes/i, kind: 'laundry', label: 'LAUNDRIES' },
-  { re: /toilets?|\bloos?\b|restrooms?|dunny|\bwee\b|bathroom/i, kind: 'toilets', label: 'PLACES WITH TOILETS' },
-  { re: /\batms?\b|\bbanks?\b|cash out|cash ?point|withdraw/i, kind: 'atm', label: 'ATMS & BANKS' },
-  { re: /mechanics?|tyres?|car repair|service the car|breakdown/i, kind: 'mechanic', label: 'MECHANICS' },
-  // FOOD (cafe-style) — lunch, breakfast, casual bites. Dinner, restaurants and
-  // takeaway are handled by the 'food' entry at the top of the array; the overlapping
-  // terms were removed here so the two kinds don't double-fire on the same question.
-  { re: /\bfood\b|where can i eat|eat here|eating|\blunch\b|\bbreakfast\b|\bmeal\b|places? to eat|bite to eat|fish and chips|burgers?/i, kind: 'cafe', label: 'FOOD & PLACES TO EAT' },
-];
-
-async function fetchPoi(kind, label) {
-  if (!gps) return '';
-  // No connection at all? That's a different problem — and the driver can act on it.
-  if (!navigator.onLine) {
-    return `NO SIGNAL — the phone has no internet connection right now, so nothing can be looked up. Tell the driver plainly that you've lost signal and you'll be able to help once they're back in range. Name nothing.`;
-  }
-  try {
-    const r = await fetch(`${API_URL}poi?lat=${gps.lat}&lon=${gps.lon}&kind=${kind}&radius=25`);
-    const d = await r.json();
-    if (d.results && d.results.length) {
-      // The Worker returns places sorted by straight-line distance — but what matters
-      // is DRIVING time. A cluster of cafés in one town can crowd out a town that's
-      // actually quicker to reach. So: pick a geographically SPREAD shortlist first,
-      // then road-distance those and rank by real driving time.
-      const all = d.results
-        .filter(s => s.lat && s.lon)
-        .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-        .sort((a,b) => a.crow - b.crow);
-
-      // Urgent needs (toilets) want the NEAREST, full stop — not a choice of directions.
-      // Everything else benefits from options in different directions.
-      const urgent = (kind === 'toilets' || kind === 'medical');
-
-      const spread = [];
-      for (const c of all) {
-        if (spread.length >= 10) break;
-        if (urgent) { spread.push(c); continue; }         // nearest first, no spreading
-        if (!spread.length) { spread.push(c); continue; }
-        const isNew = spread.every(p => distKm(c.lat, c.lon, p.lat, p.lon) > 3);
-        if (isNew || spread.length < 4) spread.push(c);
-      }
-      const cands = spread;
-      if (!cands.length) return '';
-
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
-      cands.forEach((c,i) => {
-        c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
-        c.mins = roads[i] ? roads[i].mins : null;
-      });
-      cands.sort((a,b) => a.km - b.km);   // now ranked by REAL driving distance
-
-      const picks = cands.slice(0, 5);
-      notePlaces(picks.map(s => s.name));
-      addPendingPins(picks.map(s => ({
-        name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
-      })));
-
-      // Which direction is each one? Lets the AI offer a real choice.
-      const bearing = (p) => {
-        const dy = p.lat - gps.lat, dx = p.lon - gps.lon;
-        const ang = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
-        return ['north','north-east','east','south-east','south','south-west','west','north-west'][Math.round(ang/45) % 8];
-      };
-      const list = picks.map(s => `${s.name} (${bearing(s)}) — ${distTime(s)}`).join('; ');
-      const guide = urgent
-        ? ` This is urgent — give the NEAREST one only, say what it is and how far. No choices, no alternatives.`
-        : ` Name the best TWO — and if they're in different directions, say so, because the driver may know about roadworks or traffic you don't. There are ${picks.length} showing; if you name fewer, finish by saying the others are pinned and they can tap any one to go there.`;
-      return `NEARBY ${label} (real places, nearest first by ROAD): ${list}.${guide}`;
-    }
-    // Data source said "no" — could be genuinely empty, or the service is down
-    if (d.unavailable || d.error) {
-      return `PLACES SERVICE DOWN — the map data service isn't responding (it's a free public service and gets busy). Tell the driver exactly that: the places service is playing up, not their signal, and it usually comes good within a minute or two. Name nothing.`;
-    }
-    return `NEARBY ${label}: none mapped within 25km — say so honestly and name the nearest sizeable town likely to have one. Do NOT invent distances or travel times.`;
-  } catch(e) {
-    // A thrown error usually means the request never got through
-    const reason = navigator.onLine
-      ? `the map data service isn't responding — tell the driver it's the service playing up, not their signal, and it usually comes good in a minute`
-      : `the phone has lost internet — tell the driver you'll be able to help once they're back in range`;
-    return `LOOKUP FAILED — ${reason}. Name nothing, invent nothing.`;
-  }
-}
-
-// Real places the data has served — replies mentioning them get tap-to-pick buttons
-let knownPlaces = [];
-let fuelShortlist = [];   // stations for the cheapest→nearest dial
-let fuelDialIdx = 0;
-function notePlaces(names) {
-  for (const n of names) {
-    if (n && !knownPlaces.includes(n)) {
-      knownPlaces.push(n);
-      if (knownPlaces.length > 30) knownPlaces.shift();
-    }
-  }
-}
-
-// Ground-truth lists persist between messages — follow-up questions
-// ("which is closest?") shouldn't starve just because the keyword's gone.
-const ctxKeep = {};
-function keepCtx(k, v) { if (v) ctxKeep[k] = { v, t: Date.now() }; }
-function getCtx(k) {
-  const e = ctxKeep[k];
-  return (e && Date.now() - e.t < 15 * 60 * 1000) ? e.v : '';
-}
-
-// ── SOS / EMERGENCY ───────────────────────────────────────────────────────────
-let sosLocationText = '';
-
-async function openSOS() {
-  document.getElementById('sosOverlay').classList.add('open');
-  const here = document.getElementById('sosHere');
-  const coordsEl = document.getElementById('sosCoords');
-  const copyBtn = document.getElementById('sosCopyBtn');
-  const helpEl = document.getElementById('sosHelp');
-  const signalEl = document.getElementById('sosSignal');
-
-  // CONNECTIVITY FIRST — the most important thing out bush is knowing if this works
-  const online = navigator.onLine;
-  if (!online) {
-    signalEl.style.display = 'block';
-    signalEl.innerHTML = '⚠ <b>No signal detected.</b> If you have a satellite phone, Starlink, or your phone supports satellite SOS, use it to call <b>000</b> and read them your location below. Newer phones can send an emergency SOS by satellite with no mobile towers — check your phone\'s Emergency SOS setting.';
-  } else {
-    signalEl.style.display = 'none';
-  }
-
-  if (!gps) {
-    here.textContent = 'Location not set — tap the 📍 pin on the map, or tell 000 the last town or road sign you passed.';
-    coordsEl.textContent = '';
-    copyBtn.style.display = 'none';
-    helpEl.innerHTML = '<div class="sos-help-dist">Set your location to find nearest help.</div>';
-    return;
-  }
-
-  // Coordinates are instant, offline-safe, and the thing 000 needs most
-  const lat = gps.lat.toFixed(5), lon = gps.lon.toFixed(5);
-  coordsEl.textContent = `${lat}, ${lon}`;
-  here.textContent = gpsAddress ? gpsAddress.replace(' (manual)','') : 'Locating nearest address...';
-  copyBtn.style.display = 'inline-block';
-  sosLocationText = `My location: ${here.textContent}. GPS coordinates: ${lat}, ${lon}.`;
-
-  // Everything below needs the internet — skip cleanly if offline
-  if (!online) {
-    here.textContent = gpsAddress ? gpsAddress.replace(' (manual)','') : `${lat}, ${lon}`;
-    helpEl.innerHTML = '<div class="sos-help-dist">Offline — can\'t search for facilities. Call 000; they\'ll direct you to the nearest open hospital.</div>';
-    return;
-  }
-
-  // Enrich address (best-effort; coords already shown)
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gps.lat}&lon=${gps.lon}&format=json&zoom=18`,{headers:{'Accept-Language':'en'}});
-    const d = await r.json();
-    if (d.display_name) { here.textContent = d.display_name; sosLocationText = `My location: ${d.display_name}. GPS coordinates: ${lat}, ${lon}.`; }
-  } catch(e) {}
-
-  // Nearest facilities — honest about TYPE, never claiming capability we can't verify
-  helpEl.innerHTML = '<div class="sos-help-dist">Searching for nearest facilities...</div>';
-  try {
-    const q = `[out:json][timeout:15];(node["amenity"="hospital"](around:100000,${gps.lat},${gps.lon});way["amenity"="hospital"](around:100000,${gps.lat},${gps.lon});node["healthcare"="hospital"](around:100000,${gps.lat},${gps.lon});way["healthcare"="hospital"](around:100000,${gps.lat},${gps.lon});node["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});way["amenity"="clinic"](around:60000,${gps.lat},${gps.lon});node["amenity"="police"](around:60000,${gps.lat},${gps.lon});way["amenity"="police"](around:60000,${gps.lat},${gps.lon}););out center tags 60;`;
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:'data='+encodeURIComponent(q) });
-    const d = await r.json();
-    let places = (d.elements||[]).map(e=>{
-      const t=e.tags||{}; const plat=e.lat||(e.center&&e.center.lat); const plon=e.lon||(e.center&&e.center.lon);
-      if(!plat||!plon) return null;
-      const isPolice = t.amenity==='police';
-      const isHospital = t.amenity==='hospital' || t.healthcare==='hospital';
-      const isClinic = t.amenity==='clinic';
-      if(!isPolice && !isHospital && !isClinic) return null;
-      return { name:t.name||(isPolice?'Police':(isClinic?'Medical centre':'Hospital')),
-               kind: isPolice?'police':(isClinic?'clinic':'hospital'),
-               hasED: t.emergency==='yes',
-               lat:plat, lon:plon, crow:distKm(gps.lat,gps.lon,plat,plon) };
-    }).filter(Boolean);
-
-    const byKind = k => places.filter(p=>p.kind===k).sort((a,b)=>a.crow-b.crow).slice(0,4);
-    const shortlist = [...byKind('hospital'), ...byKind('clinic'), ...byKind('police')];
-    const roads = await roadDistances(gps.lat, gps.lon, shortlist);
-    shortlist.forEach((p,i)=>{ p.km = (roads[i] && roads[i].km!=null)?roads[i].km:p.crow; p.mins = roads[i] ? roads[i].mins : null; });
-
-    const hosp   = shortlist.filter(p=>p.kind==='hospital').sort((a,b)=>a.km-b.km)[0];
-    const clinic = shortlist.filter(p=>p.kind==='clinic').sort((a,b)=>a.km-b.km)[0];
-    const pol    = shortlist.filter(p=>p.kind==='police').sort((a,b)=>a.km-b.km)[0];
-
-    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? `, ${p.mins}'` : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
-    let html = '';
-    if (hosp)   html += row('🏥', hosp, hosp.hasED ? ' · listed with emergency dept' : ' · hospital');
-    if (clinic && (!hosp || clinic.km < hosp.km)) html += row('➕', clinic, ' · medical centre, may be daytime only');
-    if (pol)    html += row('🚓', pol, ' · police');
-    if (!html)  html = '<div class="sos-help-dist">None found nearby — call 000; they\'ll direct you.</div>';
-    helpEl.innerHTML = html;
-  } catch(e) {
-    helpEl.innerHTML = '<div class="sos-help-dist">Couldn\'t search — call 000 and read them your location above.</div>';
-  }
-}
-
-function closeSOS(e) {
-  if (!e || e.target === document.getElementById('sosOverlay')) {
-    document.getElementById('sosOverlay').classList.remove('open');
-  }
-}
-
-function copyLocation() {
-  if (!sosLocationText) return;
-  navigator.clipboard.writeText(sosLocationText)
-    .then(()=>{ const b=document.getElementById('sosCopyBtn'); b.textContent='✓ Copied'; setTimeout(()=>b.textContent='📋 Copy location',2000); })
-    .catch(()=>alert(sosLocationText));
-}
-
-// ── START AGAIN — clear the conversation, keep the trip and settings ──────────
-function resetConversation() {
-  synth?.cancel();
-  try { if (recognition && isListening) recognition.stop(); } catch(e) {}
-  if (convoEnabled) setConvo(false);   // don't leave the mic listening at the front door
-  try { localStorage.removeItem(SESSION_KEY); } catch(e) {}   // fresh start = no session to restore
-  messages.length = 0;              // forget the exchange
-  lastNavReply = ''; lastSpoken = '';
-  knownPlaces = [];
-  fuelShortlist = []; fuelDialIdx = 0;
-  Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
-  clearOptionPins();
-  window._pendingPins = null;
-  document.getElementById('userInput').value = '';
-  // A fresh start means ALL the way back — the start screen, all doors open.
-  document.getElementById('chatArea').innerHTML =
-    '<div class="welcome" id="welcome"><div class="suggestion-grid" id="suggestionGrid"></div></div>';
-  updateSuggestions();
-  busy = false;
-  document.getElementById('sendBtn').disabled = false;
-  hideWhere();
-  renderResumeTrip();     // Resume/Clear cards reflect any active trip
-  renderSavedTrips();
-  renderVehiclePrompt();
-  updateGreeting();
-  document.getElementById('startOverlay').classList.remove('hidden');
-}
-
-// ── SESSION RESTORE — Android kills the page when you switch apps. Come back
-// to where you were, not the start screen.
-const SESSION_KEY = 'navigator_session';
-const SESSION_MAX_AGE = 4 * 60 * 60 * 1000;   // 4 hours — same drive, same session
-
-function saveSession() {
-  try {
-    const inChat = document.getElementById('startOverlay')?.classList.contains('hidden');
-    if (!inChat) { localStorage.removeItem(SESSION_KEY); return; }   // on start screen = nothing to restore
-    // Only keep the LAST FEW visible messages' HTML — a whole session's chat
-    // grows unbounded and truncating it mid-tag silently corrupts the restore
-    // after enough back-and-forth. The structured `messages` array carries the
-    // real conversation; the HTML snippet is just for a nice-looking reopen.
-    const bubbles = Array.from(document.querySelectorAll('#chatArea .msg'));
-    const recentHtml = bubbles.slice(-6).map(b => b.outerHTML).join('');
-    localStorage.setItem(SESSION_KEY, JSON.stringify({
-      ts: Date.now(),
-      chat: recentHtml.slice(0, 40000),     // a handful of messages is never near this
-      messages: messages.slice(-12),        // recent turns only
-      runDest: currentRunDest,
-      tripCtx: tripContext,
-      vehicle: currentVehicle,
-      solo: document.getElementById('soloChip')?.classList.contains('active') || false,
-      pins: window._pendingPins || [],
-      knownPlaces: knownPlaces.slice(-20),
-      lastSpoken,
-    }));
-  } catch(e) {}
-}
-
-function restoreSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return false;
-    const s = JSON.parse(raw);
-    if (!s || !s.ts || Date.now() - s.ts > SESSION_MAX_AGE) {
-      localStorage.removeItem(SESSION_KEY);
-      return false;
-    }
-    // Put everything back
-    if (s.vehicle && VEHICLES[s.vehicle]) selectVehicle(s.vehicle);
-    if (s.solo) document.getElementById('soloChip')?.classList.add('active');
-    currentRunDest = s.runDest || '';
-    tripContext = s.tripCtx || '';
-    messages.length = 0;
-    (s.messages || []).forEach(m => messages.push(m));
-    knownPlaces = s.knownPlaces || [];
-    lastSpoken = s.lastSpoken || '';
-    if (s.chat) {
-      // Buttons with JS-attached handlers won't survive a reload — strip the
-      // dead ones, but if we have the pinned coordinates, rebuild a REAL
-      // Navigate button rather than just deleting the only useful action.
-      let clean = s.chat.replace(/<button(?![^>]*onclick)[^>]*>[\s\S]*?<\/button>/gi, '')
-                        .replace(/<div class="feedback-row">[\s\S]*?<\/div>/gi, '');
-      document.getElementById('chatArea').innerHTML = clean;
-      // Re-attach live Navigate buttons for any pinned place mentioned in the last reply
-      if (s.pins && s.pins.length) {
-        const msgs = document.querySelectorAll('.msg.nav .msg-bubble');
-        const lastBub = msgs[msgs.length - 1];
-        if (lastBub) {
-          const txt = lastBub.textContent.toLowerCase();
-          const relevant = s.pins.filter(p => p.name && txt.includes(p.name.toLowerCase()));
-          relevant.slice(0, 3).forEach((p, idx) => {
-            const btn = document.createElement('button');
-            btn.className = 'nav-btn';
-            btn.style.marginTop = idx === 0 ? '8px' : '6px';
-            const t = p.mins ? ` — ${p.mins}'` : '';
-            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}${t}` : `📍 Navigate to ${p.name}${t}`;
-            btn.onclick = () => navigateTo(p.name, p.lat, p.lon);
-            lastBub.appendChild(btn);
-          });
-        }
-      }
-    }
-    document.getElementById('startOverlay').classList.add('hidden');
-    updateSuggestions();
-    // Redraw the route and pins once the map is genuinely ready — not a guessed
-    // delay, which silently failed if the map hadn't finished initialising.
-    if (window._navMap) {
-      // Map's already up — draw straight away
-      if (currentRunDest) plotTripRoute(currentRunDest);
-      if (s.pins && s.pins.length) showOptionPins(s.pins);
-    } else {
-      // Map's still loading — queue for the moment it's ready
-      if (currentRunDest) window._pendingRouteDest = currentRunDest;
-      if (s.pins && s.pins.length) window._pendingOptionPins = s.pins;
-    }
-    return true;
-  } catch(e) {}
-  return false;
-}
-
-// Save whenever the app goes to the background, or anything important changes
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') saveSession();
-});
-window.addEventListener('pagehide', saveSession);
-window.addEventListener('beforeunload', saveSession);
+SOLO DRIVER MODE (when flagged in context):
+- Same two sentence format.
+- Weight safety in stop selection — well-lit, staffed, reviewed.
+- Replace navigation sentence with check-in reminder when stopping for the night.
+
+CAMPSITE QUERIES:
+- For caravans: prioritise powered sites with dump points, drive-through access, caravan-friendly.
+- For campervans: prioritise free camps and low-cost options where self-contained is permitted.
+- Always flag if a site has height restrictions or is unsuitable for the vehicle type.
+- Name the campsite, distance, key facilities, and cost if known.`;
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
-async function sendMessage(silent){
-  unlockAudio();
+async function sendMessage(){
   const inp=document.getElementById('userInput');
   const text=inp.value.trim();
   if(!text||busy) return;
-
-  // "Say again" / "repeat" — re-speak the last reply, no AI round-trip
-  if (/^(say again|say that again|repeat( that)?|come again|what did you say|pardon|again please|can you repeat)\b/i.test(text)) {
-    inp.value=''; inp.style.height='auto';
-    if (lastSpoken) { synth?.cancel(); speak(lastSpoken); }
-    return;
-  }
-
-  // "Start again" / "forget that" — wipe the conversation, keep the trip
-  if (/^(start again|start over|forget (that|it|all that)|reset|scrap that|clear (that|this)|let'?s start again)\b/i.test(text)) {
-    inp.value=''; inp.style.height='auto';
-    resetConversation();
-    return;
-  }
-
-  // "Close" / "that's all" — turn off conversation mode without a round-trip
-  if (/^(close|that'?s all|that is all|i'?m (all )?(done|finished)|finished|stop listening|goodbye|bye|thanks that'?s all)\b/i.test(text)) {
-    inp.value=''; inp.style.height='auto';
-    if (convoEnabled) {
-      setConvo(false);
-      const bye = 'Righto — conversation off. Tap the mic when you need me.';
-      addMsg('nav', bye); lastSpoken = bye; speak(bye);
-    }
-    return;
-  }
-
   inp.value=''; inp.style.height='auto';
   busy=true; document.getElementById('sendBtn').disabled=true;
   synth?.cancel();
-  if (!silent) addMsg('user',text);   // buttons don't echo their own query back
-  else document.getElementById('welcome')?.remove();   // but do clear the welcome block
-  showTyping();  // show "working" during the (sometimes slow) data-gathering, not just the AI call
-  clearOptionPins();          // new question — old option pins go
-  window._pendingPins = null;
-
-  // No active trip and the question names a place? Remember it —
-  // a thumbs-up on the answer adopts it as the trip.
-  if (!currentRunDest) {
-    const m = text.match(/(?:\bto|\btowards?|\bfor)\s+([A-Z][a-zA-Z']+(?:\s+[A-Z][a-zA-Z']+){0,2})/);
-    pendingTripDest = m ? m[1].replace(/[.,!?]+$/,'').trim() : null;
-  }
-
-  // "Yes" answers a question — inherit the topic from Navigator's own words,
-  // so confirming "did you mean gyms?" actually fetches gyms.
-  const affirm = /^(yes|yeah|yep|yup|correct|that's right|sure|ok(ay)?|please do|go ahead)\b/i.test(text.trim());
-  const scanText = (affirm && lastNavReply) ? text + ' ' + lastNavReply : text;
-
-  // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
-  // every state) always; LIVE FUEL PRICES only when price is the intent —
-  // near a border the price list anchors the AI on far-away stations.
-  // Fuel questions get ONE list: every servo around them, priced or not,
-  // nearest first by road, all pinned on the map. No separate paths.
-  let fuelCtx = '';
-  let stationsCtx = '';
-  const fuelQuery = /fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(scanText);
-  if (fuelQuery) {
-    fuelCtx = await fetchFuelPrices();
-  }
-  // Stay-related question? Grab real nearby camps and parks — but ONLY near
-  // where the driver actually is. If they named a different town, say so
-  // honestly rather than silently searching the wrong place.
-  let campsCtx = '';
-  if (/camp|caravan park|powered site|dump point|free camp/i.test(scanText)) {
-    const namedElsewhere = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
-    const currentTown = (gpsAddress || '').split(',')[0].trim().toLowerCase();
-    if (namedElsewhere && namedElsewhere[1].toLowerCase() !== currentTown) {
-      campsCtx = ` NOTE: the driver asked about "${namedElsewhere[1]}" but is currently nowhere near there — say plainly you can only check places near their CURRENT position right now, and name ${namedElsewhere[1]} back to them so they know you understood. Do not invent or guess anything about ${namedElsewhere[1]}.`;
-    } else {
-      campsCtx = await fetchCamps();
-    }
-  }
-  // Roof-over-our-heads question? Grab hotels, motels, backpackers — same
-  // current-position-only honesty as camps above.
-  let accomCtx = '';
-  if (/hotel|motel|hostel|backpacker|resort|accommodation|a room|cabin|b ?& ?b|bnb|luxury|treat ourselves|somewhere (nice|comfortable|to sleep)|stay tonight|overnight/i.test(scanText)) {
-    const namedElsewhereA = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
-    const currentTownA = (gpsAddress || '').split(',')[0].trim().toLowerCase();
-    if (namedElsewhereA && namedElsewhereA[1].toLowerCase() !== currentTownA) {
-      accomCtx = ` NOTE: the driver asked about accommodation "in ${namedElsewhereA[1]}" but is currently nowhere near there — say plainly you can only check places near their CURRENT position right now, and name ${namedElsewhereA[1]} back to them so they know you understood. Do not invent or guess anything about ${namedElsewhereA[1]}.`;
-    } else {
-      accomCtx = await fetchAccom();
-    }
-  }
-  // Everyday places? Ground-truth up to two categories per question
-  let poiCtx = '';
-  const poiHits = POI_TRIGGERS.filter(t => t.re.test(scanText))
-    .filter((t, i, arr) => arr.findIndex(x => x.kind === t.kind) === i)   // one lookup per kind
-    .slice(0, 2);
-  for (const t of poiHits) {
-    const got = await fetchPoi(t.kind, t.label);
-    if (got) {
-      poiCtx += (poiCtx ? ' ' : '') + got;
-      keepCtx('poi:' + t.kind, got);   // remembered per category, never cross-contaminated
-    }
-  }
-
-  // Remember what was fetched; reuse remembered lists for follow-ups
-  keepCtx('fuel', fuelCtx); keepCtx('stations', stationsCtx);
-  keepCtx('camps', campsCtx); keepCtx('accom', accomCtx);
-  fuelCtx = fuelCtx || getCtx('fuel');
-  stationsCtx = stationsCtx || getCtx('stations');
-  campsCtx = campsCtx || getCtx('camps');
-  accomCtx = accomCtx || getCtx('accom');
-  // POI context is remembered PER CATEGORY — a stale toilets lookup must never
-  // be served up in answer to a food question.
-  if (!poiCtx && poiHits.length) {
-    poiCtx = poiHits.map(t => getCtx('poi:' + t.kind)).filter(Boolean).join(' ');
-  }
+  addMsg('user',text);
 
   const driveHrs=((Date.now()-driveStart)/3600000).toFixed(1);
   const isSolo=document.getElementById('soloChip').classList.contains('active');
-  const rangeText=document.getElementById('rangeChip').textContent.replace('🛣 ','');
+  const rangeText=document.getElementById('rangeChip').textContent.replace('⛽ ','');
   const condText=document.getElementById('condChip').textContent.replace('🌤 ','');
   const v=VEHICLES[currentVehicle];
 
-  // Real-world economy from the driver's own fuel log beats generic estimates
-  let econCtx='';
-  try {
-    const lastEcon=[...getFuelLog()].reverse().find(x=>x.l100);
-    if(lastEcon) econCtx=`Driver's logged fuel economy: ${lastEcon.l100}L/100km.`;
-  } catch(e) {}
-
-  // Route numbers from OSRM — the AI plans legs from these, never guesses.
-  // Deviated more than 20km from where the route was computed? Recompute first.
-  let routeCtx='';
-  if (window._tripRoute && currentRunDest && gps) {
-    if (distKm(gps.lat, gps.lon, window._tripRoute.originLat, window._tripRoute.originLon) > 20) {
-      await plotTripRoute(currentRunDest);
-    }
-    routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${window._tripRoute.hours} driving hours at car pace.`;
-  }
-
-  // Are we somewhere the maps actually know? If not, every distance is suspect.
-  const snap = await checkRoadSnap();
-  const offRoadCtx = offRoadNote(snap);
-
   const ctx=[
-    gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'NO LOCATION FIX — do not name or guess specific nearby places; ask the driver to tap the 📍 pin to set their location first.',
-    offRoadCtx,
-    userRego?`Vehicle rego: ${userRego}.`:'',
-    userVan?`Driver's van: ${userVan}.`:'',
+    gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'Location: Australia',
     weatherCtx,
-    stationsCtx,
-    fuelCtx,
-    econCtx,
-    routeCtx,
-    campsCtx,
-    accomCtx,
-    poiCtx,
     v.systemNote,
-    `Fuel type: ${selectedFuel}.${rangeText!=='Range'?' Driver-set fuel range: '+rangeText.replace('Range: ','')+'.':''}`,
+    `Fuel type: ${selectedFuel}. ${rangeText}.`,
     `Drive time: ${driveHrs} hours.`,
     condText!=='Conditions'?`Driver reports: ${condText}.`:'',
-    isSolo?'SOLO MODE ACTIVE.':'',
+    isSolo?'SOLO DRIVER MODE ACTIVE.':'',
     tripContext?`Trip plan: ${tripContext}`:'',
   ].filter(Boolean).join(' ');
 
   messages.push({role:'user',content:`[Context: ${ctx}]\n\n${text}`});
-  // Keep the working conversation bounded — an unbounded array sent to the AI
-  // on every turn grows the payload every round and can degrade replies over
-  // a long back-and-forth session. Recent context is what matters at the wheel.
-  if (messages.length > 16) messages.splice(0, messages.length - 16);
+  showTyping();
+
   try{
-    const res=await fetch(API_URL,{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,system:SYSTEM,messages})
+      headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:120,system:SYSTEM,messages})
     });
     const data=await res.json();
     hideTyping();
@@ -3214,10 +1089,6 @@ async function sendMessage(silent){
     messages.push({role:'assistant',content:reply});
     addMsg('nav',reply);
     speak(reply);
-    // Pin the options we offered onto the map — pictorial reference at a glance
-    if (window._pendingPins && window._pendingPins.length) {
-      showOptionPins(window._pendingPins);
-    }
   }catch(e){
     hideTyping();
     addMsg('nav','Connection issue — check your internet and try again.');
@@ -3225,58 +1096,13 @@ async function sendMessage(silent){
   busy=false; document.getElementById('sendBtn').disabled=false;
 }
 
-// ── VERSION CHECK ─────────────────────────────────────────────────────────────
-// Compares this page's build stamp against the live file on GitHub.
-// Current → stamp turns green with a tick. Stale → tap-to-update banner.
-async function checkVersion(){
-  try{
-    const res = await fetch(window.location.pathname + '?nocache=' + Date.now(), {cache:'no-store'});
-    const html = await res.text();
-    // Grab the stamp's inner HTML (may contain <br>), then normalise to plain text
-    const m = html.match(/id="buildStamp"[^>]*>([\s\S]*?)<\/div>/);
-    if(!m) return;
-    const norm = s => s.replace(/<br\s*\/?>/gi,' ').replace(/<[^>]+>/g,'').replace(/✓/g,'').replace(/\s+/g,' ').trim();
-    const liveStamp = norm(m[1]);
-    const el = document.getElementById('buildStamp');
-    const myStamp = norm(el.innerHTML);
-    if(liveStamp === myStamp){
-      el.style.color = '#2ECC71';
-    } else {
-      showUpdateBanner();
-    }
-  }catch(e){}
-}
-
-function showUpdateBanner(){
-  if(document.getElementById('updateBanner')) return;
-  const b = document.createElement('div');
-  b.id = 'updateBanner';
-  b.textContent = '⬆ New version available — tap to update';
-  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:3000;background:#F5A623;color:#0A1628;text-align:center;padding:10px;font-size:13px;font-weight:600;cursor:pointer;';
-  b.onclick = () => {
-    b.textContent = '⬆ Updating...';
-    // Force a fresh copy past any cache, then hard-reload
-    fetch(window.location.pathname + '?bust=' + Date.now(), {cache:'reload'})
-      .finally(() => { window.location.replace(window.location.pathname + '?v=' + Date.now()); });
-  };
-  document.body.appendChild(b);
-}
-
 // ── INIT ──────────────────────────────────────────────────────────────────────
 if(synth) synth.onvoiceschanged=()=>synth.getVoices();
-loadManualLocation();
 initGPS();
 updateSuggestions();
 loadMapPreference();
 loadProfile();
-renderSavedTrips();
-renderResumeTrip();
-renderVehiclePrompt();
-// Coming back after switching apps? Pick up exactly where we left off.
-restoreSession();
 setInterval(fetchWeather,600000);
-checkVersion();
-setInterval(checkVersion, 900000);
 </script>
 </body>
 </html>
