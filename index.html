@@ -288,7 +288,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 13 Jul 2026, 07:00 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 16 Jul 2026, 02:09 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -2689,6 +2689,10 @@ async function fetchAccom() {
 
 // ── EVERYDAY PLACES — gyms, cafes, chemists... proximity ground truth (OSM) ──
 const POI_TRIGGERS = [
+  // Restaurants & takeaway — matched ahead of the cafe catch-all below. Deliberately
+  // NOT 'lunch' (stays with cafes) and NOT bare 'eat' (too broad); phrase forms like
+  // "somewhere to eat" still land here.
+  { re: /\bdinner\b|restaurants?|take ?away|somewhere to eat|something to eat|\ba feed\b|\bhungry\b/i, kind: 'food', label: 'RESTAURANTS & TAKEAWAY' },
   { re: /\bgyms?\b|fitness|work ?out/i, kind: 'gym', label: 'GYMS' },
   { re: /coffee|\bcafes?\b|caf\u00e9s?|cuppa|flat white|latte|brew/i, kind: 'cafe', label: 'CAFES' },
   { re: /supermarkets?|groceries|grocery|woolworths|coles|\biga\b|shopping/i, kind: 'supermarket', label: 'SUPERMARKETS' },
@@ -2700,8 +2704,10 @@ const POI_TRIGGERS = [
   { re: /toilets?|\bloos?\b|restrooms?|dunny|\bwee\b|bathroom/i, kind: 'toilets', label: 'PLACES WITH TOILETS' },
   { re: /\batms?\b|\bbanks?\b|cash out|cash ?point|withdraw/i, kind: 'atm', label: 'ATMS & BANKS' },
   { re: /mechanics?|tyres?|car repair|service the car|breakdown/i, kind: 'mechanic', label: 'MECHANICS' },
-  // FOOD — the big one. Anything about eating lands here.
-  { re: /\bfood\b|\beat\b|eating|hungry|restaurants?|\bdinner\b|\blunch\b|\bbreakfast\b|\bmeal\b|somewhere to eat|places? to eat|bite to eat|feed\b|takeaway|take ?away|fish and chips|burgers?/i, kind: 'cafe', label: 'FOOD & PLACES TO EAT' },
+  // FOOD (cafe-style) — lunch, breakfast, casual bites. Dinner, restaurants and
+  // takeaway are handled by the 'food' entry at the top of the array; the overlapping
+  // terms were removed here so the two kinds don't double-fire on the same question.
+  { re: /\bfood\b|where can i eat|eat here|eating|\blunch\b|\bbreakfast\b|\bmeal\b|places? to eat|bite to eat|fish and chips|burgers?/i, kind: 'cafe', label: 'FOOD & PLACES TO EAT' },
 ];
 
 async function fetchPoi(kind, label) {
