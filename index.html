@@ -295,7 +295,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 11:09 AM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 11:35 AM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -714,10 +714,10 @@ const VEHICLES = {
     range: 50,
     rangeLabel: '50km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel within 20km' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
-      { icon:'🍽', label:'Food',   desc:'eat nearby', query:'Where\'s somewhere to eat nearby — dinner or takeaway?' },
+      { icon:'⛽', label:'Servo', query:'Cheapest fuel within 20km' },
+      { icon:'☕', label:'Break', query:'Where can I stop for coffee or food near here?' },
+      { icon:'🏕', label:'Camps', query:'Nearest camp sites and caravan parks' },
+      { icon:'🌤', label:'Ahead', query:'What are the weather and driving conditions ahead on my route?' },
     ],
     systemNote: 'Vehicle: standard car, no towing. Fuel range approximately 50km before next stop needed. Normal parking, any fuel station. Toll roads and traffic congestion are relevant — wind impact is not significant for a car and should not be raised unless conditions are genuinely severe.',
   },
@@ -727,10 +727,10 @@ const VEHICLES = {
     range: 300,
     rangeLabel: '300km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'van access', query:'Cheapest fuel in the next 300km I can get into with the van' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat, somewhere I can park the van?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
-      { icon:'🍽', label:'Food',   desc:'van access', query:'Where\'s somewhere to eat nearby I can get the van into?' },
+      { icon:'⛽', label:'Servo', query:'Cheapest fuel in the next 300km I can get into with the van' },
+      { icon:'☕', label:'Break', query:'Where can I stop for coffee or food, somewhere I can park the van?' },
+      { icon:'🏕', label:'Camps', query:'Nearest camp sites and caravan parks' },
+      { icon:'🌤', label:'Ahead', query:'What are the weather and driving conditions ahead on my route?' },
     ],
     systemNote: 'Vehicle: car towing a caravan. All stops must have caravan-accessible forecourts — wide entry, drive-through, no boom gates, room to manoeuvre. Flag any access issues explicitly. Wind significantly affects towing stability and fuel range — always relevant.',
   },
@@ -740,10 +740,10 @@ const VEHICLES = {
     range: 200,
     rangeLabel: '200km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel in the next 200km for a campervan' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
-      { icon:'🍽', label:'Food',   desc:'eat nearby', query:'Where\'s somewhere to eat nearby — dinner or takeaway?' },
+      { icon:'⛽', label:'Servo', query:'Cheapest fuel in the next 200km for a campervan' },
+      { icon:'☕', label:'Break', query:'Where can I stop for coffee or food, somewhere I can park the van?' },
+      { icon:'🏕', label:'Camps', query:'Nearest camp sites and caravan parks' },
+      { icon:'🌤', label:'Ahead', query:'What are the weather and driving conditions ahead on my route?' },
     ],
     systemNote: 'Vehicle: self-contained campervan. Prioritise free and low-cost camping spots over paid caravan parks where self-contained facilities allow it — this is a key differentiator from caravan mode. Height clearance may be relevant. Range approximately 200km between fuel stops.',
   },
@@ -753,10 +753,10 @@ const VEHICLES = {
     range: 400,
     rangeLabel: '400km',
     suggestions: [
-      { icon:'⛽', label:'Servo',  desc:'truck diesel', query:'Cheapest diesel in the next 400km suitable for a truck' },
-      { icon:'☕', label:'Break',  desc:'coffee / food', query:'Nearest truck-friendly stop for a coffee or a feed, somewhere I can park the rig' },
-      { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
-      { icon:'🍽', label:'Food',   desc:'truck-friendly', query:'Where\'s a truck-friendly place for dinner or a takeaway nearby?' },
+      { icon:'⛽', label:'Servo', query:'Cheapest diesel in the next 400km suitable for a truck' },
+      { icon:'☕', label:'Break', query:'Where can I stop for coffee or food, somewhere I can park the rig?' },
+      { icon:'🏕', label:'Camps', query:'Nearest camp sites and caravan parks' },
+      { icon:'🌤', label:'Ahead', query:'What are the weather and driving conditions ahead on my route?' },
     ],
     systemNote: 'Vehicle: truck. Requires truck-friendly fuel stops with diesel, adequate clearance, and room to manoeuvre. Always flag low bridges and weight restrictions proactively. Driving hour limits are a legal compliance requirement in Australia — when asked about rest breaks, treat this as mandatory, not optional, and reference fatigue management regulations if drive time suggests it is relevant. Range approximately 400km.',
   },
