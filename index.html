@@ -76,6 +76,14 @@
   .alert-chip.wind{border-color:rgba(52,152,219,0.4);color:#74b9e8;}
   .alert-chip.fatigue{border-color:rgba(46,204,113,0.3);color:var(--green);}
 
+  /* MAP GREETING — brief popup over the map, fades in ~5s after load, gone ~5s later */
+  .map-greeting{position:absolute;top:14px;left:50%;transform:translateX(-50%);max-width:88%;
+    background:rgba(10,22,40,0.92);border:1px solid rgba(245,166,35,0.5);color:var(--white);
+    font-size:13px;font-weight:600;line-height:1.35;padding:9px 16px;border-radius:20px;text-align:center;
+    opacity:0;transition:opacity 0.6s ease;pointer-events:none;z-index:500;box-shadow:0 4px 14px rgba(0,0,0,0.45);}
+  .map-greeting.show{opacity:1;}
+  .map-greeting span{color:var(--amber);}
+
   /* CONTEXT CHIPS */
   .context-panel{background:var(--navy2);border-bottom:1px solid rgba(255,255,255,0.06);padding:7px 14px;display:flex;gap:6px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;}
   .context-panel::-webkit-scrollbar{display:none;}
@@ -94,13 +102,12 @@
   .welcome h1 span{color:var(--amber);}
   .welcome p{font-size:11px;color:var(--gray2);line-height:1.5;}
 
-  /* QUICK SUGGESTION ROW */
-  .suggestion-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;}
-  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 4px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;}
+  /* QUICK SUGGESTION ROW — 4 across, icon + short label only */
+  .suggestion-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px;}
+  .suggestion{background:var(--navy2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 2px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;}
   .suggestion:hover,.suggestion:active{border-color:var(--amber);background:rgba(245,166,35,0.06);}
-  .sug-icon{font-size:26px;line-height:1;}
+  .sug-icon{font-size:23px;line-height:1;}
   .sug-label{font-size:10px;font-weight:600;color:var(--amber);line-height:1.2;}
-  .sug-desc{font-size:10px;font-weight:400;color:var(--gray2);line-height:1.2;}
 
   /* MESSAGES */
   .msg{display:flex;gap:8px;max-width:640px;}
@@ -288,7 +295,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 10:34 AM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 11:09 AM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -480,14 +487,15 @@
              cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">◎</button>
     <div class="map-placeholder" id="mapPlaceholder" onclick="openLocSheet()" style="cursor:pointer;">
       <div class="map-placeholder-icon">🗺</div>
-      <div class="map-placeholder-text" id="mapPlaceholderText">Locating... tap to set manually</div>
+      <div class="map-placeholder-text" id="mapPlaceholderText">Locating…</div>
     </div>
   </div>
   <div class="alert-strip">
     <div class="alert-chip gps" id="gpsChip" onclick="openLocSheet()" style="cursor:pointer;">📍 Locating...</div>
-    <div class="alert-chip wind" id="windChip">🌬 Wind: —</div>
+    <div class="alert-chip wind" id="windChip">🌬 —</div>
     <div class="alert-chip fatigue" id="fatigueChip">🕐 0h 0m</div>
   </div>
+  <div class="map-greeting" id="mapGreeting"></div>
 </div>
 
 <!-- CONTEXT CHIPS -->
@@ -515,7 +523,7 @@
       <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
     </div>
     <div class="input-row" id="inputRow">
-      <textarea id="userInput" placeholder="Or type here..." rows="1"
+      <textarea id="userInput" placeholder="Type here…" rows="1"
         onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
       <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
       <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙</button>
@@ -709,6 +717,7 @@ const VEHICLES = {
       { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel within 20km' },
       { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
       { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'🍽', label:'Food',   desc:'eat nearby', query:'Where\'s somewhere to eat nearby — dinner or takeaway?' },
     ],
     systemNote: 'Vehicle: standard car, no towing. Fuel range approximately 50km before next stop needed. Normal parking, any fuel station. Toll roads and traffic congestion are relevant — wind impact is not significant for a car and should not be raised unless conditions are genuinely severe.',
   },
@@ -721,6 +730,7 @@ const VEHICLES = {
       { icon:'⛽', label:'Servo',  desc:'van access', query:'Cheapest fuel in the next 300km I can get into with the van' },
       { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat, somewhere I can park the van?' },
       { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'🍽', label:'Food',   desc:'van access', query:'Where\'s somewhere to eat nearby I can get the van into?' },
     ],
     systemNote: 'Vehicle: car towing a caravan. All stops must have caravan-accessible forecourts — wide entry, drive-through, no boom gates, room to manoeuvre. Flag any access issues explicitly. Wind significantly affects towing stability and fuel range — always relevant.',
   },
@@ -733,6 +743,7 @@ const VEHICLES = {
       { icon:'⛽', label:'Servo',  desc:'check options', query:'Cheapest fuel in the next 200km for a campervan' },
       { icon:'☕', label:'Break',  desc:'coffee / food', query:'Where can I stop for a coffee or a bite to eat near here?' },
       { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'🍽', label:'Food',   desc:'eat nearby', query:'Where\'s somewhere to eat nearby — dinner or takeaway?' },
     ],
     systemNote: 'Vehicle: self-contained campervan. Prioritise free and low-cost camping spots over paid caravan parks where self-contained facilities allow it — this is a key differentiator from caravan mode. Height clearance may be relevant. Range approximately 200km between fuel stops.',
   },
@@ -745,6 +756,7 @@ const VEHICLES = {
       { icon:'⛽', label:'Servo',  desc:'truck diesel', query:'Cheapest diesel in the next 400km suitable for a truck' },
       { icon:'☕', label:'Break',  desc:'coffee / food', query:'Nearest truck-friendly stop for a coffee or a feed, somewhere I can park the rig' },
       { icon:'🚻', label:'Toilets',desc:'nearest', query:'Where are the nearest public toilets?' },
+      { icon:'🍽', label:'Food',   desc:'truck-friendly', query:'Where\'s a truck-friendly place for dinner or a takeaway nearby?' },
     ],
     systemNote: 'Vehicle: truck. Requires truck-friendly fuel stops with diesel, adequate clearance, and room to manoeuvre. Always flag low bridges and weight restrictions proactively. Driving hour limits are a legal compliance requirement in Australia — when asked about rest breaks, treat this as mandatory, not optional, and reference fatigue management regulations if drive time suggests it is relevant. Range approximately 400km.',
   },
@@ -808,6 +820,34 @@ function updateGreeting() {
     msg = `Good ${tod}${name ? ', ' + name : ''} — what are we up to today?`;
   }
   el.innerHTML = msg;
+}
+
+// ── MAP GREETING — short, time-aware, name + place; fades in ~5s after the map
+// loads and clears ~5s later. Composed at show-time so GPS has usually arrived.
+function mapGreetingText() {
+  const name = (userName && userName !== 'there') ? userName : '';
+  const h = new Date().getHours();
+  let place = '';
+  if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
+  if (place && /^-?\d/.test(place)) place = ''; // raw coordinates aren't a place name
+  const ps = place ? '<span>' + place + '</span>' : '';
+  const nm = name ? ', ' + name : '';
+  if (h >= 22 || h < 5) {
+    return place ? `Burning the midnight oil in ${ps}${nm}?` : `Burning the midnight oil${nm}?`;
+  }
+  const tod = h < 12 ? 'morning' : (h < 17 ? 'afternoon' : 'evening');
+  return `Good ${tod}${place ? ' in ' + ps : ''}${nm} — what are we up to today?`;
+}
+
+function showMapGreeting() {
+  const el = document.getElementById('mapGreeting');
+  if (!el || el.dataset.shown) return;
+  el.dataset.shown = '1'; // once per load
+  setTimeout(() => {
+    el.innerHTML = mapGreetingText();
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 5000);
+  }, 5000);
 }
 
 // ── PROFILE SETUP (first time only — name + owned vehicles) ──────────────────
@@ -895,7 +935,10 @@ function loadProfile() {
       if (p.fuel) selectedFuel = p.fuel;
       applyProfile();
       document.getElementById('profileOverlay').classList.add('hidden');
-      document.getElementById('startOverlay').classList.remove('hidden');
+      // Returning user — skip the welcome screen and land straight on the map.
+      // The greeting becomes a brief popup over the map instead.
+      document.getElementById('startOverlay').classList.add('hidden');
+      showMapGreeting();
     } else {
       // First time ever — show profile setup
       document.getElementById('profileOverlay').classList.remove('hidden');
@@ -1504,16 +1547,11 @@ function updateSuggestions() {
   const v = VEHICLES[currentVehicle];
   const grid = document.getElementById('suggestionGrid');
   if (!grid) return;
-  // The sub-label says which brain is running, so the behaviour is never a surprise
-  const onTrip = !!currentRunDest;
-  const modeDesc = onTrip
-    ? { 'Servo':'ahead on route', 'Break':'on your way', 'Toilets':'on your way' }
-    : { 'Servo':'nearby', 'Break':'nearby', 'Toilets':'nearest' };
+  // Icon + short label only — four pegs across one row
   grid.innerHTML = v.suggestions.map(s => `
     <div class="suggestion" onclick="suggest('${s.query.replace(/'/g,"\\'")}')">
       <span class="sug-icon">${s.icon}</span>
       <span class="sug-label">${s.label}</span>
-      <span class="sug-desc">${modeDesc[s.label] || s.desc || ''}</span>
     </div>
   `).join('');
 }
