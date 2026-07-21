@@ -1,10 +1,14 @@
 # Navigator
 
-Navigator is an **AI driving companion web app for Australian caravanners** (and cars, campervans, trucks). It gives drivers live, context-aware help at the wheel: cheapest fuel nearby, weather, nearby camps and caravan parks, accommodation, points of interest, routing, and an SOS panel — all driven by a conversational AI that receives the driver's live situation (GPS, vehicle, fuel type/range, trip plan, conditions) as context.
+Navigator is a **voice-first travel co-pilot web app for Australian road trippers — especially caravanners** (and cars, campervans, trucks). It plans the journey, finds what you need along the way (cheapest fuel, camps & caravan parks, weather, accommodation, POIs), and hands the actual driving to a real sat-nav — *"Navigator thinks, Google Maps steers."* A conversational AI receives the driver's live situation (GPS, vehicle, fuel type/range, trip plan, conditions) as context. A permanent SOS button is always visible.
+
+**`SPEC.md` (v1.2) in the repo root is the product doctrine — read it before UI/UX work; §0 (honesty: never silently overpromise) governs every wording choice.** §13 lists the build order; the app is being restructured session-by-session toward it.
+
+**UI shape (as of Session 1 — SPEC §10–11):** the app opens to a **home screen** — greeting · guidance (what it is, three example spoken phrases, the Drive→Stop→Brief rhythm) · a big central **mic** · a trip card when a trip is live · Solo indicator when armed. The **map is not on the home screen**: it lives behind a **results view** (`#appView`) that opens when a query returns mappable results (`showOptionPins` reveals `#mapWrap`), with an in-app "← Home" back button. **First run shows a one-time setup interview** (`#setupScreen`: name · rig · fuel · height/length · owned apps → `ownedApps` handoffs · optional solo contact), each question carrying a short "why". Returning/old profiles migrate silently and go straight home. **There is no welcome/start overlay** — it was deleted along with its popstate/pageshow/history guards (Bug 2 has nothing to resurrect). **The suggestion pegs are retired** — those are spoken requests now.
 
 ## Shape of the codebase
 
-- **The entire app is a single file: `index.html`** (~3,300 lines, ~176 KB). It contains all markup, all CSS (one `<style>` block), and all JavaScript (one `<script>` block). There is **no build step, no framework, no bundler, no `node_modules`**. What you see in the file is exactly what ships.
+- **The entire app is a single file: `index.html`** (~3,400 lines, ~185 KB). It contains all markup, all CSS (one `<style>` block), and all JavaScript (one `<script>` block). There is **no build step, no framework, no bundler, no `node_modules`**. What you see in the file is exactly what ships. (`.nojekyll` at the repo root keeps GitHub Pages from running Jekyll — it must stay in every push.)
 - Deployed as a static page via **GitHub Pages** at **https://csbowring6-source.github.io/Navigator2** (repo `csbowring6-source/Navigator2`, branch `main`).
 - The app self-updates: on load and every 15 min it re-fetches its own URL, compares an embedded `#buildStamp` against the live copy, and shows a "tap to update" banner if stale (`checkVersion()` near the bottom of `index.html`).
 
@@ -57,6 +61,8 @@ Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped
 
 ## Practical orientation for editing `index.html`
 
-- **Vehicle profiles** (`VEHICLES`, `FUEL_TYPES`) define per-vehicle fuel range, suggestion chips, and AI "system notes" that shape advice — car / caravan / campervan / truck.
+- **Screens & view switching**: `#setupScreen` (first-run interview) · `#homeScreen` (default landing) · `#appView` (results/conversation, holds the map + chat + input). `loadProfile()` decides home-vs-setup on load; `showHome()` / `openAppView()` / `backHome()` swap them; `homeMic()` opens the results view and starts listening; `revealMap()` un-hides `#mapWrap` when results land. No overlays gate any of this.
+- **Vehicle profiles** (`VEHICLES`, `FUEL_TYPES`) define per-vehicle fuel range and AI "system notes" that shape advice — car / caravan / campervan / truck. (The old per-vehicle suggestion pegs are retired; `updateSuggestions()` is now a dormant no-op.)
+- **Profile schema** (`navigator_profile`): `name, vehicles, rego, van, fuel, height, length, ownedApps[], soloContact{name,phone}`. Old profiles lack the last four — code defaults them; never force a returning user back through setup.
 - **AI request assembly** builds a big `[Context: …]` string (fuel, economy, route, camps, accom, POI, vehicle note, drive time, solo mode, trip plan) prepended to the user's message, and trims the running `messages` array to the last 16 turns to bound payload size.
 - Because everything is one file, keep edits localized and preserve the existing terse, comment-annotated style; update the `#buildStamp` when shipping a user-visible change so the self-update banner works.

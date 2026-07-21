@@ -229,140 +229,144 @@
   .profile-vehicle-opt-icon{font-size:20px;margin-bottom:3px;}
   .profile-vehicle-opt-label{font-size:11px;color:var(--gray2);}
   .profile-vehicle-opt.selected .profile-vehicle-opt-label{color:var(--amber);}
+
+  /* ── HOME SCREEN (SPEC §10) ─────────────────────────────────────────── */
+  #homeScreen{flex:1;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 20px 26px;}
+  #homeScreen.hidden{display:none;}
+  .solo-badge{display:none;align-items:center;gap:5px;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.4);border-radius:20px;padding:4px 11px;font-size:12px;color:var(--amber);font-weight:600;align-self:flex-start;margin-bottom:10px;}
+  .solo-badge.armed{display:inline-flex;}
+  .home-greeting{font-size:20px;font-weight:600;line-height:1.3;margin:2px 0 14px;}
+  .home-greeting span{color:var(--amber);}
+  .home-guide{background:var(--navy2);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px 16px;margin-bottom:20px;}
+  .home-guide-lead{font-size:13px;color:var(--gray1);line-height:1.5;margin-bottom:10px;}
+  .home-guide-lead b{color:var(--white);}
+  .home-eg-row{font-size:13px;color:var(--amber);line-height:1.55;padding:2px 0;}
+  .home-rhythm{font-size:11px;color:var(--gray2);line-height:1.5;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);}
+  .home-rhythm b{color:var(--gray1);font-weight:600;}
+  .home-mic-wrap{display:flex;flex-direction:column;align-items:center;gap:9px;margin:6px 0 4px;}
+  .home-mic{width:112px;height:112px;border-radius:50%;border:3px solid var(--amber);background:rgba(245,166,35,0.12);color:var(--amber);font-size:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform 0.12s;box-shadow:0 0 0 0 rgba(245,166,35,0.4);}
+  .home-mic:active{transform:scale(0.96);}
+  .home-mic.listening{background:var(--red);border-color:var(--red);color:#fff;animation:micPulse 1.4s infinite;}
+  @keyframes micPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,32,42,0.45);}50%{box-shadow:0 0 0 14px rgba(231,32,42,0);}}
+  .home-mic-label{font-size:14px;font-weight:600;color:var(--amber);}
+  .home-mic-hint{font-size:11px;color:var(--gray2);min-height:15px;text-align:center;line-height:1.4;}
+  .home-type-link{font-size:12px;color:var(--gray2);background:none;border:none;text-decoration:underline;cursor:pointer;font-family:inherit;padding:4px;}
+  .home-trip-card{display:none;background:var(--navy2);border:1px solid rgba(245,166,35,0.35);border-radius:14px;padding:14px 16px;margin-top:20px;}
+  .home-trip-card.live{display:block;}
+  .home-trip-line{height:3px;background:var(--amber);border-radius:2px;margin-bottom:10px;}
+  .home-trip-title{font-size:14px;font-weight:600;margin-bottom:3px;}
+  .home-trip-leg{font-size:12px;color:var(--gray2);margin-bottom:11px;line-height:1.4;}
+  .home-trip-btn{width:100%;background:var(--amber);color:var(--navy);border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .home-foot{margin-top:auto;padding-top:18px;display:flex;justify-content:space-between;align-items:center;}
+  .home-edit{font-size:12px;color:var(--gray3);background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;}
+
+  /* ── APP / RESULTS VIEW (map behind here — SPEC §10) ────────────────── */
+  #appView{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  #appView.hidden{display:none;}
+  .appview-bar{display:flex;align-items:center;gap:10px;background:var(--navy2);border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 14px;flex-shrink:0;}
+  .appview-back{background:none;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--gray1);font-size:13px;padding:5px 11px;cursor:pointer;font-family:inherit;}
+  .appview-back:hover,.appview-back:active{border-color:var(--amber);color:var(--amber);}
+  .appview-title{font-size:13px;color:var(--gray2);}
+
+  /* ── SETUP INTERVIEW (SPEC §11) ─────────────────────────────────────── */
+  .setup-screen{display:flex;position:fixed;inset:0;background:var(--navy);z-index:600;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:22px 20px 30px;}
+  .setup-screen.hidden{display:none;}
+  .setup-head{text-align:center;margin-bottom:18px;}
+  .setup-logo{font-size:40px;margin-bottom:6px;}
+  .setup-title{font-size:20px;font-weight:600;}
+  .setup-title span{color:var(--amber);}
+  .setup-intro{font-size:12px;color:var(--gray2);line-height:1.5;margin:6px auto 0;max-width:340px;}
+  .setup-q{max-width:380px;width:100%;margin:0 auto 16px;}
+  .setup-q-label{font-size:14px;font-weight:600;margin-bottom:2px;}
+  .setup-q-why{font-size:11px;color:var(--gray2);line-height:1.4;margin-bottom:8px;}
+  .setup-input{width:100%;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:11px 12px;color:var(--white);font-family:inherit;font-size:14px;outline:none;}
+  .setup-input:focus{border-color:var(--amber);}
+  .setup-input::placeholder{color:var(--gray3);}
+  .setup-chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .setup-chip{background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:18px;padding:8px 14px;font-size:13px;color:var(--gray2);cursor:pointer;transition:all 0.15s;user-select:none;}
+  .setup-chip.selected{border-color:var(--amber);color:var(--amber);background:rgba(245,166,35,0.1);}
+  .setup-row{display:flex;gap:8px;max-width:380px;margin:0 auto 16px;}
+  .setup-row .setup-q{margin:0;}
+  .setup-save{display:block;max-width:380px;width:100%;margin:6px auto 0;background:var(--amber);color:var(--navy);border:none;border-radius:11px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
 </style>
 </head>
 <body>
 
-<!-- PROFILE SETUP — first time only -->
-<div class="start-overlay" id="profileOverlay">
-  <div class="profile-modal">
-    <div class="trip-header">
-      <div class="trip-icon">🧭</div>
-      <div class="trip-title">G'day! What's your name?</div>
-      <div class="trip-sub">So Navigator can greet you properly. Just once.</div>
-    </div>
-    <div class="trip-field">
-      <input class="trip-input" id="profileName" placeholder="e.g. Brian" autofocus>
-    </div>
-    <div class="trip-field">
-      <span class="trip-label">Which vehicles do you drive?</span>
-      <div class="profile-vehicle-grid">
-        <div class="profile-vehicle-opt" data-v="car" onclick="toggleProfileVehicle(this)">
-          <div class="profile-vehicle-opt-icon">🚗</div>
-          <div class="profile-vehicle-opt-label">Car</div>
-        </div>
-        <div class="profile-vehicle-opt" data-v="caravan" onclick="toggleProfileVehicle(this)">
-          <div class="profile-vehicle-opt-icon">🚐</div>
-          <div class="profile-vehicle-opt-label">Caravan</div>
-        </div>
-        <div class="profile-vehicle-opt" data-v="campervan" onclick="toggleProfileVehicle(this)">
-          <div class="profile-vehicle-opt-icon">🏕</div>
-          <div class="profile-vehicle-opt-label">Campervan</div>
-        </div>
-        <div class="profile-vehicle-opt" data-v="truck" onclick="toggleProfileVehicle(this)">
-          <div class="profile-vehicle-opt-icon">🚛</div>
-          <div class="profile-vehicle-opt-label">Truck</div>
-        </div>
-      </div>
-    </div>
-    <div class="trip-row">
-      <div class="trip-field">
-        <span class="trip-label">Rego — optional</span>
-        <input class="trip-input" id="profileRego" placeholder="e.g. 123ABC">
-      </div>
-      <div class="trip-field">
-        <span class="trip-label">Caravan / van model — optional</span>
-        <input class="trip-input" id="profileVan" placeholder="e.g. Jayco Starcraft 19ft">
-      </div>
-    </div>
-    <div class="trip-field">
-      <span class="trip-label">Fuel you use</span>
-      <div class="trip-chips" id="profileFuelChips">
-        <div class="trip-chip" data-f="Unleaded 91" onclick="pickProfileFuel(this)">U91</div>
-        <div class="trip-chip" data-f="E10" onclick="pickProfileFuel(this)">E10</div>
-        <div class="trip-chip" data-f="Premium 95" onclick="pickProfileFuel(this)">P95</div>
-        <div class="trip-chip" data-f="Premium 98" onclick="pickProfileFuel(this)">P98</div>
-        <div class="trip-chip" data-f="Diesel" onclick="pickProfileFuel(this)">Diesel</div>
-      </div>
-    </div>
-    <div class="trip-btn-row">
-      <button class="trip-btn secondary" style="flex:0 0 auto;" onclick="cancelSetup()">← Back</button>
-      <button class="trip-btn primary" style="flex:1;" onclick="saveProfile()">Save & go</button>
+<!-- SETUP INTERVIEW — first run only (SPEC §11) -->
+<div class="setup-screen" id="setupScreen">
+  <div class="setup-head">
+    <div class="setup-logo">🧭</div>
+    <div class="setup-title">Let's set up <span>Navigator</span></div>
+    <div class="setup-intro">About ninety seconds, then it's gone. Every question here changes the answers you'll get — nothing's asked idly.</div>
+  </div>
+
+  <div class="setup-q">
+    <div class="setup-q-label">What should I call you?</div>
+    <div class="setup-q-why">So the briefings are yours, not a stranger's.</div>
+    <input class="setup-input" id="setupName" placeholder="e.g. Craig" autocomplete="off">
+  </div>
+
+  <div class="setup-q">
+    <div class="setup-q-label">What are you driving?</div>
+    <div class="setup-q-why">Your rig is a hard filter — a spot a car fits isn't one a caravan fits.</div>
+    <div class="setup-chips" id="setupRig">
+      <div class="setup-chip" data-v="car" onclick="pickSetupRig(this)">🚗 Car</div>
+      <div class="setup-chip" data-v="caravan" onclick="pickSetupRig(this)">🚐 Caravan</div>
+      <div class="setup-chip" data-v="campervan" onclick="pickSetupRig(this)">🏕 Campervan</div>
+      <div class="setup-chip" data-v="truck" onclick="pickSetupRig(this)">🚛 Truck</div>
     </div>
   </div>
-</div>
 
-<!-- START OVERLAY -->
-<div class="start-overlay hidden" id="startOverlay">
-  <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 12:38 PM AEST</div>
-  <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
-  <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
-  <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
-
-  <!-- THE TWO MODES — explained plainly, not left as examples to guess from -->
-  <div style="width:100%;max-width:320px;margin:0 auto 12px;background:var(--navy3);border-radius:12px;padding:10px 14px;">
-    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;">
-      <span style="font-size:16px;">🗺</span>
-      <div style="font-size:12px;color:var(--gray1);line-height:1.3;text-align:left;">
-        <b style="color:var(--white);">Planning a journey?</b> Tell me where — I'll size up the days, overnight stops, rest breaks and safety along the way.
-      </div>
+  <div class="setup-q">
+    <div class="setup-q-label">What fuel does it take?</div>
+    <div class="setup-q-why">So "cheapest fuel ahead" prices the pump you actually use.</div>
+    <div class="setup-chips" id="setupFuel">
+      <div class="setup-chip" data-f="Unleaded 91" onclick="pickSetupFuel(this)">U91</div>
+      <div class="setup-chip" data-f="E10" onclick="pickSetupFuel(this)">E10</div>
+      <div class="setup-chip" data-f="Premium 95" onclick="pickSetupFuel(this)">P95</div>
+      <div class="setup-chip" data-f="Premium 98" onclick="pickSetupFuel(this)">P98</div>
+      <div class="setup-chip" data-f="Diesel" onclick="pickSetupFuel(this)">Diesel</div>
     </div>
-    <div style="display:flex;gap:10px;align-items:flex-start;">
-      <span style="font-size:16px;">🚗</span>
-      <div style="font-size:12px;color:var(--gray1);line-height:1.3;text-align:left;">
-        <b style="color:var(--white);">Just driving?</b> Ask me anything nearby — fuel, food, a toilet, whatever you need right now.
+  </div>
+
+  <div class="setup-row">
+    <div class="setup-q">
+      <div class="setup-q-label">Height <span style="color:var(--gray3);font-weight:400;">· optional</span></div>
+      <div class="setup-q-why">Only to rule out low clearances.</div>
+      <input class="setup-input" id="setupHeight" placeholder="e.g. 3.1 m" inputmode="decimal" autocomplete="off">
+    </div>
+    <div class="setup-q">
+      <div class="setup-q-label">Length <span style="color:var(--gray3);font-weight:400;">· optional</span></div>
+      <div class="setup-q-why">Helps size drive-through camps.</div>
+      <input class="setup-input" id="setupLength" placeholder="e.g. 7.5 m" inputmode="decimal" autocomplete="off">
+    </div>
+  </div>
+
+  <div class="setup-q">
+    <div class="setup-q-label">Which of these do you already use?</div>
+    <div class="setup-q-why">I can't read their data — that wall is Apple's and Google's — but I'll add a one-tap handoff to the ones you own on every result they suit.</div>
+    <div class="setup-chips" id="setupApps">
+      <div class="setup-chip" data-app="WikiCamps" onclick="toggleSetupApp(this)">WikiCamps</div>
+      <div class="setup-chip" data-app="Hipcamp" onclick="toggleSetupApp(this)">Hipcamp</div>
+      <div class="setup-chip" data-app="Fuel Map" onclick="toggleSetupApp(this)">Fuel Map</div>
+      <div class="setup-chip" data-app="BOM" onclick="toggleSetupApp(this)">BOM Weather</div>
+    </div>
+  </div>
+
+  <div class="setup-q">
+    <div class="setup-q-label">Travelling solo — who should know where you are? <span style="color:var(--gray3);font-weight:400;">· optional</span></div>
+    <div class="setup-q-why">Kept on this phone only. Later, stop briefings can offer a one-tap "arrived safe" text — Navigator can't track you in the background, so a real person is the honest backstop.</div>
+    <div class="setup-row" style="margin:0;">
+      <div class="setup-q" style="flex:1.3;margin:0;">
+        <input class="setup-input" id="setupSoloName" placeholder="Contact name" autocomplete="off">
+      </div>
+      <div class="setup-q" style="flex:1;margin:0;">
+        <input class="setup-input" id="setupSoloPhone" placeholder="Number" inputmode="tel" autocomplete="off">
       </div>
     </div>
   </div>
 
-  <!-- SPEAK OR TYPE — genuine equals, not primary and fallback -->
-  <div style="width:100%;max-width:320px;margin:0 auto;display:flex;gap:10px;margin-bottom:4px;">
-    <button id="startMicBtn" onclick="startVoiceStart()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
-             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
-             background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:24px;">🎙</span>
-      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to speak</span>
-    </button>
-    <button onclick="showWhere()"
-      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
-             padding:12px 10px;border-radius:14px;border:2px solid var(--amber);
-             background:rgba(245,166,35,0.10);cursor:pointer;transition:all 0.2s;">
-      <span style="font-size:24px;">⌨</span>
-      <span style="font-size:12px;font-weight:700;color:var(--amber);">Tap to type</span>
-    </button>
-  </div>
-  <div id="startMicStatus" style="width:100%;max-width:320px;margin:2px auto 10px;font-size:12px;color:var(--amber);min-height:16px;font-weight:600;text-align:center;"></div>
-
-  <div class="start-btns" style="gap:8px;">
-    <div class="start-btn quick" id="resumeBtn" style="display:none;border-color:var(--amber);padding:10px 14px;" onclick="resumeTrip()">
-      <div class="start-btn-title" id="resumeTitle">▶ Resume trip</div>
-      <div class="start-btn-desc">Pick up where you left off</div>
-    </div>
-    <div class="start-btn quick" id="clearTripBtn" style="display:none;border-color:rgba(231,76,60,0.5);padding:10px 14px;" onclick="clearTrip()">
-      <div class="start-btn-title" id="clearTitle" style="color:var(--red);">✕ Clear trip</div>
-      <div class="start-btn-desc">Regular runs & ⭐ stops kept</div>
-    </div>
-    <div id="whereWrap" style="display:none;background:var(--navy3);border:1px solid rgba(245,166,35,0.35);border-radius:12px;padding:12px;">
-      <div style="display:flex;gap:8px;align-items:center;">
-        <input class="trip-input" id="whereInput" placeholder="Type where you're going, or what you need" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();whereTo();}">
-        <button class="trip-btn primary" style="flex:0 0 auto;padding:10px 18px;" onclick="whereTo()">Go</button>
-        <button class="trip-btn secondary" style="flex:0 0 auto;padding:10px 12px;" onclick="hideWhere()" title="Cancel">✕</button>
-      </div>
-    </div>
-    <button class="start-btn quick" onclick="quickStart()" style="padding:11px 14px;background:none;border:1px solid rgba(255,255,255,0.12);">
-      <div class="start-btn-title" style="font-size:13px;color:var(--gray2);">Skip straight to chat</div>
-    </button>
-    <div class="start-btn quick" onclick="editSetup()" style="padding:11px 14px;">
-      <div class="start-btn-title" style="font-size:13px;">⚙ Edit setup</div>
-      <div class="start-btn-desc">Name · vehicle · rego · van model</div>
-    </div>
-  </div>
-  <div id="savedTripsWrap" style="display:none;width:100%;max-width:320px;margin-top:16px;">
-    <div style="font-size:10px;color:var(--gray3);text-align:center;letter-spacing:0.08em;margin-bottom:8px;">REGULAR RUNS</div>
-    <div id="savedTripsList" style="display:flex;flex-direction:column;gap:8px;"></div>
-  </div>
+  <button class="setup-save" onclick="saveSetup()">Save &amp; start</button>
 </div>
 
 <!-- TRIP SETUP MODAL -->
@@ -477,59 +481,91 @@
   </div>
 </div>
 
-<!-- MAP -->
-<div class="map-wrap">
-  <div id="map">
-    <button id="recentreBtn" onclick="recentreMap()" title="Back to my location"
-      style="display:none;position:absolute;bottom:12px;right:12px;z-index:500;
-             width:40px;height:40px;border-radius:50%;border:2px solid var(--amber);
-             background:rgba(10,22,40,0.92);color:var(--amber);font-size:18px;
-             cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">◎</button>
-    <div class="map-placeholder" id="mapPlaceholder" onclick="openLocSheet()" style="cursor:pointer;">
-      <div class="map-placeholder-icon">🗺</div>
-      <div class="map-placeholder-text" id="mapPlaceholderText">Locating…</div>
-    </div>
+<!-- HOME SCREEN (SPEC §10) — greeting · guidance · big mic · trip card · solo -->
+<div id="homeScreen">
+  <div class="solo-badge" id="soloBadge">🧍 Solo mode</div>
+  <div class="home-greeting" id="homeGreeting">G'day.</div>
+  <div class="home-guide">
+    <div class="home-guide-lead"><b>Navigator thinks — your sat-nav steers.</b> Ask out loud for what's ahead; I find it, then hand the driving to Google Maps.</div>
+    <div class="home-eg-row">“Find me a campsite within the next hour along my route.”</div>
+    <div class="home-eg-row">“Cheapest diesel ahead I can get the van into.”</div>
+    <div class="home-eg-row">“Somewhere for lunch — and what's the weather doing?”</div>
+    <div class="home-rhythm"><b>Drive → Stop → Brief.</b> I can't watch the road while your sat-nav steers, so pull in when you need me and I'll size up the next stretch.</div>
   </div>
-  <div class="alert-strip">
-    <div class="alert-chip gps" id="gpsChip" onclick="openLocSheet()" style="cursor:pointer;">📍 Locating...</div>
-    <div class="alert-chip wind" id="windChip">🌬 —</div>
-    <div class="alert-chip fatigue" id="fatigueChip">🕐 0h 0m</div>
+  <div class="home-mic-wrap">
+    <button class="home-mic" id="homeMic" onclick="homeMic()" aria-label="Tap and talk">🎙</button>
+    <div class="home-mic-label">Tap and talk</div>
+    <div class="home-mic-hint" id="homeMicHint">Answers come back spoken</div>
+    <button class="home-type-link" onclick="openAppView()">Type instead</button>
   </div>
-  <div class="map-greeting" id="mapGreeting"></div>
+  <div class="home-trip-card" id="homeTripCard">
+    <div class="home-trip-line"></div>
+    <div class="home-trip-title" id="homeTripTitle"></div>
+    <div class="home-trip-leg" id="homeTripLeg"></div>
+    <button class="home-trip-btn" onclick="resumeTrip()">Resume — brief me</button>
+  </div>
+  <div class="home-foot">
+    <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 21 Jul 2026, 05:23 PM AEST</div>
+  </div>
 </div>
 
-<!-- CONTEXT CHIPS -->
-<div class="context-panel">
-  <div class="ctx-chip active" id="vehicleChip" onclick="openVehicleSheet()">🚗 Car</div>
-  <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
-  <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()" style="display:none;">⛽ U91</div>
-  <div class="ctx-chip" id="rangeChip" onclick="setRange()" style="display:none;">🛣 Range</div>
-  <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
-  <div class="ctx-chip" id="logChip" onclick="openFillSheet()" style="display:none;">📒 Fill-up</div>
-</div>
+<!-- APP / RESULTS VIEW — the map is wallpaper here, revealed only on results -->
+<div id="appView" class="hidden">
+  <div class="appview-bar">
+    <button class="appview-back" onclick="backHome()">← Home</button>
+    <div class="appview-title">Navigator</div>
+  </div>
 
-<!-- BOTTOM -->
-<div class="bottom-panel">
-  <div class="chat-area" id="chatArea">
-    <div class="welcome" id="welcome">
-      <div class="suggestion-grid" id="suggestionGrid">
-        <!-- Populated by JS based on vehicle -->
+  <!-- MAP (revealed only when a query returns mappable results — SPEC §10) -->
+  <div class="map-wrap" id="mapWrap" style="display:none;">
+    <div id="map">
+      <button id="recentreBtn" onclick="recentreMap()" title="Back to my location"
+        style="display:none;position:absolute;bottom:12px;right:12px;z-index:500;
+               width:40px;height:40px;border-radius:50%;border:2px solid var(--amber);
+               background:rgba(10,22,40,0.92);color:var(--amber);font-size:18px;
+               cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">◎</button>
+      <div class="map-placeholder" id="mapPlaceholder" onclick="openLocSheet()" style="cursor:pointer;">
+        <div class="map-placeholder-icon">🗺</div>
+        <div class="map-placeholder-text" id="mapPlaceholderText">Locating…</div>
       </div>
     </div>
+    <div class="alert-strip">
+      <div class="alert-chip gps" id="gpsChip" onclick="openLocSheet()" style="cursor:pointer;">📍 Locating...</div>
+      <div class="alert-chip wind" id="windChip">🌬 —</div>
+      <div class="alert-chip fatigue" id="fatigueChip">🕐 0h 0m</div>
+    </div>
   </div>
 
-  <div class="input-area">
-    <div class="wake-bar">
-      <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
+  <!-- CONTEXT CHIPS -->
+  <div class="context-panel">
+    <div class="ctx-chip active" id="vehicleChip" onclick="openVehicleSheet()">🚗 Car</div>
+    <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
+    <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()" style="display:none;">⛽ U91</div>
+    <div class="ctx-chip" id="rangeChip" onclick="setRange()" style="display:none;">🛣 Range</div>
+    <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
+    <div class="ctx-chip" id="logChip" onclick="openFillSheet()" style="display:none;">📒 Fill-up</div>
+  </div>
+
+  <!-- BOTTOM -->
+  <div class="bottom-panel">
+    <div class="chat-area" id="chatArea">
+      <div class="welcome" id="welcome"></div>
     </div>
-    <div class="input-row" id="inputRow">
-      <textarea id="userInput" placeholder="Type here…" rows="1"
-        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
-      <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙</button>
-      <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
+
+    <div class="input-area">
+      <div class="wake-bar">
+        <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
+      </div>
+      <div class="input-row" id="inputRow">
+        <textarea id="userInput" placeholder="Type here…" rows="1"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
+        <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙</button>
+        <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
+      </div>
+      <div class="voice-status" id="voiceStatus"></div>
     </div>
-    <div class="voice-status" id="voiceStatus"></div>
   </div>
 </div>
 
@@ -795,7 +831,7 @@ let userVan = '';
 
 // ── LIVING GREETING — place, weather, time and name, composed fresh ───────────
 function updateGreeting() {
-  const el = document.getElementById('startTitle');
+  const el = document.getElementById('homeGreeting');
   if (!el) return;
   const name = (userName && userName !== 'there') ? userName : '';
   const h = new Date().getHours();
@@ -822,105 +858,122 @@ function updateGreeting() {
   el.innerHTML = msg;
 }
 
-// ── MAP GREETING — short, time-aware, name + place; fades in ~5s after the map
-// loads and clears ~5s later. Composed at show-time so GPS has usually arrived.
-function mapGreetingText() {
-  const name = (userName && userName !== 'there') ? userName : '';
-  const h = new Date().getHours();
-  let place = '';
-  if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
-  if (place && /^-?\d/.test(place)) place = ''; // raw coordinates aren't a place name
-  const ps = place ? '<span>' + place + '</span>' : '';
-  const nm = name ? ', ' + name : '';
-  if (h >= 22 || h < 5) {
-    return place ? `Burning the midnight oil in ${ps}${nm}?` : `Burning the midnight oil${nm}?`;
+// ── HOME / APP-VIEW SWITCHING (SPEC §10 — no idle map, no welcome overlay) ────
+let userHeight = '', userLength = '', ownedApps = [], soloContact = null;
+
+function showHome() {
+  document.getElementById('setupScreen')?.classList.add('hidden');
+  document.getElementById('appView')?.classList.add('hidden');
+  document.getElementById('homeScreen')?.classList.remove('hidden');
+  updateGreeting();
+  renderHomeTripCard();
+  renderSoloIndicator();
+}
+function openAppView() {
+  document.getElementById('homeScreen')?.classList.add('hidden');
+  document.getElementById('setupScreen')?.classList.add('hidden');
+  document.getElementById('appView')?.classList.remove('hidden');
+  const mw = document.getElementById('mapWrap');
+  if (mw && mw.style.display !== 'none' && window._navMap) { try { window._navMap.invalidateSize(); } catch(e){} }
+}
+function backHome() { saveSession(); showHome(); }
+
+// The big home mic — voice-first. Open the conversation view and start listening;
+// tap-to-talk is the same engine, and "Type instead" is always there (SPEC §4).
+function homeMic() {
+  openAppView();
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    toggleVoice();
+  } else {
+    document.getElementById('userInput')?.focus();
   }
-  const tod = h < 12 ? 'morning' : (h < 17 ? 'afternoon' : 'evening');
-  return `Good ${tod}${place ? ' in ' + ps : ''}${nm} — what are we up to today?`;
+}
+// The map is wallpaper — revealed inside the results view only when results land.
+function revealMap() {
+  const mw = document.getElementById('mapWrap');
+  if (mw) mw.style.display = '';
+  if (window._navMap) { try { window._navMap.invalidateSize(); } catch(e){} }
 }
 
-function showMapGreeting() {
-  const el = document.getElementById('mapGreeting');
-  if (!el || el.dataset.shown) return;
-  el.dataset.shown = '1'; // once per load
-  setTimeout(() => {
-    el.innerHTML = mapGreetingText();
-    el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 5000);
-  }, 5000);
-}
-
-// ── PROFILE SETUP (first time only — name + owned vehicles) ──────────────────
-function toggleProfileVehicle(el) {
-  el.classList.toggle('selected');
-}
-
-// Back out of setup without saving — returns to the start screen.
-// On first run there's no profile yet, so a minimal one is created rather than
-// leaving the app with nothing.
-function cancelSetup() {
-  const hasProfile = (() => { try { return !!localStorage.getItem('navigator_profile'); } catch(e) { return false; } })();
-  if (!hasProfile) {
-    userName = userName || 'there';
-    userVehicles = userVehicles.length ? userVehicles : ['car'];
-    try { localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego:'', van:'', fuel: selectedFuel })); } catch(e) {}
-    applyProfile();
+// Trip card on home — the live trip with a resume, or hidden (SPEC §10).
+function renderHomeTripCard() {
+  const card = document.getElementById('homeTripCard');
+  if (!card) return;
+  let raw = {}; try { raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); } catch(e){}
+  const dest = currentRunDest || raw.dest || '';
+  if (dest) {
+    document.getElementById('homeTripTitle').textContent = '🚐 Trip to ' + dest;
+    document.getElementById('homeTripLeg').textContent = raw.cond ? ('Conditions noted: ' + raw.cond + ' — pick up where you left off') : 'Pick up where you left off';
+    card.classList.add('live');
+  } else {
+    card.classList.remove('live');
   }
-  document.getElementById('profileOverlay').classList.add('hidden');
-  document.getElementById('startOverlay').classList.remove('hidden');
 }
 
-function pickProfileFuel(el) {
-  document.querySelectorAll('#profileFuelChips .trip-chip').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
+// Solo indicator (SPEC §8/§10) — mirrors the armed state of the Solo chip.
+function renderSoloIndicator() {
+  const badge = document.getElementById('soloBadge');
+  if (!badge) return;
+  badge.classList.toggle('armed', !!document.getElementById('soloChip')?.classList.contains('active'));
 }
 
-function saveProfile() {
-  const name = document.getElementById('profileName').value.trim();
-  const selected = Array.from(document.querySelectorAll('.profile-vehicle-opt.selected')).map(el => el.dataset.v);
-  const fuelEl = document.querySelector('#profileFuelChips .trip-chip.selected');
+// ── SETUP INTERVIEW (first run only — SPEC §11) ──────────────────────────────
+function pickSetupRig(el){ document.querySelectorAll('#setupRig .setup-chip').forEach(c=>c.classList.remove('selected')); el.classList.add('selected'); }
+function pickSetupFuel(el){ document.querySelectorAll('#setupFuel .setup-chip').forEach(c=>c.classList.remove('selected')); el.classList.add('selected'); }
+function toggleSetupApp(el){ el.classList.toggle('selected'); }
 
-  userName = name || 'there';
-  userVehicles = selected.length ? selected : ['car'];
-  userRego = document.getElementById('profileRego').value.trim();
-  userVan = document.getElementById('profileVan').value.trim();
-  if (fuelEl) { selectedFuel = fuelEl.dataset.f; document.getElementById('fuelTypeChip').textContent = fuelChipText(); }
-
+function persistProfile() {
   try {
-    localStorage.setItem('navigator_profile', JSON.stringify({ name: userName, vehicles: userVehicles, rego: userRego, van: userVan, fuel: selectedFuel }));
+    localStorage.setItem('navigator_profile', JSON.stringify({
+      name: userName, vehicles: userVehicles, rego: userRego, van: userVan, fuel: selectedFuel,
+      height: userHeight, length: userLength, ownedApps: ownedApps, soloContact: soloContact
+    }));
   } catch(e) {}
-
-  document.getElementById('profileOverlay').classList.add('hidden');
-  applyProfile();
-  document.getElementById('startOverlay').classList.remove('hidden');
 }
 
-// ── EDIT SETUP — reopen the profile, prefilled ────────────────────────────────
-function editSetup() {
-  document.getElementById('profileName').value = userName === 'there' ? '' : userName;
-  document.getElementById('profileRego').value = userRego || '';
-  document.getElementById('profileVan').value = userVan || '';
-  document.querySelectorAll('.profile-vehicle-opt').forEach(el => {
-    el.classList.toggle('selected', userVehicles.includes(el.dataset.v));
-  });
-  document.querySelectorAll('#profileFuelChips .trip-chip').forEach(el => {
-    el.classList.toggle('selected', el.dataset.f === selectedFuel);
-  });
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-  document.getElementById('profileOverlay').classList.remove('hidden');
+function openSetup(prefill) {
+  if (prefill) {
+    document.getElementById('setupName').value = (userName && userName !== 'there') ? userName : '';
+    const rig = (userVehicles && userVehicles[0]) || 'car';
+    document.querySelectorAll('#setupRig .setup-chip').forEach(c => c.classList.toggle('selected', c.dataset.v === rig));
+    document.querySelectorAll('#setupFuel .setup-chip').forEach(c => c.classList.toggle('selected', c.dataset.f === selectedFuel));
+    document.getElementById('setupHeight').value = userHeight || '';
+    document.getElementById('setupLength').value = userLength || '';
+    document.querySelectorAll('#setupApps .setup-chip').forEach(c => c.classList.toggle('selected', ownedApps.includes(c.dataset.app)));
+    document.getElementById('setupSoloName').value = (soloContact && soloContact.name) || '';
+    document.getElementById('setupSoloPhone').value = (soloContact && soloContact.phone) || '';
+  }
+  document.getElementById('homeScreen')?.classList.add('hidden');
+  document.getElementById('appView')?.classList.add('hidden');
+  document.getElementById('setupScreen').classList.remove('hidden');
+}
+// Legacy name — anything still wired to editSetup reopens the interview, prefilled.
+function editSetup() { openSetup(true); }
+
+function saveSetup() {
+  const name = document.getElementById('setupName').value.trim();
+  const rigEl = document.querySelector('#setupRig .setup-chip.selected');
+  const fuelEl = document.querySelector('#setupFuel .setup-chip.selected');
+  userName = name || 'there';
+  userVehicles = rigEl ? [rigEl.dataset.v] : (userVehicles.length ? userVehicles : ['car']);
+  if (fuelEl) selectedFuel = fuelEl.dataset.f;
+  userHeight = document.getElementById('setupHeight').value.trim();
+  userLength = document.getElementById('setupLength').value.trim();
+  ownedApps = Array.from(document.querySelectorAll('#setupApps .setup-chip.selected')).map(el => el.dataset.app);
+  const scName = document.getElementById('setupSoloName').value.trim();
+  const scPhone = document.getElementById('setupSoloPhone').value.trim();
+  soloContact = (scName || scPhone) ? { name: scName, phone: scPhone } : null;
+  persistProfile();
+  applyProfile();
+  const ftc = document.getElementById('fuelTypeChip'); if (ftc) ftc.textContent = fuelChipText();
+  // Naming a solo contact arms Solo (existing chip mechanism) so the indicator shows.
+  if (soloContact) document.getElementById('soloChip')?.classList.add('active');
+  showHome();   // saving lands on the HOME SCREEN, never an overlay (SPEC §11)
 }
 
 function applyProfile() {
-  // Personalise greetings — composed live from place, weather and time
   updateGreeting();
-  const wh = document.getElementById('welcomeHeading');
-  if (wh) wh.innerHTML = `G'day ${userName}.<br>Your <span>co-pilot</span> is ready.`;
-
-  // First owned vehicle becomes the starting default — all vehicles stay selectable
-  if (userVehicles.length) {
-    selectVehicle(userVehicles[0]);
-  }
-  renderVehiclePrompt();
+  if (userVehicles.length) selectVehicle(userVehicles[0]);
 }
 
 function loadProfile() {
@@ -928,25 +981,24 @@ function loadProfile() {
     const saved = localStorage.getItem('navigator_profile');
     if (saved) {
       const p = JSON.parse(saved);
-      userName = p.name;
-      userVehicles = p.vehicles;
+      // Migrate silently — old profiles carry name/vehicles/rego/van/fuel; the new
+      // fields default. A returning user must never be shown the interview again.
+      userName = p.name || 'there';
+      userVehicles = (p.vehicles && p.vehicles.length) ? p.vehicles : ['car'];
       userRego = p.rego || '';
       userVan = p.van || '';
       if (p.fuel) selectedFuel = p.fuel;
+      userHeight = p.height || '';
+      userLength = p.length || '';
+      ownedApps = p.ownedApps || [];
+      soloContact = p.soloContact || null;
       applyProfile();
-      document.getElementById('profileOverlay').classList.add('hidden');
-      // Returning user — skip the welcome screen and land straight on the map.
-      // The greeting becomes a brief popup over the map instead.
-      document.getElementById('startOverlay').classList.add('hidden');
-      showMapGreeting();
-      markAppStarted();   // Back must not resurrect the welcome screen from here
+      showHome();                       // returning user → straight to home, no overlay
     } else {
-      // First time ever — show profile setup
-      document.getElementById('profileOverlay').classList.remove('hidden');
-      stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+      openSetup(false);                 // first run ever → the interview
     }
   } catch(e) {
-    document.getElementById('profileOverlay').classList.remove('hidden');
+    openSetup(false);
   }
 }
 
@@ -1074,7 +1126,7 @@ function hideWhere() {
 async function whereTo() {
   const q = document.getElementById('whereInput').value.trim();
   if (!q) { quickStart(); return; }
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+  openAppView();
   addMsg('user', 'Heading to ' + q);
   showTyping();
   try {
@@ -1173,8 +1225,7 @@ function pickTodaysVehicle(k) {
 
 // ── START OVERLAY / TRIP SETUP ────────────────────────────────────────────────
 function quickStart() {
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
-  markAppStarted();
+  openAppView();
   // Restore safety-relevant trip context only — fuel is handled by the fuel tile and chips
   try {
     const lastTrip = localStorage.getItem('navigator_last_trip');
@@ -1188,7 +1239,7 @@ function quickStart() {
 }
 
 function openTripSetup() {
-  stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+  openAppView();
   document.getElementById('tripSetupModal').classList.add('visible');
 }
 
@@ -1294,7 +1345,7 @@ function resumeTrip() {
     updateSuggestions();   // chips announce route-aware mode
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
-    stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+    openAppView();
     plotTripRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
   } catch(e) {}
@@ -1352,7 +1403,7 @@ function recallTrip(i) {
     currentRunDest = r.dest;
     if (r.vehicle && VEHICLES[r.vehicle]) selectVehicle(r.vehicle);
     if (r.passengers && r.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
-    stopStartMic(); document.getElementById('startOverlay').classList.add('hidden');
+    openAppView();
     plotTripRoute(currentRunDest);
     addMsg('nav', `Back on the ${r.dest} run. Conditions and fuel range are fresh — set them if today's different. What do you need?`);
   } catch(e) {}
@@ -1419,7 +1470,9 @@ function addPendingPins(pins) {
 }
 
 function showOptionPins(places) {
-  if (!window._navMap || !window.L || !places || !places.length) return;
+  if (!places || !places.length) return;
+  revealMap();                                   // results arrived — the map is no longer wallpaper
+  if (!window._navMap || !window.L) return;
   clearOptionPins();
   window._userMovedMap = false;   // new answer, new pins — the app takes the wheel again
   const rb = document.getElementById('recentreBtn');
@@ -2960,19 +3013,13 @@ function resetConversation() {
   Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
   clearOptionPins();
   window._pendingPins = null;
-  document.getElementById('userInput').value = '';
-  // A fresh start means ALL the way back — the start screen, all doors open.
-  document.getElementById('chatArea').innerHTML =
-    '<div class="welcome" id="welcome"><div class="suggestion-grid" id="suggestionGrid"></div></div>';
-  updateSuggestions();
+  const ui = document.getElementById('userInput'); if (ui) ui.value = '';
+  document.getElementById('chatArea').innerHTML = '<div class="welcome" id="welcome"></div>';
+  const mw = document.getElementById('mapWrap'); if (mw) mw.style.display = 'none';   // map back to wallpaper
   busy = false;
   document.getElementById('sendBtn').disabled = false;
-  hideWhere();
-  renderResumeTrip();     // Resume/Clear cards reflect any active trip
-  renderSavedTrips();
-  renderVehiclePrompt();
-  updateGreeting();
-  document.getElementById('startOverlay').classList.remove('hidden');
+  // A fresh start goes all the way back — the home screen (no overlay any more).
+  showHome();
 }
 
 // ── SESSION RESTORE — Android kills the page when you switch apps. Come back
@@ -2982,8 +3029,8 @@ const SESSION_MAX_AGE = 4 * 60 * 60 * 1000;   // 4 hours — same drive, same se
 
 function saveSession() {
   try {
-    const inChat = document.getElementById('startOverlay')?.classList.contains('hidden');
-    if (!inChat) { localStorage.removeItem(SESSION_KEY); return; }   // on start screen = nothing to restore
+    // Nothing said yet? Nothing to restore. (No welcome overlay to gate on now.)
+    if (!messages.length) { localStorage.removeItem(SESSION_KEY); return; }
     // Only keep the LAST FEW visible messages' HTML — a whole session's chat
     // grows unbounded and truncating it mid-tag silently corrupts the restore
     // after enough back-and-forth. The structured `messages` array carries the
@@ -3049,13 +3096,8 @@ function restoreSession() {
         }
       }
     }
-    document.getElementById('startOverlay').classList.add('hidden');
-    // A restored session means the app has been used — never leave the setup
-    // overlay up over it (covers the case where the profile was evicted but the
-    // session survived), and guard Back from here on.
-    document.getElementById('profileOverlay').classList.add('hidden');
-    markAppStarted();
-    updateSuggestions();
+    // A restored session lives in the conversation view; the app still lands on
+    // the home screen (loadProfile did that) and the trip card reflects the run.
     // Redraw the route and pins once the map is genuinely ready — not a guessed
     // delay, which silently failed if the map hadn't finished initialising.
     if (window._navMap) {
@@ -3067,6 +3109,9 @@ function restoreSession() {
       if (currentRunDest) window._pendingRouteDest = currentRunDest;
       if (s.pins && s.pins.length) window._pendingOptionPins = s.pins;
     }
+    // Home reflects the restored run (trip card) and solo state.
+    renderHomeTripCard();
+    renderSoloIndicator();
     return true;
   } catch(e) {}
   return false;
@@ -3333,49 +3378,17 @@ function showUpdateBanner(){
   document.body.appendChild(b);
 }
 
-// ── BACK-BUTTON GUARD ─────────────────────────────────────────────────────────
-// Once the app has started (the map is showing), the browser Back button must
-// never resurrect the welcome or setup screen. We push one history entry the
-// first time the app reaches the map; on a Back press we re-assert that both
-// overlays stay hidden, so Back keeps the driver on the map instead of dropping
-// them onto a start screen. (Requires only a saved profile OR a restored
-// session to count as "started".)
-let _appStarted = false;
-function markAppStarted() {
-  if (_appStarted) return;
-  _appStarted = true;
-  try { history.pushState({ nav: 'app-map' }, ''); } catch(e) {}
-}
-window.addEventListener('popstate', () => {
-  if (!_appStarted) return;
-  document.getElementById('startOverlay')?.classList.add('hidden');
-  document.getElementById('profileOverlay')?.classList.add('hidden');
-});
-// Samsung Internet / iOS Safari restore a page from the back-forward cache
-// WITHOUT re-running init or firing popstate — so the guard above never sees
-// it, and the driver lands back on the welcome/setup screen. A pageshow with
-// event.persisted === true is the bfcache-restore signal: if this driver has
-// already set up (saved profile or session), re-hide both start overlays.
-window.addEventListener('pageshow', (e) => {
-  if (!e.persisted) return;                 // only bfcache restores need this
-  let returning = _appStarted;
-  try { returning = returning || !!localStorage.getItem('navigator_profile') || !!localStorage.getItem('navigator_session'); } catch(_) {}
-  if (!returning) return;                   // genuine first-timer keeps the setup flow
-  document.getElementById('startOverlay')?.classList.add('hidden');
-  document.getElementById('profileOverlay')?.classList.add('hidden');
-  markAppStarted();                         // re-arm the Back guard for the restored page
-});
+// Back-button guards are gone: with the welcome overlay deleted there is no
+// start screen for Back or a bfcache restore to resurrect (Bug 2 dissolved,
+// SPEC §12). The app opens to the home screen; the in-app "← Home" button
+// returns there from the results view.
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 if(synth) synth.onvoiceschanged=()=>synth.getVoices();
 loadManualLocation();
 initGPS();
-updateSuggestions();
 loadMapPreference();
-loadProfile();
-renderSavedTrips();
-renderResumeTrip();
-renderVehiclePrompt();
+loadProfile();          // returning → home; first run → setup interview
 // Coming back after switching apps? Pick up exactly where we left off.
 restoreSession();
 setInterval(fetchWeather,600000);
