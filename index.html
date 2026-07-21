@@ -295,7 +295,7 @@
 <!-- START OVERLAY -->
 <div class="start-overlay hidden" id="startOverlay">
   <div class="start-logo">🧭</div>
-  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 12:05 PM AEST</div>
+  <div class="build-stamp" id="buildStamp" title="Last updated" style="text-align:center;max-width:none;margin-bottom:10px;">✓ v 17 Jul 2026, 12:38 PM AEST</div>
   <div class="start-title" id="startTitle">Welcome to <span>Navigator</span></div>
   <div class="start-sub" style="margin-bottom:4px;">What are we doing today?</div>
   <div id="vehiclePrompt" style="margin:0 0 10px;"></div>
@@ -3350,6 +3350,20 @@ window.addEventListener('popstate', () => {
   if (!_appStarted) return;
   document.getElementById('startOverlay')?.classList.add('hidden');
   document.getElementById('profileOverlay')?.classList.add('hidden');
+});
+// Samsung Internet / iOS Safari restore a page from the back-forward cache
+// WITHOUT re-running init or firing popstate — so the guard above never sees
+// it, and the driver lands back on the welcome/setup screen. A pageshow with
+// event.persisted === true is the bfcache-restore signal: if this driver has
+// already set up (saved profile or session), re-hide both start overlays.
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;                 // only bfcache restores need this
+  let returning = _appStarted;
+  try { returning = returning || !!localStorage.getItem('navigator_profile') || !!localStorage.getItem('navigator_session'); } catch(_) {}
+  if (!returning) return;                   // genuine first-timer keeps the setup flow
+  document.getElementById('startOverlay')?.classList.add('hidden');
+  document.getElementById('profileOverlay')?.classList.add('hidden');
+  markAppStarted();                         // re-arm the Back guard for the restored page
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
