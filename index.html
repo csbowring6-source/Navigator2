@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 03:26 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 09:15 AM AEST</div>
   </div>
 </div>
 
@@ -882,6 +882,68 @@ function adoptTrip(dest) {
   } catch(e) {}
   plotTripRoute(dest);
 }
+let pendingTripSwitch = null;   // a proposed destination change, awaiting yes/no
+
+// ── TRIP INTENT (pure) — decide what a spoken/typed line means for the trip ──
+// No DOM, no globals: (text, {currentDest}) -> decision | null, so it can be
+// bench-tested with fake inputs. null means "not a destination statement" —
+// let the normal query flow handle it. Origin is captured when stated
+// ("Cairns to Cardwell"); otherwise the caller uses current GPS.
+function parseTripIntent(text, state) {
+  state = state || {};
+  const cur = (state.currentDest || '').trim();
+  const t = (text || '').trim();
+  if (!t) return null;
+
+  // A question, or a request for something NEARBY (even if it names a town),
+  // is not a trip statement — "find me a campsite in Bowen" stays a camps query.
+  const isRequest = /\?$/.test(t)
+    || /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|do (you|i)|got any|looking for)\b/i.test(t)
+    || /\b(nearest|closest|cheapest)\b/i.test(t)
+    || /\b(campsite|camp site|camps?|caravan park|powered site|free camp|dump point|servo|fuel|petrol|diesel|toilet|loo|caf[eé]|coffee|feed|meal|lunch|dinner|breakfast|chemist|pharmacy|gym|pub|atm|weather)\b/i.test(t);
+  if (isRequest) return null;
+
+  const NOT_PLACE = new Set(['the','a','an','some','any','somewhere','anywhere','nowhere','here','there','home','nearest','closest','next','town','back','now','today','tomorrow','tonight','way','road','route','trip','it','me','us','go']);
+  const cleanPlace = s => (s||'')
+    .replace(/[.,!?]+$/,'')
+    .replace(/\s+(please|thanks|thank you|mate|cheers|now|eh|okay|ok|today|tomorrow|tonight|first)\s*$/i,'')
+    .replace(/\s+/g,' ').trim();
+  const isPlace = s => {
+    s = cleanPlace(s);
+    if (s.length < 3 || !/^[A-Za-z][A-Za-z'’\- ]+$/.test(s)) return false;
+    const words = s.toLowerCase().split(/\s+/);
+    if (words.length > 3) return false;                 // too long to be a town
+    return !words.every(w => NOT_PLACE.has(w));
+  };
+
+  let origin = null, dest = null, m;
+  // A) "[from] A to B" — stated origin, no trip verb leading A
+  if ((m = t.match(/^(?:from\s+)?([A-Za-z][A-Za-z'’\-]+(?:\s+[A-Za-z][A-Za-z'’\-]+)?)\s+to\s+([A-Za-z][A-Za-z'’\-]+(?:\s+[A-Za-z][A-Za-z'’\-]+)?)(?:\s+(?:today|tomorrow|tonight|now|please))?\s*$/i))
+      && !/^(going|heading|head|driving|drive|travelling|traveling|travel|off|back|bound|take|get|plan|next|we|let)\b/i.test(m[1])
+      && isPlace(m[1]) && isPlace(m[2])) {
+    origin = cleanPlace(m[1]); dest = cleanPlace(m[2]);
+  }
+  // B) trip verb + destination ("going back to Canungra", "heading to Airlie")
+  else if ((m = t.match(/\b(?:going|heading|head|driving|drive|travelling|traveling|travel|bound|we'?re|we are|off)\s+(?:back\s+)?(?:to|for|off to)\s+([A-Za-z][A-Za-z'’\- ]{2,28}?)(?=\s+(?:for|today|tomorrow|tonight|this|next|and|now|please|then|via)\b|[.,!?]|$)/i))) {
+    dest = cleanPlace(m[1]);
+  }
+  // C) explicit lead-ins ("back to X", "take me to X", "plan a trip to X")
+  else if ((m = t.match(/\b(?:back to|on to|take me to|get me to|go(?:ing)? to|gonna (?:go|head) to|plan(?:\s+me)?\s+a\s+(?:trip|journey|route)\s+to|route to|trip to)\s+([A-Za-z][A-Za-z'’\- ]{2,28}?)(?=\s+(?:for|today|tomorrow|tonight|this|next|and|now|please|then|via)\b|[.,!?]|$)/i))) {
+    dest = cleanPlace(m[1]);
+  }
+  // D) destination-last shorthand ("Boyland next", "Cardwell first")
+  else if ((m = t.match(/^([A-Za-z][A-Za-z'’\- ]{2,28}?)\s+(?:next|first|next stop)\.?$/i))) {
+    dest = cleanPlace(m[1]);
+  }
+
+  if (!dest || !isPlace(dest)) return null;
+  if (origin && !isPlace(origin)) origin = null;
+
+  if (cur && dest.toLowerCase() === cur.toLowerCase()) return { action: 'already', dest: cur };
+  if (cur) return { action: 'switch', dest, from: cur, origin };
+  return { action: 'create', dest, origin };
+}
+
 let userName = '';
 let userVehicles = [];
 let userRego = '';
@@ -2509,6 +2571,7 @@ RULES:
 - OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, urgent need — treat it matter-of-factly, no coyness. The list includes public toilets AND servos, cafés and pubs (all of which have toilets and are far better mapped). Give the NEAREST one, whatever kind it is — nobody cares whether it's a park or a servo when they need to go. Say what it is ("the servo at X, 4 minutes"). In Solo mode, prefer staffed or well-lit places over isolated spots.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
+- NEVER say you have no route or trip plan. If the driver asks about something ahead or "along my route" and no trip is set, do not refuse — offer to plan it ("Want me to set a trip to [place]?" if they named one, otherwise "Where are you headed — I'll set the trip") and answer with what's nearby meanwhile.
 - NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
 - NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
 - WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
@@ -3378,6 +3441,43 @@ async function sendMessage(silent){
       const bye = 'Righto — conversation off. Tap the mic when you need me.';
       addMsg('nav', bye); lastSpoken = bye; speak(bye);
     }
+    return;
+  }
+
+  // ── TRIP CREATION / UPDATE (S2.1) ──────────────────────────────────────────
+  // Confirming a proposed destination change?
+  if (pendingTripSwitch) {
+    const yes = /^(yes|yeah|yep|yup|sure|ok(ay)?|do it|switch|change it|go ahead|please|correct|that'?s right)\b/i.test(text);
+    const no  = /^(no|nah|nope|keep|stay|cancel|leave it|don'?t)\b/i.test(text);
+    if (yes || no) {
+      inp.value=''; inp.style.height='auto';
+      addMsg('user', text);
+      const target = pendingTripSwitch; pendingTripSwitch = null;
+      let msg;
+      if (yes) { adoptTrip(target); msg = `Trip switched to ${target}. Want the day plan, or just the road ahead?`; }
+      else     { msg = `Sticking with ${currentRunDest} then. What do you need?`; }
+      addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+      return;
+    }
+    pendingTripSwitch = null;   // anything else — drop the pending switch, carry on
+  }
+  // A destination statement sets or updates the trip — no AI round-trip needed.
+  const trip = parseTripIntent(text, { currentDest: currentRunDest });
+  if (trip) {
+    inp.value=''; inp.style.height='auto';
+    addMsg('user', text);
+    let msg;
+    if (trip.action === 'create') {
+      adoptTrip(trip.dest);
+      if (trip.origin) tripContext = `Origin: ${trip.origin}. Destination: ${trip.dest}.`;
+      msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Want the day plan, or just the road ahead?`;
+    } else if (trip.action === 'switch') {
+      pendingTripSwitch = trip.dest;               // confirm before overwriting
+      msg = `Switch the trip from ${trip.from} to ${trip.dest}?`;
+    } else {                                        // already on this run
+      msg = `Already on the ${trip.dest} run. What do you need?`;
+    }
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
     return;
   }
 
