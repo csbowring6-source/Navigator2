@@ -20,6 +20,18 @@
   .header{background:var(--navy2);border-bottom:1px solid rgba(245,166,35,0.25);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
   .logo{display:flex;align-items:center;gap:8px;cursor:pointer;}
 
+  /* HEADER MENU — settings + start fresh, reachable from every screen */
+  .menu-picker{position:relative;}
+  .menu-btn{background:var(--navy3);border:1px solid rgba(255,255,255,0.12);border-radius:7px;color:var(--gray1);font-size:16px;line-height:1;padding:6px 10px;cursor:pointer;font-family:inherit;}
+  .menu-btn:hover,.menu-btn:active{border-color:var(--amber);color:var(--amber);}
+  .menu-dropdown{position:fixed;top:52px;right:8px;background:var(--navy2);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:6px;min-width:232px;z-index:2000;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.7);}
+  .menu-dropdown.open{display:block;}
+  .menu-item{padding:10px 12px;border-radius:8px;font-size:14px;color:var(--gray1);cursor:pointer;line-height:1.25;}
+  .menu-item span{display:block;font-size:11px;color:var(--gray2);margin-top:2px;}
+  .menu-item:hover,.menu-item:active{background:var(--navy3);}
+  .menu-item.danger{color:var(--red);}
+  .menu-item.danger:hover,.menu-item.danger:active{background:rgba(231,76,60,0.1);}
+
   /* VERSION LINE — tap the title on any screen to see the build + update state */
   .version-line{display:none;align-items:center;justify-content:space-between;gap:10px;
     background:var(--navy3);border-bottom:1px solid rgba(255,255,255,0.08);
@@ -483,6 +495,15 @@
         <div class="map-option" onclick="selectMap('maps.me','🧭','Maps.me')">🧭 Maps.me</div>
       </div>
     </div>
+    <!-- MENU — settings + start fresh, one tap from any screen -->
+    <div class="menu-picker" id="menuPicker">
+      <button class="menu-btn" onclick="toggleAppMenu()" title="Settings and start fresh">⋯</button>
+      <div class="menu-dropdown" id="menuDropdown">
+        <div class="menu-item" onclick="menuGo('setup')">⚙ Edit setup<span>Name · rig · fuel · apps</span></div>
+        <div class="menu-item" onclick="menuGo('trip')">↺ Clear this trip<span>Wipes chat and trip. Keeps your profile.</span></div>
+        <div class="menu-item danger" onclick="menuGo('fresh')">⚠ Start completely fresh<span>Erases everything. Back to setup.</span></div>
+      </div>
+    </div>
     <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
   </div>
 </div>
@@ -543,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 02:11 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 02:25 AM AEST</div>
   </div>
 </div>
 
@@ -1901,7 +1922,30 @@ setInterval(() => {
 }, 30000);
 
 // ── MAP PICKER ────────────────────────────────────────────────────────────────
-function toggleMapMenu() { document.getElementById('mapDropdown').classList.toggle('open'); }
+function toggleMapMenu() {
+  document.getElementById('menuDropdown')?.classList.remove('open');   // one menu at a time
+  document.getElementById('mapDropdown').classList.toggle('open');
+}
+
+// ── HEADER MENU — settings + start fresh, one tap from any screen ────────────
+function toggleAppMenu() {
+  document.getElementById('mapDropdown')?.classList.remove('open');
+  document.getElementById('menuDropdown').classList.toggle('open');
+}
+function closeAppMenu() { document.getElementById('menuDropdown')?.classList.remove('open'); }
+
+function menuGo(what) {
+  closeAppMenu();
+  if (what === 'setup') openSetup(true);
+  else if (what === 'trip') clearThisTrip();          // confirms, then wipes chat/trip
+  else if (what === 'fresh') startCompletelyFresh();  // confirms, then wipes everything
+}
+
+// Tap anywhere else closes the menus rather than leaving them hanging open
+document.addEventListener('click', e => {
+  if (!e.target.closest('#menuPicker')) closeAppMenu();
+  if (!e.target.closest('#mapPicker')) document.getElementById('mapDropdown')?.classList.remove('open');
+}, true);
 function selectMap(id,icon,label) {
   selectedMap=id;
   document.getElementById('mapIcon').textContent=icon;
