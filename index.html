@@ -505,7 +505,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 12:33 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 01:03 AM AEST</div>
   </div>
 </div>
 
@@ -2033,8 +2033,12 @@ function unlockAudio() {
 // another and stitch the transcripts together — the AI receives ONE utterance,
 // never fragments.
 let captureActive = false;     // the driver wants the mic open
-let stitchedFinal = '';        // text carried across recogniser restarts
-let curFinal = '', curInterim = '';   // this recogniser instance's text
+// Stitching rule: the committed transcript holds FINAL results only. Interim
+// text is shown live but is always REPLACED, never appended — appending it (or
+// carrying it across a restart) is what produced "going back to going back to…".
+let committedFinal = '';       // finals carried from PREVIOUS recogniser instances
+let instanceFinal = '';        // finals from the CURRENT instance (rebuilt, not appended)
+let interimText = '';          // current interim segment — replaced every result
 let heardSpeech = false;       // has anything actually been said this capture
 let silenceTimer = null;       // fires after a long silence, once speech exists
 let noSpeechTimer = null;      // conversation-mode auto-sleep only
@@ -2047,8 +2051,9 @@ function toggleVoice() {
   else startListening();
 }
 
+// Everything committed so far, plus the live interim tail (shown, not committed).
 function capturedText() {
-  return (stitchedFinal + ' ' + curFinal + ' ' + curInterim).replace(/\s+/g,' ').trim();
+  return (committedFinal + ' ' + instanceFinal + ' ' + interimText).replace(/\s+/g,' ').trim();
 }
 function showCaptured(text) {
   const ui = document.getElementById('userInput');
@@ -2074,7 +2079,7 @@ function startListening() {
   }
   synth?.cancel();
   captureActive = true;
-  stitchedFinal = ''; curFinal = ''; curInterim = '';
+  committedFinal = ''; instanceFinal = ''; interimText = '';
   heardSpeech = false; restartBurst = 0;
   showCaptured('');
   startRecogniser();
@@ -2104,12 +2109,15 @@ function startRecogniser() {
   recognition.onstart = () => { isListening = true; setListeningUI(true); };
 
   recognition.onresult = e => {
+    // e.results is cumulative for this instance, so REBUILD both segments from
+    // scratch every event. Never append — appending is what duplicated words.
     let fin = '', interim = '';
     for (let i = 0; i < e.results.length; i++) {
       const r = e.results[i];
       if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript + ' ';
     }
-    curFinal = fin.trim(); curInterim = interim.trim();
+    instanceFinal = fin.replace(/\s+/g,' ').trim();   // replaces, never accumulates
+    interimText  = interim.replace(/\s+/g,' ').trim();// live only — never committed here
     const combined = capturedText();
     if (combined) { heardSpeech = true; restartBurst = 0; }
     showCaptured(combined);            // the driver sees what's being heard
@@ -2127,9 +2135,14 @@ function startRecogniser() {
   };
 
   recognition.onend = () => {
-    // Carry this instance's text forward before the object is discarded
-    stitchedFinal = capturedText();
-    curFinal = ''; curInterim = '';
+    // Carry forward FINALS ONLY. The interim tail is deliberately dropped: the
+    // next recogniser may re-hear that audio, and committing it here is what
+    // produced repeated fragments. Idempotent, so a double onend can't double it.
+    const done = instanceFinal;
+    if (done && !committedFinal.endsWith(done)) {
+      committedFinal = (committedFinal + ' ' + done).replace(/\s+/g,' ').trim();
+    }
+    instanceFinal = ''; interimText = '';
     if (!captureActive) return;        // a deliberate stop — stopCapture sends
     // Android ended us early but the driver isn't finished: start another.
     restartBurst++;
@@ -2155,8 +2168,9 @@ function stopCapture(send) {
   captureActive = false;
   clearTimeout(silenceTimer); clearTimeout(noSpeechTimer);
   try { if (recognition) { recognition.onend = null; recognition.stop(); } } catch(e) {}
+  // Committed finals + the last interim tail, counted once each.
   const text = capturedText();
-  stitchedFinal = ''; curFinal = ''; curInterim = '';
+  committedFinal = ''; instanceFinal = ''; interimText = '';
   resetVoiceUI();
   if (send && text.length > 1 && !busy) {
     convoSilentTurns = 0;              // they spoke — still in the conversation
