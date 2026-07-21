@@ -257,7 +257,7 @@
   .home-trip-title{font-size:14px;font-weight:600;margin-bottom:3px;}
   .home-trip-leg{font-size:12px;color:var(--gray2);margin-bottom:11px;line-height:1.4;}
   .home-trip-btn{width:100%;background:var(--amber);color:var(--navy);border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
-  .home-foot{margin-top:auto;padding-top:18px;display:flex;justify-content:space-between;align-items:center;}
+  .home-foot{margin-top:auto;padding-top:10px;display:flex;justify-content:space-between;align-items:flex-end;}
   .home-edit{font-size:12px;color:var(--gray3);background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;}
 
   /* ── APP / RESULTS VIEW (map behind here — SPEC §10) ────────────────── */
@@ -860,11 +860,28 @@ function updateGreeting() {
 // ── HOME / APP-VIEW SWITCHING (SPEC §10 — no idle map, no welcome overlay) ────
 let userHeight = '', userLength = '', ownedApps = [], soloContact = null;
 
+// Navigator hands the driving to whichever sat-nav the driver uses — name theirs
+// once they've chosen one, stay generic until then (SPEC §1: Navigator thinks,
+// the sat-nav steers — never claim one brand does the steering).
+function satNavName() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('navigator_map_pref') || 'null');
+    if (saved && saved.label) return saved.label;
+  } catch(e) {}
+  return 'your sat-nav';
+}
+function renderGuidance() {
+  const el = document.getElementById('homeGuideLead');
+  if (!el) return;
+  el.innerHTML = `<b>Navigator thinks — your sat-nav steers.</b> Ask out loud for what's ahead; I find it, then hand the driving to ${satNavName()}.`;
+}
+
 function showHome() {
   document.getElementById('setupScreen')?.classList.add('hidden');
   document.getElementById('appView')?.classList.add('hidden');
   document.getElementById('homeScreen')?.classList.remove('hidden');
   updateGreeting();
+  renderGuidance();
   renderHomeTripCard();
   renderSoloIndicator();
 }
