@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 02:56 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 02:43 AM AEST</div>
   </div>
 </div>
 
@@ -1613,13 +1613,13 @@ async function plotTripRoute(dest) {
     if (window._tripRoute && window._tripRoute.dest === dest && window._tripRoute.dlat) {
       dlat = window._tripRoute.dlat; dlon = window._tripRoute.dlon;
     } else {
-      const g = await fetchWithTimeout(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
       const gd = await g.json();
       if (!gd || !gd.length) return;
       dlat = parseFloat(gd[0].lat); dlon = parseFloat(gd[0].lon);
     }
     // The driving route
-    const r = await fetchWithTimeout(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
     const rd = await r.json();
     if (!rd.routes || !rd.routes.length) return;
     // Give the AI the real numbers: distance and car-pace driving time.
@@ -2841,16 +2841,6 @@ function distKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// Every road-data call gets a deadline. Without one a hung fetch left the app
-// showing the typing dots forever — no reply, no error, nothing to act on.
-const ROAD_TIMEOUT_MS = 15000;
-async function fetchWithTimeout(url, opts, ms) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms || ROAD_TIMEOUT_MS);
-  try { return await fetch(url, Object.assign({}, opts || {}, { signal: ctrl.signal })); }
-  finally { clearTimeout(t); }
-}
-
 // Amenity wording that never overstates: OSM leaves tags blank far more often
 // than it says "no", and a blank is NOT a "no" (SPEC §5 — flag, don't guess).
 function campAmenities(s) {
@@ -2879,7 +2869,7 @@ async function fetchCamps(opts) {
     const onTrip = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
     // On a trip the corridor runs past a 40km bubble — search wider.
     const radius = onTrip ? 90 : 40;
-    const r = await fetchWithTimeout(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=${radius}`);
+    const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=${radius}`);
     const d = await r.json();
     if (!d.results || !d.results.length) {
       return `NO CAMPS FOUND within ${radius}km. Say plainly that nothing is showing in the data out here and offer to widen the search — do not invent sites.`;
@@ -3501,32 +3491,6 @@ async function sendMessage(silent){
   const affirm = /^(yes|yeah|yep|yup|correct|that's right|sure|ok(ay)?|please do|go ahead)\b/i.test(text.trim());
   const scanText = (affirm && lastNavReply) ? text + ' ' + lastNavReply : text;
 
-  // A confirmation that kicks off route + camps lookups can take seconds. Say so
-  // out loud immediately — the driver must never be left staring at a silent
-  // screen wondering whether it heard them (SPEC §0).
-  const willLookupRoad =
-    /camp|caravan park|powered site|dump point|free camp/i.test(scanText) ||
-    !!(currentRunDest && gps) || !!(pendingTripDest && affirm);
-  if (willLookupRoad) {
-    const ack = 'On it — checking the road ahead.';
-    addMsg('nav', ack);
-    speak(ack);
-  }
-
-  // Backstop: whatever goes wrong in the data-gathering below, this reply is
-  // never allowed to end in silence. Cleared when the turn finishes normally.
-  clearTimeout(window._sendWatchdog);
-  window._sendWatchdog = setTimeout(() => {
-    if (!busy) return;
-    hideTyping();
-    const msg = "Couldn't reach my road data — try again in a minute.";
-    addMsg('nav', msg); speak(msg);
-    // Deliberately NOT touching `messages` here: if this fires during data
-    // gathering the turn hasn't been pushed yet, so a pop would eat an older one.
-    busy = false;
-    const sb = document.getElementById('sendBtn'); if (sb) sb.disabled = false;
-  }, 25000);
-
   // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
   // every state) always; LIVE FUEL PRICES only when price is the intent —
   // near a border the price list anchors the AI on far-away stations.
@@ -3699,7 +3663,6 @@ async function sendMessage(silent){
     messages.pop();
     addMsg('nav',`Connection issue — ${e.message || 'the request could not be sent'}. Check your internet and try again.`);
   }
-  clearTimeout(window._sendWatchdog);   // turn finished properly — stand the backstop down
   busy=false; document.getElementById('sendBtn').disabled=false;
 }
 
