@@ -2002,7 +2002,8 @@ function setConvo(on) {
   } else {
     b.textContent = '🎙 Conversation: Off';
     b.classList.remove('active');
-    try { if (recognition && isListening) recognition.stop(); } catch(e) {}
+    // Close the mic properly — a bare stop() would just be restarted by onend
+    if (captureActive) stopCapture(false);
   }
 }
 
@@ -2024,82 +2025,158 @@ function unlockAudio() {
   } catch(e) {}
 }
 
-function toggleVoice() { unlockAudio(); isListening ? stopListening() : startListening(); }
+// ── MIC CAPTURE — driver-controlled endpointing ──────────────────────────────
+// Tap to open the mic, tap again to send. The line stays open through
+// mid-thought pauses; it only closes itself after a long silence once real
+// speech has been captured. Android's recogniser fires onend early no matter
+// what continuous says, so when that happens mid-capture we immediately start
+// another and stitch the transcripts together — the AI receives ONE utterance,
+// never fragments.
+let captureActive = false;     // the driver wants the mic open
+let stitchedFinal = '';        // text carried across recogniser restarts
+let curFinal = '', curInterim = '';   // this recogniser instance's text
+let heardSpeech = false;       // has anything actually been said this capture
+let silenceTimer = null;       // fires after a long silence, once speech exists
+let noSpeechTimer = null;      // conversation-mode auto-sleep only
+let restartBurst = 0;          // guards a recogniser that dies instantly
+const SILENCE_MS = 2800;       // long enough to survive a mid-sentence breath
 
-let silenceTimer = null;
-let capturedFinal = '';
+function toggleVoice() {
+  unlockAudio();
+  if (captureActive) stopCapture(true);   // tap-to-send — the primary endpoint
+  else startListening();
+}
+
+function capturedText() {
+  return (stitchedFinal + ' ' + curFinal + ' ' + curInterim).replace(/\s+/g,' ').trim();
+}
+function showCaptured(text) {
+  const ui = document.getElementById('userInput');
+  if (ui) { ui.value = text; try { autoResize(ui); } catch(e) {} }
+}
+function setListeningUI(on) {
+  document.getElementById('voiceBtn')?.classList.toggle('listening', on);
+  document.getElementById('inputRow')?.classList.toggle('listening', on);
+  document.getElementById('homeMic')?.classList.toggle('listening', on);
+  if (on) setVoiceStatus('listening', '🔴 Listening — tap again to send');
+}
+// Only ever armed after real speech: a driver who hasn't spoken yet keeps the
+// mic until they tap. Any new speech resets the clock, so pauses are safe.
+function armSilenceTimer() {
+  clearTimeout(silenceTimer);
+  if (!heardSpeech) return;
+  silenceTimer = setTimeout(() => { if (captureActive) stopCapture(true); }, SILENCE_MS);
+}
 
 function startListening() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('Voice not supported. Try Chrome on Android.'); return;
   }
   synth?.cancel();
-  capturedFinal = '';
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.lang='en-AU';
-  // Android's engine re-sends cumulative text, so stitching results repeats the
-  // opening words. On Android: single-shot, final transcript only — its native
-  // pause detection decides when you're done. Elsewhere: continuous + silence timer.
-  recognition.continuous = !isAndroid;
-  recognition.interimResults = !isAndroid;
-  recognition.onstart = () => {
-    isListening=true;
-    document.getElementById('voiceBtn').classList.add('listening');
-    document.getElementById('inputRow').classList.add('listening');
-    setVoiceStatus('listening','🔴 Listening... pause when done');
-  };
-  recognition.onresult = e => {
-    if (isAndroid) {
-      const last = e.results[e.results.length-1];
-      if (last.isFinal) document.getElementById('userInput').value = last[0].transcript.trim();
-      return;
-    }
-    // Rebuild the whole transcript from scratch every event
-    let full='';
-    for(let i=0;i<e.results.length;i++){ full+=e.results[i][0].transcript+' '; }
-    document.getElementById('userInput').value=full.replace(/\s+/g,' ').trim();
-    // Only send after a genuine pause — don't cut the driver off mid-sentence
-    clearTimeout(silenceTimer);
-    silenceTimer=setTimeout(()=>{ try{if(recognition)recognition.stop();}catch(err){} },1600);
-  };
-  recognition.onerror = e => {
-    if(e.error==='not-allowed'){ resetVoiceUI(); alert('Microphone blocked. Please allow access in browser settings.'); }
-  };
-  recognition.onend = () => {
-    clearTimeout(silenceTimer);
-    resetVoiceUI();
-    // Always send whatever was captured — prevents the mic ending with an unsent command
-    const pending=document.getElementById('userInput').value.trim();
-    if(pending.length>1 && !busy) {
-      convoSilentTurns = 0;      // they spoke — still in the conversation
-      sendMessage();
-    } else if (convoEnabled) {
-      // Mic opened and heard nothing useful — after two of these, go to sleep
+  captureActive = true;
+  stitchedFinal = ''; curFinal = ''; curInterim = '';
+  heardSpeech = false; restartBurst = 0;
+  showCaptured('');
+  startRecogniser();
+  // Conversation mode only: if nothing is ever said, go back to sleep.
+  clearTimeout(noSpeechTimer);
+  if (convoEnabled) {
+    noSpeechTimer = setTimeout(() => {
+      if (!captureActive || heardSpeech) return;
+      stopCapture(false);
       convoSilentTurns++;
       if (convoSilentTurns >= 2) {
         setConvo(false);
         setVoiceStatus('', '🎙 Conversation ended — tap the mic when you need me');
-        setTimeout(()=>setVoiceStatus('',''), 4000);
+        setTimeout(() => setVoiceStatus('',''), 4000);
       }
+    }, 9000);
+  }
+}
+
+function startRecogniser() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-AU';
+  recognition.continuous = true;       // hold the line through pauses
+  recognition.interimResults = true;   // so partials can be shown and stitched
+
+  recognition.onstart = () => { isListening = true; setListeningUI(true); };
+
+  recognition.onresult = e => {
+    let fin = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript + ' ';
+    }
+    curFinal = fin.trim(); curInterim = interim.trim();
+    const combined = capturedText();
+    if (combined) { heardSpeech = true; restartBurst = 0; }
+    showCaptured(combined);            // the driver sees what's being heard
+    armSilenceTimer();                 // speech resets the silence clock
+  };
+
+  recognition.onerror = e => {
+    if (e.error === 'not-allowed') {
+      captureActive = false;
+      clearTimeout(silenceTimer); clearTimeout(noSpeechTimer);
+      resetVoiceUI();
+      alert('Microphone blocked. Please allow access in browser settings.');
+    }
+    // no-speech / network / aborted fall through to onend, which restarts
+  };
+
+  recognition.onend = () => {
+    // Carry this instance's text forward before the object is discarded
+    stitchedFinal = capturedText();
+    curFinal = ''; curInterim = '';
+    if (!captureActive) return;        // a deliberate stop — stopCapture sends
+    // Android ended us early but the driver isn't finished: start another.
+    restartBurst++;
+    if (restartBurst > 12 && !heardSpeech) {
+      stopCapture(false);
+      setVoiceStatus('', '🎙 Mic keeps dropping out — tap to try again, or type it');
+      setTimeout(() => setVoiceStatus('',''), 5000);
+      return;
+    }
+    try { startRecogniser(); } catch(err) {
+      setTimeout(() => { if (captureActive) { try { startRecogniser(); } catch(e2) {} } }, 250);
     }
   };
-  try { recognition.start(); } catch(e) { resetVoiceUI(); }
+
+  try { recognition.start(); } catch(e) {
+    // start() throws if the previous instance hasn't released yet — retry once
+    setTimeout(() => { if (captureActive) { try { recognition.start(); } catch(e2) {} } }, 250);
+  }
+}
+
+// The single exit point: close the mic and send ONE combined utterance.
+function stopCapture(send) {
+  captureActive = false;
+  clearTimeout(silenceTimer); clearTimeout(noSpeechTimer);
+  try { if (recognition) { recognition.onend = null; recognition.stop(); } } catch(e) {}
+  const text = capturedText();
+  stitchedFinal = ''; curFinal = ''; curInterim = '';
+  resetVoiceUI();
+  if (send && text.length > 1 && !busy) {
+    convoSilentTurns = 0;              // they spoke — still in the conversation
+    showCaptured(text);
+    // Show what was actually heard before it goes (SPEC §0 — no silent guessing)
+    setVoiceStatus('', '➤ Sending: “' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '”');
+    setTimeout(() => { if (!busy) sendMessage(); }, 600);
+  } else if (!send) {
+    showCaptured('');
+  }
 }
 
 function resetVoiceUI() {
-  isListening=false;
-  recognition=null;
-  document.getElementById('voiceBtn').classList.remove('listening');
-  document.getElementById('inputRow').classList.remove('listening');
+  isListening = false;
+  recognition = null;
+  setListeningUI(false);
   setVoiceStatus('','');
 }
 
-function stopListening() {
-  // Manual tap while listening — stop the mic; onend sends what was captured
-  try{if(recognition)recognition.stop();}catch(e){}
-}
+function stopListening() { stopCapture(true); }   // legacy name — same endpoint
 
 function speak(text) {
   if(!synth) return;
@@ -2123,7 +2200,7 @@ function speak(text) {
     setVoiceStatus('','🎙 Tap to reply');
     setTimeout(()=>setVoiceStatus('',''), 3000);
     // Conversation mode: your turn — mic reopens by itself
-    if (convoEnabled && !busy && !isListening) setTimeout(startListening, 600);
+    if (convoEnabled && !busy && !isListening && !captureActive) setTimeout(startListening, 600);
   };
   synth.speak(utt);
 }
