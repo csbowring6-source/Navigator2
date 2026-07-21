@@ -58,6 +58,13 @@ Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped
 - **The user pushes via GitHub Desktop**, not from this environment. This machine has no GitHub push credentials (HTTPS remote, no `gh` CLI, no token). Do not attempt `git push`; stage/commit only when asked, and leave publishing to the user's GitHub Desktop.
 - **Test changes before committing.** Because there's no build/test harness, "test" means exercising the affected behavior in a browser — load `index.html`, drive the flow that changed (e.g. ask the AI, trigger a fuel/camps/weather lookup, check the map pins), and confirm it works and the console is clean — before proposing a commit.
 - The GitHub remote for this repo is `csbowring6-source/Navigator2` (`origin`), branch `main`.
+- **Always report the build stamp.** The final line of every job must be the current `#buildStamp` — version plus date/time in AEST — in exactly this format, so it can be checked against the phone at a glance:
+
+  ```
+  DEPLOYED: ✓ v 22 Jul 2026, 01:03 AM AEST
+  ```
+
+  Print it as the last line even when the job didn't change the stamp (say so if it's unchanged), and get the time from `TZ="Australia/Sydney" date` rather than guessing.
 
 ## Practical orientation for editing `index.html`
 
