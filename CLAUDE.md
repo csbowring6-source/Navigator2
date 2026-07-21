@@ -66,6 +66,13 @@ Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped
 
   Print it as the last line even when the job didn't change the stamp (say so if it's unchanged), and get the time from `TZ="Australia/Sydney" date` rather than guessing.
 
+## Engineering discipline — how we work
+
+1. **One behaviour per ticket.** Never ship "part 1" of a ticket. If a ticket is too big for one pass, say so and split it **before** starting — not halfway through, and not in the final report.
+2. **Bench-test before commit.** Core logic (trip creation, corridor search, ranking) must be callable as pure functions and actually **run with fake inputs** before committing. "Tested" means *executed*, not read. Put the test output in the report.
+3. **Regression check every commit.** Confirm the **mic capture path**, the **home screen render**, and the **setup interview** are untouched or still working. The mic capture has regressed twice already — once from a gap in its own fix, once when a revert removed it — so it gets checked every time regardless of what the change was about.
+4. **Every report ends with the build stamp** — see the Workflow rule above for the exact format.
+
 ## Practical orientation for editing `index.html`
 
 - **Screens & view switching**: `#setupScreen` (first-run interview) · `#homeScreen` (default landing) · `#appView` (results/conversation, holds the map + chat + input). `loadProfile()` decides home-vs-setup on load; `showHome()` / `openAppView()` / `backHome()` swap them; `homeMic()` opens the results view and starts listening; `revealMap()` un-hides `#mapWrap` when results land. No overlays gate any of this.
