@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 09:21 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 09:29 AM AEST</div>
   </div>
 </div>
 
@@ -3275,12 +3275,11 @@ async function answerCamps(scanText) {
   const alongWay = /\b(along|on (?:the|my) (?:route|way)|next hour|within (?:the|an) hour|on the way|up ahead|ahead of me|near me|around here|nearby)\b/i.test(scanText);
   const namedMatch = scanText.match(/\b(?:in|at|near|around|to)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
   let named = (namedMatch && !alongWay) ? namedMatch[1] : null;
-  // Voice transcripts are often lowercase — if they say "in <destination>" and
-  // that's the live trip's destination, honour it even without a capital letter.
-  if (!named && !alongWay && currentRunDest) {
-    const re = new RegExp('\\b(?:in|at|near|around|to)\\s+' + currentRunDest.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'i');
-    if (re.test(scanText)) named = currentRunDest;
-  }
+  // With a live trip, the trip IS the context: "when I get there", "at the
+  // destination", a lowercase "in cardwell", or a bare camps ask all mean the
+  // DESTINATION — not wherever the car happens to be right now. The corridor
+  // is only for explicit "along the way / next hour" phrasing (above).
+  if (!named && !alongWay && currentRunDest) named = currentRunDest;
   const ans = formatCampsAnswer(named ? await getCampsNear(named) : await getCorridorCamps());
   // The answer ends by OFFERING a number search when the best fit has no verified
   // number — hold that question so a bare "yes" answers IT, not a new camps query.
