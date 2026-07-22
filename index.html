@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 10:35 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 01:16 PM AEST</div>
   </div>
 </div>
 
@@ -2289,15 +2289,17 @@ function startRecogniser() {
   recognition.onstart = () => { isListening = true; setListeningUI(true); };
 
   recognition.onresult = e => {
-    // e.results is cumulative for this instance, so REBUILD both segments from
-    // scratch every event. Never append — appending is what duplicated words.
+    // Rebuild both segments from scratch every event (e.results is cumulative).
+    // Android's cumulative results can contain DUPLICATE or overlapping items —
+    // finals re-finalised, interims re-emitted — so fold each segment through
+    // mergeFinal instead of a blind concat, or the same phrase repeats N times.
     let fin = '', interim = '';
     for (let i = 0; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript + ' ';
+      const r = e.results[i], seg = (r[0] && r[0].transcript) || '';
+      if (r.isFinal) fin = mergeFinal(fin, seg); else interim = mergeFinal(interim, seg);
     }
-    instanceFinal = fin.replace(/\s+/g,' ').trim();   // replaces, never accumulates
-    interimText  = interim.replace(/\s+/g,' ').trim();// live only — never committed here
+    instanceFinal = fin;      // deduped finals for this instance
+    interimText  = interim;   // deduped interim tail — shown live, never committed here
     const combined = capturedText();
     if (combined) { heardSpeech = true; restartBurst = 0; }
     showCaptured(combined);            // the driver sees what's being heard
