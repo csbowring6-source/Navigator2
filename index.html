@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 09:12 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 09:21 AM AEST</div>
   </div>
 </div>
 
@@ -573,6 +573,8 @@
   <div class="appview-bar">
     <button class="appview-back" onclick="backHome()">← Home</button>
     <div class="appview-title">Navigator</div>
+    <button class="appview-back" id="mapToggle" onclick="toggleMapView()"
+            style="display:none;margin-left:auto;">🗺 Map</button>
   </div>
 
   <!-- MAP (revealed only when a query returns mappable results — SPEC §10) -->
@@ -1025,11 +1027,36 @@ function homeMic() {
     document.getElementById('userInput')?.focus();
   }
 }
-// The map is wallpaper — revealed inside the results view only when results land.
+// The map is a RESULTS VIEW ONLY, opened BY CHOICE (SPEC §10): it must never
+// auto-open over the answer. Results make the 🗺 toggle appear; the driver taps
+// it to see the pins. The banners are always what lands first.
 function revealMap() {
   const mw = document.getElementById('mapWrap');
   if (mw) mw.style.display = '';
   if (window._navMap) { try { window._navMap.invalidateSize(); } catch(e){} }
+}
+function offerMap() {   // results exist — show the toggle, leave the map closed
+  const btn = document.getElementById('mapToggle');
+  if (!btn) return;
+  btn.style.display = '';
+  const open = document.getElementById('mapWrap')?.style.display !== 'none';
+  btn.textContent = open ? '✕ Map' : '🗺 Map';
+}
+function toggleMapView() {
+  const mw = document.getElementById('mapWrap');
+  const btn = document.getElementById('mapToggle');
+  if (!mw) return;
+  if (mw.style.display !== 'none') {
+    mw.style.display = 'none';
+    if (btn) btn.textContent = '🗺 Map';
+  } else {
+    revealMap();
+    if (btn) btn.textContent = '✕ Map';
+    // Fit the pins now the container has real size — a hidden map can't measure.
+    if (window._navMap && window._optionFit) {
+      try { window._navMap.fitBounds(window._optionFit, { padding: [40,40], maxZoom: 14 }); } catch(e) {}
+    }
+  }
 }
 
 // Trip card on home — the live trip with a resume, or hidden (SPEC §10).
@@ -1613,7 +1640,7 @@ function addPendingPins(pins) {
 
 function showOptionPins(places) {
   if (!places || !places.length) return;
-  revealMap();                                   // results arrived — the map is no longer wallpaper
+  offerMap();   // results arrived — offer the map, NEVER auto-open it over the answer
   if (!window._navMap || !window.L) return;
   clearOptionPins();
   window._userMovedMap = false;   // new answer, new pins — the app takes the wheel again
@@ -1653,11 +1680,14 @@ function showOptionPins(places) {
     optionPins.push(m);
     pts.push([p.lat, p.lon]);
   });
-  // Auto-fit so all options AND the driver are visible
-  if (pts.length && gps) {
-    pts.push([gps.lat, gps.lon]);
+  // Auto-fit so all options AND the driver are visible. The map may still be
+  // hidden (toggle not tapped) — remember the bounds so toggleMapView can re-fit
+  // once the container actually has a size.
+  if (pts.length) {
+    if (gps) pts.push([gps.lat, gps.lon]);
     try {
-      window._navMap.fitBounds(L.latLngBounds(pts), { padding: [40,40], maxZoom: 14 });
+      window._optionFit = L.latLngBounds(pts);
+      window._navMap.fitBounds(window._optionFit, { padding: [40,40], maxZoom: 14 });
     } catch(e) {}
   }
 }
@@ -3260,6 +3290,9 @@ async function answerCamps(scanText) {
   if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
+  // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
+  // stays closed until the driver opens it (SPEC §10: never bury the answer).
+  if (ans.sites.length && window._pendingPins && window._pendingPins.length) showOptionPins(window._pendingPins);
   // Interleave a one-tap Call (verified numbers only) after each site's Navigate
   // button; offer a search where the best fit has no verified number.
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
@@ -3677,6 +3710,8 @@ function resetConversation() {
   const ui = document.getElementById('userInput'); if (ui) ui.value = '';
   document.getElementById('chatArea').innerHTML = '<div class="welcome" id="welcome"></div>';
   const mw = document.getElementById('mapWrap'); if (mw) mw.style.display = 'none';   // map back to wallpaper
+  const mt = document.getElementById('mapToggle'); if (mt) { mt.style.display = 'none'; mt.textContent = '🗺 Map'; }
+  window._optionFit = null;
   busy = false;
   document.getElementById('sendBtn').disabled = false;
   // A fresh start goes all the way back — the home screen (no overlay any more).
