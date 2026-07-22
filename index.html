@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 09:23 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 22 Jul 2026, 10:35 AM AEST</div>
   </div>
 </div>
 
@@ -2572,6 +2572,7 @@ RULES:
 - TOILETS: A practical, urgent need — treat it matter-of-factly, no coyness. The list includes public toilets AND servos, cafés and pubs (all of which have toilets and are far better mapped). Give the NEAREST one, whatever kind it is — nobody cares whether it's a park or a servo when they need to go. Say what it is ("the servo at X, 4 minutes"). In Solo mode, prefer staffed or well-lit places over isolated spots.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
 - NEVER say you have no route or trip plan. If the driver asks about something ahead or "along my route" and no trip is set, do not refuse — offer to plan it ("Want me to set a trip to [place]?" if they named one, otherwise "Where are you headed — I'll set the trip") and answer with what's nearby meanwhile.
+- PHONE NUMBERS (hard rule): only ever state a phone number you are certain of from a verified source. If you are not certain of the exact digits, say you couldn't find a verified number and offer to keep looking — NEVER guess, approximate, or reconstruct a number. A wrong number sent to a driver at the wheel is worse than no number.
 - NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
 - NEVER invent a place, a distance, or a travel time. If the context doesn't give you one, you don't have one.
 - WHEN A LOOKUP FAILS, SAY WHY. The context will tell you the reason — no signal, or the data service playing up. Pass that reason on plainly, because the driver can act on it: no signal means wait until back in range; a service problem means try again in a minute. Never just say "can't check right now" without the reason.
@@ -2958,59 +2959,159 @@ function selectCorridorCamps(camps, opts) {
   return { directional, widened, rigFiltered, total: inWindow.length, sites: inWindow.slice(0, 6) };
 }
 
-// Async wrapper: fetch OSM camps, attach real drive times, run the pure selector,
-// build the AI context. (Answer wording / call handoff / results view are S2.3–4.)
-async function fetchCamps() {
-  if (!gps) return '';
+// Async: fetch OSM camps, attach real drive times, run the pure selector.
+// Returns STRUCTURED data (sites carry phone/amenity tags) or {error}. A 15s
+// deadline means a stalled fetch fails honestly instead of hanging.
+async function getCorridorCamps() {
+  if (!gps) return { error: 'no-gps' };
+  const onTrip = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
+  const radius = onTrip ? 90 : 40;
+  let d;
   try {
-    const onTrip = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
-    const radius = onTrip ? 90 : 40;   // a corridor runs past a 40km bubble
-    const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=${radius}`);
-    const d = await r.json();
-    if (!d.results || !d.results.length) {
-      return `NO CAMPS in the data within ${radius}km. Say plainly nothing is showing out here and offer to widen — invent nothing.`;
-    }
-    // Shortlist by crow first (keeps the OSRM table call small), then real times.
-    const cands = d.results.filter(s => s.lat && s.lon)
-      .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-      .sort((a,b) => a.crow - b.crow)
-      .slice(0, 12);
-    const roads = await roadDistances(gps.lat, gps.lon, cands);
-    cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
-
-    const sel = selectCorridorCamps(cands, {
-      gps, routePath: onTrip ? window._tripRoute.path : null,
-      rig: currentVehicle, windowMins: 60,
-    });
-
-    if (!sel.sites.length) {
-      return onTrip
-        ? `NOTHING AHEAD: no camps found ahead on the ${currentRunDest} route within the window. Say so plainly and offer to widen or look further along — never offer sites behind the driver, never pad.`
-        : `NO CAMPS matched within the window. Say so and offer to widen — invent nothing.`;
-    }
-
-    notePlaces(sel.sites.map(s => s.name));
-    addPendingPins(sel.sites.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
-
-    const list = sel.sites.map(s => {
-      const known = [], unknown = [];
-      const tag = (v, yes, name) => { if (v === 'yes') known.push(yes); else if (v !== 'no') unknown.push(name); };
-      tag(s.powered, 'powered', 'power'); tag(s.toilets, 'toilets', 'toilets'); tag(s.water, 'water', 'water'); tag(s.dump, 'dump point', 'dump point');
-      const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? 'paid' : 'price unconfirmed');
-      const det = s.detour != null ? `, ${s.detour.toFixed(0)}km off route` : '';
-      return `${s.name} (${s.type}) — ${distTime(s)}${det}, ${price}; has ${known.length?known.join(', '):'nothing recorded'}${unknown.length?`; UNCONFIRMED: ${unknown.join(', ')}`:''}`;
-    }).join(' | ');
-
-    const dir = sel.directional
-      ? `AHEAD on the ${currentRunDest} route only (behind the driver already excluded)`
-      : `nearest by road (no trip set, so not filtered to a direction)`;
-    const wide = sel.widened ? ' NOTE: nothing sat inside the hour — say that first, then offer these as the nearest beyond it.' : '';
-    const rigTxt = sel.rigFiltered ? ` Filtered to sites a ${VEHICLES[currentVehicle].label.toLowerCase()} fits by type/power — OSM has no rig-size tag, so drive-through/unhitching is UNCONFIRMED; where it matters say so and suggest a call or WikiCamps, never guess.` : '';
-
-    return `CAMPS — ${dir}, ranked by fit then drive time, real road times, all pinned:${wide} ${list}.${rigTxt} A blank field is neither yes nor no — say "unconfirmed".`;
-  } catch(e) {
-    return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check camps/parks. Name nothing, invent nothing.`;
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch(`${API_URL}camps?lat=${gps.lat}&lon=${gps.lon}&radius=${radius}`, { signal: ctrl.signal });
+    clearTimeout(to);
+    d = await r.json();
+  } catch (e) {
+    return { error: navigator.onLine ? 'service' : 'offline' };
   }
+  if (!d.results || !d.results.length) return { error: 'empty', directional: onTrip };
+  const cands = d.results.filter(s => s.lat && s.lon)
+    .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+    .sort((a,b) => a.crow - b.crow).slice(0, 12);
+  const roads = await roadDistances(gps.lat, gps.lon, cands);
+  cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
+  const sel = selectCorridorCamps(cands, { gps, routePath: onTrip ? window._tripRoute.path : null, rig: currentVehicle, windowMins: 60 });
+  if (!sel.sites.length) return { error: onTrip ? 'none-ahead' : 'empty', directional: onTrip };
+  return { sites: sel.sites.slice(0, 3), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered };
+}
+
+// ── ANSWER SHAPE + CALL HANDOFF (S2.3) — deterministic, so the TRUST RULE is
+// enforced in code: a phone number is only ever SPOKEN if it is in the data.
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+// Verified = a phone tag from OSM with enough digits to be a real number.
+function verifiedPhone(s) {
+  const p = (s && (s.phone || s['contact:phone'])) || '';
+  return (p.replace(/[^\d]/g,'').length >= 6) ? p.trim() : null;
+}
+const speakablePhone = p => p.replace(/[^\d]/g,'').split('').join(' ');   // read digit by digit
+function timePhrase(s) {
+  if (s.mins == null) return `${Math.round(s.km)} km`;
+  if (s.mins < 60) return `${s.mins} minute${s.mins === 1 ? '' : 's'}`;
+  const h = Math.floor(s.mins/60), m = s.mins % 60;
+  return m ? `${h} hour${h>1?'s':''} ${m} min` : `${h} hour${h>1?'s':''}`;
+}
+// Field-tester vocabulary ONLY: powered, pool, showers, toilets, wi-fi. Confirmed
+// (=='yes') is spoken; blank is "unconfirmed"; an explicit 'no' is silently absent.
+function campAmenities(s) {
+  const known = [], unknown = [];
+  const add = (v, label) => { if (v === 'yes') known.push(label); else if (v !== 'no') unknown.push(label); };
+  add(s.powered, 'power'); add(s.swimming_pool, 'a pool'); add(s.shower, 'showers'); add(s.toilets, 'toilets');
+  const w = (s.internet_access || '').toLowerCase();
+  if (/^(wlan|yes|wired|terminal)$/.test(w)) known.push('wi-fi'); else if (!w) unknown.push('wi-fi');
+  return { known, unknown };
+}
+
+// PURE: build the spoken/text answer from getCorridorCamps' result. Count stated
+// FIRST and honestly, up to three sites, only confirmed fields, and it FINISHES
+// by handing over the best-fit's verified number — or saying there isn't one.
+function formatCampsAnswer(res) {
+  if (res.error) {
+    const map = {
+      'no-gps': "I don't have your location yet — tap the pin to set it and I'll find camps.",
+      'offline': "No coverage here, so I can't reach the camp data — I'll answer the moment we're back in range.",
+      'service': "The camp data service is playing up — not your signal. Try again in a minute.",
+      'none-ahead': `Nothing showing ahead on the ${currentRunDest} route right now. Want me to widen the search or look further along?`,
+      'empty': "No campsites showing in the data around here right now. Want me to widen the search?",
+    };
+    return { text: map[res.error] || map['service'], sites: [] };
+  }
+  const sites = (res.sites || []).slice(0, 3);
+  const n = sites.length;
+  const where = res.directional ? 'ahead' : 'nearby';
+  // COUNT-FIRST — never imply three exist when they don't.
+  let head = n === 1 ? `Only one ${where}:` : n === 2 ? `I can only find two ${where}:` : `Three ${where}:`;
+  if (res.widened) head = n === 1 ? `Nothing inside the hour — one a bit further ${where}:`
+                                  : `Nothing inside the hour — the ${n === 2 ? 'two' : 'three'} nearest ${where}:`;
+  const lines = sites.map(s => {
+    const am = campAmenities(s);
+    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? 'paid' : 'price unconfirmed');
+    let line = `${s.name}, ${timePhrase(s)} — ${price}`;
+    if (am.known.length) line += ` — ${am.known.join(', ')}`;
+    line += '.';
+    if (am.unknown.length) line += ` ${cap(am.unknown.join(', '))} unconfirmed — worth asking when you call.`;
+    return line;
+  });
+  const best = sites[0];
+  const bp = verifiedPhone(best);
+  const finish = bp ? `Call ${best.name} on ${speakablePhone(bp)} to check tonight.`
+                    : `No verified number for ${best.name} — want me to search for it?`;
+  return {
+    text: [head, lines.join(' '), finish].join(' '),
+    sites: sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s) })),
+  };
+}
+
+// Is this a camps request? (Fuel-mixed queries fall through to the AI path.)
+function isCampsQuery(text) {
+  return /\b(campsite|camp site|camps?|caravan park|powered site|free camp|dump point|somewhere to (stay|camp)|stay tonight|camp tonight|overnight stop)\b/i.test(text)
+    && !/\b(fuel|servo|petrol|diesel|coffee|toilet|breakfast|lunch|dinner)\b/i.test(text);
+}
+
+async function answerCamps(scanText) {
+  // Honesty: they named a town they're not near — don't silently search elsewhere.
+  const namedElsewhere = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
+  const currentTown = (gpsAddress || '').split(',')[0].trim().toLowerCase();
+  if (namedElsewhere && namedElsewhere[1].toLowerCase() !== currentTown) {
+    const msg = `I can only check camps near where you are right now, not ${namedElsewhere[1]}. Want me to look around you instead?`;
+    addMsg('nav', msg); speak(msg);
+    return;
+  }
+  const ans = formatCampsAnswer(await getCorridorCamps());
+  if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
+  addMsg('nav', ans.text);   // draws the Navigate button(s) from the pins
+  speak(ans.text);
+  // Interleave a one-tap Call (verified numbers only) after each site's Navigate
+  // button; offer a search where the best fit has no verified number.
+  const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
+  const bub = bubbles[bubbles.length - 1];
+  if (!bub) return;
+  const navBtns = [...bub.querySelectorAll('button.nav-btn')];
+  const after = (el, ref) => { if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref.nextSibling); else bub.appendChild(el); };
+  ans.sites.forEach(s => {
+    const navFor = navBtns.find(b => b.textContent.includes(s.name));
+    if (s.phone) {
+      const call = document.createElement('a'); call.className = 'nav-btn';
+      call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
+      call.href = 'tel:' + s.phone.replace(/[^\d+]/g,''); call.textContent = `📞 Call ${s.name}`;
+      after(call, navFor);
+    } else if (s === ans.sites[0]) {
+      const find = document.createElement('button'); find.className = 'nav-btn';
+      find.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--amber);color:var(--amber);';
+      find.textContent = `🔎 Search for ${s.name}'s number`;
+      find.onclick = () => { const ui = document.getElementById('userInput'); if (ui) { ui.value = `find the phone number for ${s.name}`; sendMessage(); } };
+      after(find, navFor);
+    }
+  });
+}
+
+// Legacy AI-context path (kept for camps mixed with other intents, e.g. "camp
+// and a servo"). Builds a context string from the same structured selection.
+async function fetchCamps() {
+  const res = await getCorridorCamps();
+  if (res.error) {
+    if (res.error === 'offline' || res.error === 'service')
+      return `LOOKUP FAILED — ${res.error === 'offline' ? 'the phone has lost internet; tell the driver you\'ll help once back in range' : 'the map data service isn\'t responding; tell the driver it\'s the service, not their signal, and to try in a minute'}. Name nothing, invent nothing.`;
+    return `NO CAMPS matched ${res.directional ? 'ahead on the route' : 'nearby'} within the window. Say so plainly and offer to widen — never pad, never invent.`;
+  }
+  const list = res.sites.map(s => {
+    const am = campAmenities(s);
+    const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? 'paid' : 'price unconfirmed');
+    const ph = verifiedPhone(s) ? `phone ${verifiedPhone(s)}` : 'NO VERIFIED NUMBER';
+    return `${s.name} (${s.type}) — ${timePhrase(s)}, ${price}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}; ${ph}`;
+  }).join(' | ');
+  return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here.`;
 }
 
 // ── NEARBY FUEL STATIONS — proximity ground truth (OSM, all brands, no prices) ─
@@ -3583,6 +3684,19 @@ async function sendMessage(silent){
   // so confirming "did you mean gyms?" actually fetches gyms.
   const affirm = /^(yes|yeah|yep|yup|correct|that's right|sure|ok(ay)?|please do|go ahead)\b/i.test(text.trim());
   const scanText = (affirm && lastNavReply) ? text + ' ' + lastNavReply : text;
+
+  // ── CAMPS answered deterministically (S2.3): verified data only, so a phone
+  // number is never AI-composed (TRUST RULE). Mixed camps+other queries fall
+  // through to the AI path below.
+  if (isCampsQuery(scanText)) {
+    try { await answerCamps(scanText); } catch(e) {
+      const msg = "Couldn't check camps just now — try again in a minute.";
+      addMsg('nav', msg); speak(msg);
+    }
+    hideTyping();
+    busy = false; document.getElementById('sendBtn').disabled = false;
+    return;
+  }
 
   // Fuel questions get TWO ground truths: NEARBY FUEL STATIONS (proximity,
   // every state) always; LIVE FUEL PRICES only when price is the intent —
