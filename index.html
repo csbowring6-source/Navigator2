@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 06:07 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 08:55 AM AEST</div>
   </div>
 </div>
 
@@ -3125,7 +3125,8 @@ function formatCampsAnswer(res) {
       'no-place': `I couldn't find ${res.place} on the map — can you say the town again?`,
       'empty-place': `No caravan parks showing in the data around ${res.place} right now. Want me to widen the search?`,
     };
-    return { text: map[res.error] || map['service'], sites: [] };
+    const t = map[res.error] || map['service'];
+    return { text: t, spoken: t, sites: [] };
   }
   const sites = (res.sites || []).slice(0, 3);
   const n = sites.length;
@@ -3143,12 +3144,33 @@ function formatCampsAnswer(res) {
     if (am.unknown.length) line += ` ${cap(am.unknown.join(', '))} unconfirmed — worth asking when you call.`;
     return line;
   });
+  // SPOKEN variant — CONFIRMED facts only. Unconfirmed items are NEVER listed
+  // aloud per site (the full detail stays in the text banner above). A data-poor
+  // site is one short honest line; gaps get ONE summary sentence at the end.
+  let anyGaps = false;
+  const spokenLines = sites.map(s => {
+    const am = campAmenities(s);
+    if (am.unknown.length) anyGaps = true;
+    const t = timePhrase(s).replace(/\bmin\b/, 'minutes');   // TTS says the word in full
+    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? 'paid' : null);
+    if (!price) anyGaps = true;
+    const ph = verifiedPhone(s);
+    const facts = [...am.known];
+    if (price) facts.push(price);                            // price last, never "unconfirmed"
+    if (!facts.length)
+      return `${s.name}, ${t} — details unconfirmed, one to ring${ph ? ': ' + speakablePhone(ph) : ''}.`;
+    return `${s.name}, ${t} — ${facts.join(', ')}${ph ? `, on ${speakablePhone(ph)}` : ''}.`;
+  });
   const best = sites[0];
   const bp = verifiedPhone(best);
   const finish = bp ? `Call ${best.name} on ${speakablePhone(bp)} to check tonight.`
                     : `No verified number for ${best.name} — want me to search for it?`;
+  const spokenBits = [head, spokenLines.join(' ')];
+  if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
+  if (!bp) spokenBits.push(finish);   // the offer (drives the pending question); a rich best's number was already spoken in its line
   return {
     text: [head, lines.join(' '), finish].join(' '),
+    spoken: spokenBits.join(' '),
     sites: sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s) })),
   };
 }
@@ -3232,8 +3254,8 @@ async function answerCamps(scanText) {
     ? { type: 'number-search', site: ans.sites[0].name, sites: ans.sites.map(s => s.name) }
     : null;
   if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
-  addMsg('nav', ans.text);   // draws the Navigate button(s) from the pins
-  speak(ans.text);
+  addMsg('nav', ans.text);            // full detail stays in the text banner
+  speak(ans.spoken || ans.text);      // aloud: confirmed facts only
   // Interleave a one-tap Call (verified numbers only) after each site's Navigate
   // button; offer a search where the best fit has no verified number.
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
