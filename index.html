@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 10:33 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 03:25 PM AEST</div>
   </div>
 </div>
 
@@ -872,8 +872,11 @@ let currentRunDest = '';
 let pendingTripDest = null;
 
 // 👍 on an answer about a place = adopt it as the trip, no form needed
+let tripMode = '';   // '' unknown · 'day' (back tonight) · 'journey' (travelling on)
+
 function adoptTrip(dest) {
   currentRunDest = dest;
+  tripMode = '';         // new trip — mode not known until the driver says
   updateSuggestions();   // chips announce route-aware mode
   tripContext = `Destination: ${dest}.`;
   pendingTripDest = null;
@@ -889,8 +892,8 @@ let pendingTripSwitch = null;   // a proposed destination change, awaiting yes/n
 // PURE: honest one-glance day brief from real route data (km + OSRM hours),
 // paced for the vehicle (same factors the AI uses: car +10%, caravan/campervan
 // +30%, truck +20%). No route data yet → say so plainly, never guess numbers.
-function formatDayBrief(dest, origin, route, vehicle) {
-  const head = `Trip set — ${origin ? origin + ' to ' : ''}${dest}.`;
+function formatDayBrief(dest, origin, route, vehicle, headOverride) {
+  const head = headOverride || `Trip set — ${origin ? origin + ' to ' : ''}${dest}.`;
   if (!route || route.dest !== dest || !route.km) {
     return `${head} I'm still fetching the road picture — ask for the plan again in a moment.`;
   }
@@ -1528,6 +1531,7 @@ function resumeTrip() {
     const lockedPlan = localStorage.getItem('navigator_trip_plan');
     if (lockedPlan) tripContext += ' Agreed plan for this trip: ' + lockedPlan;
     currentRunDest = raw.dest || '';
+    tripMode = raw.mode || '';   // day out / journey survives the restart
     updateSuggestions();   // chips announce route-aware mode
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
@@ -3244,7 +3248,7 @@ function formatCampsAnswer(res) {
 // ALWAYS takes the deterministic /camps path (getCorridorCamps handles no-GPS),
 // so a phone number is never AI-composed and the answer never comes back empty.
 function isCampsQuery(text) {
-  return /\b(?:campgrounds?|campsites?|camp ?sites?|camping|camps?|caravan ?parks?|van ?parks?|holiday ?parks?|tourist ?parks?|caravan ?sites?|powered ?sites?|free ?camps?|dump ?points?|showgrounds?|somewhere to (?:stay|camp)|(?:stay|camp) tonight|overnight (?:stop|stay|spot|park))\b/i.test(text);
+  return /\b(?:campgrounds?|campsites?|camp ?sites?|camping|camps?|caravan ?parks?|van ?parks?|holiday ?parks?|tourist ?parks?|caravan ?sites?|powered ?sites?|free ?camps?|dump ?points?|showgrounds?|somewhere to (?:stay|camp)|(?:stay|camp) tonight|overnight (?:stops?|stays?|spots?|parks?))\b/i.test(text);
 }
 
 // ── PENDING QUESTION (context) ────────────────────────────────────────────────
@@ -3259,6 +3263,14 @@ function matchPendingAnswer(text, pending) {
   if (!pending) return null;
   const t = (text || '').trim().toLowerCase();
   if (!t) return null;
+  if (pending.type === 'trip-mode') {
+    // "Out for the day, or on a journey?" — day = back tonight; journey = travelling on.
+    if (/\b(day out|out for the day|day trip|just (?:the|a) day|back (?:home )?tonight|home tonight|returning tonight)\b/.test(t) || /^(day|the day|out)$/.test(t))
+      return { action: 'trip-mode', mode: 'day' };
+    if (/\b(journey|travell?ing(?: on)?|touring|moving on|onwards?|staying (?:away|out|over)|overnight)\b/.test(t))
+      return { action: 'trip-mode', mode: 'journey' };
+    return null;   // not an answer — new query; the mode stays unknown
+  }
   if (pending.type === 'camps-offer') {
     // "Want the caravan sites now?" — yes runs the held camps ask; a fresh
     // camps question is the same intent, so run THAT instead.
@@ -3900,7 +3912,11 @@ async function sendMessage(silent){
       addMsg('user', text);
       const target = pendingTripSwitch; pendingTripSwitch = null;
       let msg;
-      if (yes) { adoptTrip(target); msg = `Trip switched to ${target}. Want the day plan, or just the road ahead?`; }
+      if (yes) {
+        adoptTrip(target);
+        msg = `Trip switched to ${target}. Out for the day, or on a journey?`;
+        pendingQuestion = { type: 'trip-mode', dest: target };
+      }
       else     { msg = `Sticking with ${currentRunDest} then. What do you need?`; }
       addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       return;
@@ -3920,6 +3936,34 @@ async function sendMessage(silent){
       addMsg('user', text);
       if (pa.action === 'search') {
         searchNumberFor(pa.site);
+      } else if (pa.action === 'trip-mode') {
+        // Store the mode ON the trip, then give the road brief. Day out = brief
+        // only, no overnight/camp prompts. Journey = brief, then ONE held offer.
+        tripMode = pa.mode;
+        try {
+          const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
+          raw.mode = pa.mode;
+          localStorage.setItem('navigator_last_trip_raw', JSON.stringify(raw));
+        } catch(e) {}
+        tripContext += pa.mode === 'day'
+          ? ' Mode: day out — returning tonight; do not suggest overnight stops or camps unless asked.'
+          : ' Mode: journey — travelling on.';
+        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+        let msg;
+        try {
+          try { await plotTripRoute(currentRunDest); } catch(e) {}
+          const head = pa.mode === 'day'
+            ? `Day out to ${currentRunDest} — back tonight.`
+            : `Journey to ${currentRunDest}.`;
+          msg = formatDayBrief(currentRunDest, null, window._tripRoute, currentVehicle, head);
+        } finally {
+          hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+        }
+        if (pa.mode === 'journey') {
+          msg += ' Want me to look at overnight stops?';
+          pendingQuestion = { type: 'camps-offer', ask: 'overnight stops' };
+        }
+        addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       } else if (pa.action === 'camps') {
         // The accepted "want the caravan sites now?" — run the held camps ask.
         busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
@@ -3980,10 +4024,15 @@ async function sendMessage(silent){
       }
       return;
     }
-    // Simple destination statement — offer, don't interrogate.
-    const msg = trip.action === 'create'
-      ? `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Want the day plan, or just the road ahead?`
-      : `Already on the ${trip.dest} run. What do you need?`;
+    // Simple destination statement — ONE question that shapes everything after:
+    // day out (back tonight, no overnight prompts) vs journey (travelling on).
+    let msg;
+    if (trip.action === 'create') {
+      msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Out for the day, or on a journey?`;
+      pendingQuestion = { type: 'trip-mode', dest: trip.dest };
+    } else {
+      msg = `Already on the ${trip.dest} run. What do you need?`;
+    }
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
     return;
   }
