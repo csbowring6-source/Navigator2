@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 09:29 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 10:12 AM AEST</div>
   </div>
 </div>
 
@@ -1517,6 +1517,18 @@ function resumeTrip() {
     openAppView();
     plotTripRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
+    // The Navigate offer comes from TRIP STATE — never scraped from chat text.
+    if (currentRunDest) {
+      const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
+      const bub = bubbles[bubbles.length - 1];
+      if (bub) {
+        const btn = document.createElement('button'); btn.className = 'nav-btn';
+        btn.style.marginTop = '8px';
+        btn.textContent = '📍 Navigate to ' + currentRunDest;
+        btn.onclick = () => navigateTo(currentRunDest);
+        bub.appendChild(btn);
+      }
+    }
   } catch(e) {}
 }
 
@@ -2492,11 +2504,11 @@ function suggest(text){
   sendMessage(true);   // silent: don't show the query bubble
 }
 function cleanText(t){return t.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').replace(/#{1,6}\s/g,'').trim();}
-function parseDest(text){
-  const pp=[/navigating to ([^\.]+)/i,/([A-Z][a-zA-Z\s]+(?:Roadhouse|Caravan Park|Station|Hotel|Motel|Camp|Rest Area|BP|Shell|Ampol|Coles Express|United|Servo|servo|Pub|Truck Stop))/];
-  for(const p of pp){const m=text.match(p);if(m)return m[1].trim().replace(/\.$/,'');}
-  return null;
-}
+// parseDest is GONE: it scraped Navigator's own reply text for anything that
+// looked like a place ("…WikiCamps…" matched as "WikiCamp") and made it a
+// Navigate target. RULE: the app's own spoken/system text is NEVER parsed for
+// destinations — Navigate buttons come only from knownPlaces (real, pinned
+// data) and trips only from what the USER says (parseTripIntent on user text).
 
 function addMsg(role,text,spoken){
   document.getElementById('welcome')?.remove();
@@ -2542,7 +2554,7 @@ function addMsg(role,text,spoken){
         bub.appendChild(star);
       }
     } else {
-      const dest=parseDest(cleaned) || mentions[0];
+      const dest=mentions[0];   // ONLY a known real place — never scraped from our own text
       if(dest){
         const btn=document.createElement('button'); btn.className='nav-btn';
         const c1 = coordsFor(dest);
