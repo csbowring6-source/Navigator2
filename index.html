@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 01:25 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 02:54 PM AEST</div>
   </div>
 </div>
 
@@ -2576,7 +2576,7 @@ async function finishCloudCapture() {
       nothingCaught();
       return;
     }
-    if (text) { setVoiceStatus('',''); deliverTranscript(text); return; }
+    if (text) { setVoiceStatus('',''); deliverTranscript(text, 'cloud'); return; }
     console.warn('[cloud ears] empty transcript — Web Speech for this turn');
   } catch (e) {
     console.warn('[cloud ears] /transcribe failed:', (e && e.message) || e, '— Web Speech for this turn');
@@ -2710,15 +2710,19 @@ function startRecogniser() {
 // THE handoff point. Every set of ears — Web Speech finals or a cloud
 // transcript — arrives HERE and nowhere else, so nothing downstream knows or
 // cares which engine heard it. Do not add a second route into sendMessage.
-function deliverTranscript(text) {
+function deliverTranscript(text, source) {
   // Cloud transcription punctuates; the phone's recogniser doesn't. Normalise
   // once HERE so "Cardwell." and "Cardwell" are the same word everywhere after.
   text = cleanTranscript(text);
   if (text.length <= 1 || busy) return;
   convoSilentTurns = 0;                // they spoke — still in the conversation
+  // DIAGNOSTIC (display only, no routing effect): show WHAT was heard and WHICH
+  // ears heard it — ☁️ cloud/Whisper, 📱 basic/Web Speech. The input keeps the
+  // clean text (that's what gets sent); the tag rides in the status line.
+  const tag = source === 'basic' ? '📱' : '☁️';
+  console.info('[ears] transcript via ' + (source === 'basic' ? 'BASIC (Web Speech)' : 'CLOUD (Whisper)') + ': ' + JSON.stringify(text));
   showCaptured(text);
-  // Show what was actually heard before it goes (SPEC §0 — no silent guessing)
-  setVoiceStatus('', '➤ Sending: “' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '”');
+  setVoiceStatus('', 'Heard: “' + text.slice(0, 55) + (text.length > 55 ? '…' : '') + '” ' + tag);
   setTimeout(() => { if (!busy) sendMessage(); }, 600);
 }
 
@@ -2732,7 +2736,7 @@ function stopCapture(send) {
   const text = capturedText();
   committedFinal = ''; instanceFinal = ''; interimText = '';
   resetVoiceUI();
-  if (send) deliverTranscript(text);
+  if (send) deliverTranscript(text, 'basic');   // Web Speech = the basic ears
   else showCaptured('');
 }
 
