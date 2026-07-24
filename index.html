@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 03:06 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 03:29 PM AEST</div>
   </div>
 </div>
 
@@ -3423,14 +3423,25 @@ async function getCampsNear(place) {
 }
 
 // ── ANSWER SHAPE + CALL HANDOFF (S2.3) — deterministic, so the TRUST RULE is
-// enforced in code: a phone number is only ever SPOKEN if it is in the data.
+// enforced in code: a phone number is NEVER spoken aloud (a driver can't dial a
+// read-out string anyway) — the voice hands off to the 📞 Call button, and the
+// digits live only in the visible banner. So the app can't misspeak a number.
 const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 // Verified = a phone tag from OSM with enough digits to be a real number.
 function verifiedPhone(s) {
   const p = (s && (s.phone || s['contact:phone'])) || '';
   return (p.replace(/[^\d]/g,'').length >= 6) ? p.trim() : null;
 }
-const speakablePhone = p => p.replace(/[^\d]/g,'').split('').join(' ');   // read digit by digit
+// VISIBLE ONLY — Australian local grouping (07 4066 8550 / 0412 345 678). Never
+// spoken; the spoken answer says "tap Call" instead.
+function localPhone(p) {
+  const d = (p || '').replace(/[^\d]/g, '');
+  if (d.length === 10 && d[0] === '0') {
+    return d[1] === '4' ? `${d.slice(0,4)} ${d.slice(4,7)} ${d.slice(7)}`   // mobile
+                        : `${d.slice(0,2)} ${d.slice(2,6)} ${d.slice(6)}`;  // landline
+  }
+  return (p || '').trim();   // unknown shape — show as given, still never spoken
+}
 function timePhrase(s) {
   if (s.mins == null) return `${Math.round(s.km)} km`;
   if (s.mins < 60) return `${s.mins} minute${s.mins === 1 ? '' : 's'}`;
@@ -3491,22 +3502,26 @@ function formatCampsAnswer(res) {
     const t = timePhrase(s).replace(/\bmin\b/, 'minutes');   // TTS says the word in full
     const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? 'paid' : null);
     if (!price) anyGaps = true;
-    const ph = verifiedPhone(s);
     const facts = [...am.known];
     if (price) facts.push(price);                            // price last, never "unconfirmed"
+    // Digits are NEVER spoken — presence of a number is handed to the Call button.
     if (!facts.length)   // "unconfirmed" is reserved for the ONE closing line
-      return `${s.name}, ${t} — details to confirm, one to ring${ph ? ': ' + speakablePhone(ph) : ''}.`;
-    return `${s.name}, ${t} — ${facts.join(', ')}${ph ? `, on ${speakablePhone(ph)}` : ''}.`;
+      return `${s.name}, ${t} — details to confirm, one to ring.`;
+    return `${s.name}, ${t} — ${facts.join(', ')}.`;
   });
   const best = sites[0];
   const bp = verifiedPhone(best);
-  const finish = bp ? `Call ${best.name} on ${speakablePhone(bp)} to check tonight.`
-                    : `No verified number for ${best.name} — want me to search for it?`;
+  // SPOKEN: a verified number becomes a Call handoff, never read-out digits.
+  const spokenFinish = bp ? `I've got the number — tap Call for ${best.name}.`
+                          : `No verified number for ${best.name} — want me to search for it?`;
+  // TEXT banner: the digits, in readable local format (visible, never spoken).
+  const textFinish   = bp ? `Call ${best.name} on ${localPhone(bp)} to check tonight.`
+                          : `No verified number for ${best.name} — want me to search for it?`;
   const spokenBits = [head, spokenLines.join(' ')];
   if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
-  if (!bp) spokenBits.push(finish);   // the offer (drives the pending question); a rich best's number was already spoken in its line
+  spokenBits.push(spokenFinish);   // Call handoff, or the search offer (which drives the pending question)
   return {
-    text: [head, lines.join(' '), finish].join(' '),
+    text: [head, lines.join(' '), textFinish].join(' '),
     spoken: spokenBits.join(' '),
     sites: sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s) })),
   };
