@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 23 Jul 2026, 03:25 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 12:20 PM AEST</div>
   </div>
 </div>
 
@@ -2344,9 +2344,175 @@ async function ensureMicPermission() {
   return true;   // no getUserMedia (very old browser) — let the recogniser try
 }
 
+// ── CLOUD EARS (V2) — record the audio, let the Worker transcribe it ─────────
+// Everything here ends at deliverTranscript(), the same handoff Web Speech
+// uses. If any step fails we log why and fall back to Web Speech for that turn.
+let cloudActive = false;        // a recording is running
+let mediaRecorder = null;
+let mediaStream = null;
+let recChunks = [];
+let recMaxTimer = null;
+let recAudioCtx = null;
+let cloudSendWanted = true;     // did the driver want this turn sent?
+const REC_SILENCE_MS = 1500;    // ~1.5s of quiet ends the turn
+const REC_MAX_MS = 30000;       // hard stop — never record forever
+
+function cloudEarsSupported() {
+  return !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+// iOS Safari records audio/mp4; Chrome/Firefox/Android record audio/webm.
+// Ask for the one this browser actually supports, preferring its native format.
+function pickRecordingMime() {
+  const ua = navigator.userAgent;
+  const isApple = /iPad|iPhone|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|CriOS|FxiOS/.test(ua));
+  const order = isApple ? ['audio/mp4', 'audio/webm'] : ['audio/webm', 'audio/mp4'];
+  for (const m of order) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';   // nothing declared — let the browser pick its default
+}
+
+function releaseRecordingStream() {
+  try { if (mediaStream) mediaStream.getTracks().forEach(t => t.stop()); } catch(e) {}
+  mediaStream = null;
+  try { if (recAudioCtx) recAudioCtx.close(); } catch(e) {}
+  recAudioCtx = null;
+}
+
+// End the turn after ~1.5s of quiet, but only once they've actually spoken —
+// a driver still thinking keeps the mic until they tap.
+function armRecordingSilence() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    recAudioCtx = new Ctx();
+    const src = recAudioCtx.createMediaStreamSource(mediaStream);
+    const an = recAudioCtx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    let spoke = false, quietSince = 0;
+    const tick = () => {
+      if (!cloudActive) return;
+      an.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128); if (v > peak) peak = v; }
+      const now = Date.now();
+      if (peak > 6) { spoke = true; heardSpeech = true; quietSince = 0; }
+      else if (spoke) {
+        if (!quietSince) quietSince = now;
+        else if (now - quietSince >= REC_SILENCE_MS) { stopCloudCapture(true); return; }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  } catch (e) {
+    console.warn('[cloud ears] silence detection unavailable:', e && e.message, '— tap to send');
+  }
+}
+
+async function startCloudCapture() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    console.warn('[cloud ears] mic stream failed:', e && e.name);
+    return false;
+  }
+  const mime = pickRecordingMime();
+  try {
+    mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
+  } catch (e) {
+    console.warn('[cloud ears] MediaRecorder failed:', e && e.message);
+    releaseRecordingStream();
+    return false;
+  }
+  recChunks = [];
+  cloudSendWanted = true;
+  heardSpeech = false;
+  mediaRecorder.ondataavailable = ev => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+  mediaRecorder.onstop = () => { finishCloudCapture(); };
+  try {
+    mediaRecorder.start();
+  } catch (e) {
+    console.warn('[cloud ears] recorder would not start:', e && e.message);
+    releaseRecordingStream(); mediaRecorder = null;
+    return false;
+  }
+  cloudActive = true; captureActive = true;
+  showCaptured('');
+  setListeningUI(true);
+  setVoiceStatus('listening', '🔴 Recording — tap again to send');
+  armRecordingSilence();
+  clearTimeout(recMaxTimer);
+  recMaxTimer = setTimeout(() => { if (cloudActive) stopCloudCapture(true); }, REC_MAX_MS);
+  return true;
+}
+
+function stopCloudCapture(send) {
+  if (!cloudActive) return;
+  cloudActive = false; captureActive = false;
+  cloudSendWanted = !!send;
+  clearTimeout(recMaxTimer);
+  try {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();   // onstop → finishCloudCapture
+    else finishCloudCapture();
+  } catch (e) {
+    console.warn('[cloud ears] stop failed:', e && e.message);
+    finishCloudCapture();
+  }
+}
+
+// POST the blob to the Worker and read back { text }.
+async function transcribeBlob(blob) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 20000);
+  let r;
+  try {
+    r = await fetch(API_URL + 'transcribe', {
+      method: 'POST',
+      headers: { 'content-type': blob.type || 'audio/webm' },
+      body: blob,
+      signal: ctrl.signal,
+    });
+  } finally { clearTimeout(to); }
+  let d = {};
+  try { d = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+  return (d && d.text) ? String(d.text).trim() : '';
+}
+
+async function finishCloudCapture() {
+  const chunks = recChunks; recChunks = [];
+  const type = (mediaRecorder && mediaRecorder.mimeType) || pickRecordingMime() || 'audio/webm';
+  mediaRecorder = null;
+  releaseRecordingStream();
+  setListeningUI(false);
+  if (!cloudSendWanted) { setVoiceStatus('',''); showCaptured(''); return; }
+  const blob = new Blob(chunks, { type });
+  if (blob.size < 1024) {
+    setVoiceStatus('', '🎙 Didn\'t catch that — tap and try again');
+    setTimeout(() => setVoiceStatus('',''), 3000);
+    return;
+  }
+  setVoiceStatus('speaking', '💭 Thinking…');
+  try {
+    const text = await transcribeBlob(blob);
+    if (text) { setVoiceStatus('',''); deliverTranscript(text); return; }
+    console.warn('[cloud ears] empty transcript — Web Speech for this turn');
+  } catch (e) {
+    console.warn('[cloud ears] /transcribe failed:', (e && e.message) || e, '— Web Speech for this turn');
+  }
+  setVoiceStatus('','');
+  if (('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window)) startWebSpeechCapture();
+}
+
+// V2: RECORDING is the primary path — the phone's own recogniser is the weak
+// link in a noisy cab (SPEC §4). Web Speech stays as the silent per-turn
+// fallback whenever recording or the transcription round-trip fails.
 async function startListening() {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    alert('Voice not supported. Try Chrome on Android.'); return;
+  const hasWebSpeech = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+  if (!hasWebSpeech && !cloudEarsSupported()) {
+    alert('Voice not supported on this browser — type it instead.'); return;
   }
   if (captureActive || micPending) return;   // already live, or waiting on the prompt
   synth?.cancel();
@@ -2356,6 +2522,15 @@ async function startListening() {
   const allowed = await ensureMicPermission();
   micPending = false;
   if (!allowed) { resetVoiceUI(); return; }
+  if (cloudEarsSupported()) {
+    if (await startCloudCapture()) return;
+    console.warn('[cloud ears] recording unavailable — Web Speech for this turn');
+  }
+  if (hasWebSpeech) startWebSpeechCapture();
+  else setVoiceStatus('', '🎙 Mic unavailable — type it instead');
+}
+
+function startWebSpeechCapture() {
   captureActive = true;
   committedFinal = ''; instanceFinal = ''; interimText = '';
   heardSpeech = false; restartBurst = 0;
@@ -2453,8 +2628,22 @@ function startRecogniser() {
   }
 }
 
+// THE handoff point. Every set of ears — Web Speech finals or a cloud
+// transcript — arrives HERE and nowhere else, so nothing downstream knows or
+// cares which engine heard it. Do not add a second route into sendMessage.
+function deliverTranscript(text) {
+  text = (text || '').trim();
+  if (text.length <= 1 || busy) return;
+  convoSilentTurns = 0;                // they spoke — still in the conversation
+  showCaptured(text);
+  // Show what was actually heard before it goes (SPEC §0 — no silent guessing)
+  setVoiceStatus('', '➤ Sending: “' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '”');
+  setTimeout(() => { if (!busy) sendMessage(); }, 600);
+}
+
 // The single exit point: close the mic and send ONE combined utterance.
 function stopCapture(send) {
+  if (cloudActive) { stopCloudCapture(send); return; }   // recording path has its own stop
   captureActive = false;
   clearTimeout(silenceTimer); clearTimeout(noSpeechTimer);
   try { if (recognition) { recognition.onend = null; recognition.stop(); } } catch(e) {}
@@ -2462,15 +2651,8 @@ function stopCapture(send) {
   const text = capturedText();
   committedFinal = ''; instanceFinal = ''; interimText = '';
   resetVoiceUI();
-  if (send && text.length > 1 && !busy) {
-    convoSilentTurns = 0;              // they spoke — still in the conversation
-    showCaptured(text);
-    // Show what was actually heard before it goes (SPEC §0 — no silent guessing)
-    setVoiceStatus('', '➤ Sending: “' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '”');
-    setTimeout(() => { if (!busy) sendMessage(); }, 600);
-  } else if (!send) {
-    showCaptured('');
-  }
+  if (send) deliverTranscript(text);
+  else showCaptured('');
 }
 
 function resetVoiceUI() {
