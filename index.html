@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 02:54 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 24 Jul 2026, 03:06 PM AEST</div>
   </div>
 </div>
 
@@ -2595,6 +2595,9 @@ async function startListening() {
   }
   if (captureActive || micPending) return;   // already live, or waiting on the prompt
   synth?.cancel();
+  // Starting a fresh recording after the question went stale: drop it now so
+  // this turn is a clean new query, not a late answer to something forgotten.
+  if (pendingQuestion && !pendingIsFresh()) setPending(null);
   // Gate on a confirmed mic grant so we never open a deaf recogniser (the iOS
   // first-run race). In steady state this resolves instantly (micGranted).
   micPending = true;
@@ -3523,6 +3526,13 @@ function isCampsQuery(text) {
 // here; the NEXT user reply is first checked as an answer to it — never re-run
 // as a fresh query, which looped the same camps answer + offer forever.
 let pendingQuestion = null;   // {type:'number-search', site, sites:[names]}
+let pendingQuestionAt = 0;    // when it was armed — a held question goes STALE
+const PENDING_TTL_MS = 60000; // after 60s, a reply is a new query, not an answer
+// Always set the pending question through here so it carries a timestamp; a bare
+// "Cardwell" minutes later must read as a destination, not an answer to an
+// offer the driver has long forgotten.
+function setPending(q) { pendingQuestion = q || null; pendingQuestionAt = q ? Date.now() : 0; }
+function pendingIsFresh() { return !!pendingQuestion && (Date.now() - pendingQuestionAt) <= PENDING_TTL_MS; }
 
 // PURE: interpret a short reply as an answer to the pending question.
 // Returns {action:'search', site} | {action:'declined'} | null (= a new query).
@@ -3608,9 +3618,9 @@ async function answerCamps(scanText) {
   const ans = formatCampsAnswer(named ? await getCampsNear(named) : await getCorridorCamps());
   // The answer ends by OFFERING a number search when the best fit has no verified
   // number — hold that question so a bare "yes" answers IT, not a new camps query.
-  pendingQuestion = (ans.sites.length && !ans.sites[0].phone)
+  setPending((ans.sites.length && !ans.sites[0].phone)
     ? { type: 'number-search', site: ans.sites[0].name, sites: ans.sites.map(s => s.name) }
-    : null;
+    : null);
   if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
@@ -3637,7 +3647,7 @@ async function answerCamps(scanText) {
       find.textContent = `🔎 Search for ${s.name}'s number`;
       // Same honest path as saying "yes" — never sends the AI hunting for a
       // number it would have to guess (TRUST RULE).
-      find.onclick = () => { pendingQuestion = null; searchNumberFor(s.name); };
+      find.onclick = () => { setPending(null); searchNumberFor(s.name); };
       after(find, navFor);
     }
   });
@@ -4189,7 +4199,7 @@ async function sendMessage(silent){
       if (yes) {
         adoptTrip(target);
         msg = `Trip switched to ${target}. Out for the day, or on a journey?`;
-        pendingQuestion = { type: 'trip-mode', dest: target };
+        setPending({ type: 'trip-mode', dest: target });
       }
       else     { msg = `Sticking with ${currentRunDest} then. What do you need?`; }
       addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
@@ -4202,9 +4212,12 @@ async function sendMessage(silent){
   // search for the number?"). A short reply answers THAT question first — it
   // must never be re-run as a new query, which re-ran the camps search and
   // looped the same three sites + offer forever.
-  if (pendingQuestion) {
+  // A STALE question is no question — after 60s the driver has moved on, so a
+  // bare "Cardwell" is a new destination, not an answer. Drop it and fall through.
+  if (pendingQuestion && !pendingIsFresh()) setPending(null);
+  if (pendingIsFresh()) {
     const pa = matchPendingAnswer(text, pendingQuestion);
-    pendingQuestion = null;               // one shot — answered or superseded
+    setPending(null);                     // one shot — answered or superseded
     if (pa) {
       inp.value=''; inp.style.height='auto';
       addMsg('user', text);
@@ -4221,10 +4234,10 @@ async function sendMessage(silent){
         if (found) {
           adoptTrip(pa.place);
           msg = `Trip set to ${pa.place}. Out for the day, or on a journey?`;
-          pendingQuestion = { type: 'trip-mode', dest: pa.place };
+          setPending({ type: 'trip-mode', dest: pa.place });
         } else {
           msg = `I heard ${pa.place} but can't find it on the map. Say it again, or give me the nearest town?`;
-          pendingQuestion = { type: 'destination' };   // still waiting — but they know why
+          setPending({ type: 'destination' });   // still waiting — but they know why
         }
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       } else if (pa.action === 'trip-mode') {
@@ -4252,7 +4265,7 @@ async function sendMessage(silent){
         }
         if (pa.mode === 'journey') {
           msg += ' Want me to look at overnight stops?';
-          pendingQuestion = { type: 'camps-offer', ask: 'overnight stops' };
+          setPending({ type: 'camps-offer', ask: 'overnight stops' });
         }
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       } else if (pa.action === 'camps') {
@@ -4302,7 +4315,7 @@ async function sendMessage(silent){
         }
         if (wantsCamps && wantsPlan) {
           msg += ' Want the caravan sites now?';
-          pendingQuestion = { type: 'camps-offer', ask: text };
+          setPending({ type: 'camps-offer', ask: text });
           addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
         } else if (wantsCamps) {
           addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
@@ -4320,7 +4333,7 @@ async function sendMessage(silent){
     let msg;
     if (trip.action === 'create') {
       msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Out for the day, or on a journey?`;
-      pendingQuestion = { type: 'trip-mode', dest: trip.dest };
+      setPending({ type: 'trip-mode', dest: trip.dest });
     } else {
       msg = `Already on the ${trip.dest} run. What do you need?`;
     }
@@ -4514,7 +4527,7 @@ async function sendMessage(silent){
         speak(reply);
         // If we just asked where they're headed, hold that question so the
         // natural one-word answer ("Cardwell") is accepted instead of looping.
-        if (!currentRunDest && asksForDestination(reply)) pendingQuestion = { type: 'destination' };
+        if (!currentRunDest && asksForDestination(reply)) setPending({ type: 'destination' });
         // Pin the options we offered onto the map — pictorial reference at a glance
         if (window._pendingPins && window._pendingPins.length) {
           showOptionPins(window._pendingPins);
