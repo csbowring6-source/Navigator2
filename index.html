@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 08:21 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 08:43 AM AEST</div>
   </div>
 </div>
 
@@ -3524,17 +3524,20 @@ function formatCampsAnswer(res) {
       return `${s.name}, ${t} — details to confirm, one to ring.`;
     return `${s.name}, ${t} — ${facts.join(', ')}.`;
   });
+  // The number is read STRICTLY from the best listed site object — never a loose
+  // name — so a number can only ever be surfaced bound to a site in this set.
   const best = sites[0];
   const bp = verifiedPhone(best);
-  // SPOKEN: a verified number becomes a Call handoff, never read-out digits.
+  // No capability to search the web for a number, so we never offer to. A missing
+  // number just names the specific site, honestly (SPEC §0).
   const spokenFinish = bp ? `I've got the number — tap Call for ${best.name}.`
-                          : `No verified number for ${best.name} — want me to search for it?`;
+                          : `No verified number for ${best.name}.`;
   // TEXT banner: the digits, in readable local format (visible, never spoken).
   const textFinish   = bp ? `Call ${best.name} on ${localPhone(bp)} to check tonight.`
-                          : `No verified number for ${best.name} — want me to search for it?`;
+                          : `No verified number for ${best.name}.`;
   const spokenBits = [head, spokenLines.join(' ')];
   if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
-  spokenBits.push(spokenFinish);   // Call handoff, or the search offer (which drives the pending question)
+  spokenBits.push(spokenFinish);   // Call handoff, or an honest "no number for <site>"
   return {
     text: [head, lines.join(' '), textFinish].join(' '),
     spoken: spokenBits.join(' '),
@@ -3552,10 +3555,10 @@ function isCampsQuery(text) {
 }
 
 // ── PENDING QUESTION (context) ────────────────────────────────────────────────
-// When Navigator asks a question ("shall I search for the number?"), it is held
-// here; the NEXT user reply is first checked as an answer to it — never re-run
-// as a fresh query, which looped the same camps answer + offer forever.
-let pendingQuestion = null;   // {type:'number-search', site, sites:[names]}
+// When Navigator asks a question (trip mode, overnight-stops offer, destination),
+// it is held here; the NEXT user reply is first checked as an answer to it —
+// never re-run as a fresh query.
+let pendingQuestion = null;   // {type:'trip-mode'|'camps-offer'|'destination', …}
 let pendingQuestionAt = 0;    // when it was armed — a held question goes STALE
 const PENDING_TTL_MS = 60000; // after 60s, a reply is a new query, not an answer
 // Always set the pending question through here so it carries a timestamp; a bare
@@ -3595,41 +3598,7 @@ function matchPendingAnswer(text, pending) {
       return { action: 'declined' };
     return null;
   }
-  if (pending.type === 'number-search') {
-    // Naming an offered site IN FULL picks that one — checked before anything
-    // else so "Port Hinchinbrook Van Park" isn't mistaken for a new camps query.
-    if (t.length >= 4) {
-      const exact = (pending.sites || []).find(n => {
-        const nl = n.toLowerCase();
-        return t.includes(nl) || nl.includes(t);
-      });
-      if (exact) return { action: 'search', site: exact };
-    }
-    // A fresh camps/parks QUESTION is a new query, not an answer to the offer —
-    // "caravan parks in Tully" must re-search, not pick a site.
-    if (isCampsQuery(t)) return null;
-    // A distinctive word of a site name picks it ("the Kennedy one") — generic
-    // camp words are ignored so they can't false-match.
-    if (t.length >= 4) {
-      const GENERIC = /^(park|parks|caravan|van|camp|camps|camping|tourist|holiday|site|sites|free|powered|beach|creek|river|point)$/;
-      const site = (pending.sites || []).find(n =>
-        n.toLowerCase().split(/\s+/).some(w => w.length >= 4 && !GENERIC.test(w) && t.includes(w)));
-      if (site) return { action: 'search', site };
-    }
-    if (t.length <= 40 && /^(yes|yeah|yep|yup|yes please|please|ok(ay)?|sure|go ahead|do it|search|find it|look it up)\b/.test(t))
-      return { action: 'search', site: pending.site };
-    if (t.length <= 40 && /^(no|nah|nope|no thanks|don'?t|leave it|forget it|never ?mind)\b/.test(t))
-      return { action: 'declined' };
-  }
   return null;   // not an answer to what was asked — treat as a new query
-}
-
-// The accepted "search for the number" action — HONEST (SPEC §0): there is no
-// number-search service yet and the AI must never guess a number (TRUST RULE),
-// so say exactly that and hand over the name to look up.
-function searchNumberFor(site) {
-  const msg = `I can't search the web for phone numbers yet — the site to look up is ${site}. WikiCamps or a quick web search for “${site}” will have it.`;
-  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
 
 async function answerCamps(scanText) {
@@ -3646,40 +3615,28 @@ async function answerCamps(scanText) {
   // is only for explicit "along the way / next hour" phrasing (above).
   if (!named && !alongWay && currentRunDest) named = currentRunDest;
   const ans = formatCampsAnswer(named ? await getCampsNear(named) : await getCorridorCamps());
-  // The answer ends by OFFERING a number search when the best fit has no verified
-  // number — hold that question so a bare "yes" answers IT, not a new camps query.
-  setPending((ans.sites.length && !ans.sites[0].phone)
-    ? { type: 'number-search', site: ans.sites[0].name, sites: ans.sites.map(s => s.name) }
-    : null);
   if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
   // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
   // stays closed until the driver opens it (SPEC §10: never bury the answer).
   if (ans.sites.length && window._pendingPins && window._pendingPins.length) showOptionPins(window._pendingPins);
-  // Interleave a one-tap Call (verified numbers only) after each site's Navigate
-  // button; offer a search where the best fit has no verified number.
+  // Interleave a one-tap Call after each site's Navigate button. A Call button is
+  // ONLY ever created from a listed site object and dials THAT site's own verified
+  // number — so a number can never be surfaced for a site not in this set. A site
+  // without a number simply gets no button (we don't offer a search we can't do).
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
   const bub = bubbles[bubbles.length - 1];
   if (!bub) return;
   const navBtns = [...bub.querySelectorAll('button.nav-btn')];
   const after = (el, ref) => { if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref.nextSibling); else bub.appendChild(el); };
   ans.sites.forEach(s => {
+    if (!s.phone) return;
     const navFor = navBtns.find(b => b.textContent.includes(s.name));
-    if (s.phone) {
-      const call = document.createElement('a'); call.className = 'nav-btn';
-      call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
-      call.href = 'tel:' + s.phone.replace(/[^\d+]/g,''); call.textContent = `📞 Call ${s.name}`;
-      after(call, navFor);
-    } else if (s === ans.sites[0]) {
-      const find = document.createElement('button'); find.className = 'nav-btn';
-      find.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--amber);color:var(--amber);';
-      find.textContent = `🔎 Search for ${s.name}'s number`;
-      // Same honest path as saying "yes" — never sends the AI hunting for a
-      // number it would have to guess (TRUST RULE).
-      find.onclick = () => { setPending(null); searchNumberFor(s.name); };
-      after(find, navFor);
-    }
+    const call = document.createElement('a'); call.className = 'nav-btn';
+    call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
+    call.href = 'tel:' + s.phone.replace(/[^\d+]/g,''); call.textContent = `📞 Call ${s.name}`;
+    after(call, navFor);
   });
 }
 
@@ -4251,9 +4208,7 @@ async function sendMessage(silent){
     if (pa) {
       inp.value=''; inp.style.height='auto';
       addMsg('user', text);
-      if (pa.action === 'search') {
-        searchNumberFor(pa.site);
-      } else if (pa.action === 'destination') {
+      if (pa.action === 'destination') {
         // Geocode the bare name before committing to it. NEVER re-ask blind:
         // if it can't be found, say what was actually heard (SPEC §0).
         busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
