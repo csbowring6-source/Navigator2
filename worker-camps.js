@@ -347,7 +347,27 @@ async function handleWeather(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 23 Jul 2026, 3:40 PM AEST (adds /transcribe and /version)";
+const WORKER_BUILD = "Navigator Worker — 24 Jul 2026, 1:05 PM AEST (adds /transcribe, /version, Australian place-name hints)";
+
+// Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
+// town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
+// "Canungra" as "Kanungra", "Proserpine" as "Prosperine" — and a misheard town
+// is a wrong trip. This is a HINT, not a whitelist: anything not listed still
+// transcribes normally. Keep it well under Whisper's ~224-token prompt limit.
+const PLACE_HINT = [
+  "Australian road trip.",
+  "Towns: Cairns, Cardwell, Tully, Innisfail, Townsville, Ingham, Mission Beach,",
+  "Port Douglas, Mareeba, Atherton, Cooktown, Mackay, Proserpine, Airlie Beach,",
+  "Bowen, Rockhampton, Gladstone, Bundaberg, Hervey Bay, Maryborough, Gympie,",
+  "Noosa, Caloundra, Canungra, Boyland, Toowoomba, Warwick, Goondiwindi,",
+  "Ballina, Byron Bay, Grafton, Coffs Harbour, Kempsey, Taree, Newcastle,",
+  "Dubbo, Broken Hill, Wagga Wagga, Albury, Bendigo, Ballarat, Geelong,",
+  "Mount Isa, Longreach, Charleville, Roma, Emerald, Barcaldine, Winton,",
+  "Katherine, Alice Springs, Coober Pedy, Ceduna, Esperance, Kalgoorlie,",
+  "Geraldton, Carnarvon, Broome, Kununurra, Derby, Exmouth.",
+  "Caravan words: caravan park, powered site, dump point, free camp, rest area,",
+  "showground, big rig, drive-through site, annexe, jockey wheel, servo, diesel.",
+].join(" ");
 
 function handleVersion() {
   return jsonResp({ version: WORKER_BUILD });
@@ -376,6 +396,7 @@ async function handleTranscribe(request, env) {
   form.append("file", new Blob([audio], { type: blobType }), filename);
   form.append("model", "whisper-1");
   form.append("language", "en");
+  form.append("prompt", PLACE_HINT);   // bias toward Australian town names
 
   let r;
   try {
