@@ -73,6 +73,14 @@ Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped
 3. **Regression check every commit.** Confirm the **mic capture path**, the **home screen render**, and the **setup interview** are untouched or still working. The mic capture has regressed twice already — once from a gap in its own fix, once when a revert removed it — so it gets checked every time regardless of what the change was about.
 4. **Every report ends with the build stamp** — see the Workflow rule above for the exact format.
 
+## Wording conventions (locked — do not drift)
+
+These three phrasings are settled. Do not "improve", paraphrase, or re-derive them — match them exactly, and treat any drift as a regression.
+
+1. **Durations** — always spoken and displayed as **hours and minutes** (`"1 hr 35"`). Never total minutes (`"95 minutes"`).
+2. **Stop-sync rhythm line** — the exact wording is **"when you pull in, I'll size up the next stretch."** Descriptive, not directive. Do not rewrite it.
+3. **Sat-nav handoff** — handoff wording names the **user's own preferred sat-nav** (Google Maps, Apple Maps, or Waze, per their setup answer). Never hardcode "Google Maps."
+
 ## Practical orientation for editing `index.html`
 
 - **Screens & view switching**: `#setupScreen` (first-run interview) · `#homeScreen` (default landing) · `#appView` (results/conversation, holds the map + chat + input). `loadProfile()` decides home-vs-setup on load; `showHome()` / `openAppView()` / `backHome()` swap them; `homeMic()` opens the results view and starts listening; `revealMap()` un-hides `#mapWrap` when results land. No overlays gate any of this.
