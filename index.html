@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 11:48 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 11:55 AM AEST</div>
   </div>
 </div>
 
@@ -3638,6 +3638,7 @@ const CAMP_ROUND_MAX_AGE = 6 * 60 * 60 * 1000;   // one night's ring-around, not
 let campRound = null;            // {place, query, sites:[{name,lat,lon,km,mins,phone}], tried:[names], calledSite, ts}
 let campOutcomePending = null;   // the site we've already shown an outcome prompt for (dedupe focus events)
 let campWidenScale = 1;          // radius multiplier the search reads; only "widen" changes it
+let lastBookedSite = null;       // {name,lat,lon,mins} of the just-booked site, for a Navigate handoff
 
 function saveCampRound() {
   try {
@@ -3667,6 +3668,7 @@ function startCampRound(place, query, sites) {
     tried: [], calledSite: null, ts: Date.now(),
   };
   campOutcomePending = null;
+  lastBookedSite = null;   // a new set supersedes any prior booked-navigate offer
   saveCampRound();
 }
 function campSite(name) { return campRound && campRound.sites.find(s => s.name === name); }
@@ -3717,9 +3719,26 @@ function campOutcome(name, outcome) {
   if (!campRound) return;
   campRound.calledSite = null; campOutcomePending = null;
   if (outcome === 'booked') {
-    const msg = `Great — you're sorted at ${name}. Anything else?`;
+    // Resolve the destination from the STORED site record for the site that was
+    // called — never by parsing a name out of speech. Keep it after the round is
+    // cleared so "take me there" still works.
+    const site = campSite(name);
+    lastBookedSite = site ? { name: site.name, lat: site.lat, lon: site.lon, mins: site.mins } : null;
+    const msg = `Great — you're booked at ${name}. Tap Navigate to head there, or say "take me there".`;
     clearCampRound();
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+    if (site) {
+      const bub = lastNavBubble();
+      if (bub) {
+        const mn = { apple:'Apple Maps', google:'Google Maps', waze:'Waze', 'maps.me':'Maps.me' }[selectedMap] || 'your maps';
+        const b = document.createElement('button'); b.className = 'nav-btn'; b.style.marginTop = '8px';
+        b.textContent = `📍 Navigate to ${site.name} — ${mn}`;
+        // Hand off to the preferred nav app with the site's OWN coordinates, exactly
+        // as the existing result blocks do (coords beat a name search).
+        b.onclick = () => navigateTo(site.name, site.lat, site.lon);
+        bub.appendChild(b);
+      }
+    }
     return;
   }
   if (name && !campRound.tried.includes(name)) campRound.tried.push(name);
@@ -3784,6 +3803,21 @@ function handleRingAroundVoice(text) {
   if (!action) return false;
   addMsg('user', text);                          // echo the driver BEFORE the reply
   if (action === 'widen') widenCampSearch(); else campOutcome(cur, outcome);
+  return true;
+}
+
+// Spoken "navigate me there" / "take me to that one" after a booking. Fires ONLY
+// on a deictic reference to the just-booked site (there / that one / it) — a
+// NAMED place is a new destination and is left to the trip flow. The destination
+// is always the stored booked record, never parsed from the words.
+function handleNavigateBooked(text) {
+  if (!lastBookedSite) return false;
+  const t = text.toLowerCase().trim();
+  const nav = /\b(navigate|take me|drive me|directions|guide me|head there|go there|let'?s go|start driving|route me)\b/.test(t);
+  const deictic = /\b(there|that one|that place|this one|the one|it|that site|that park)\b/.test(t);
+  if (!(nav && deictic)) return false;
+  addMsg('user', text);
+  navigateTo(lastBookedSite.name, lastBookedSite.lat, lastBookedSite.lon);   // from the STORED record
   return true;
 }
 
@@ -4226,7 +4260,7 @@ function resetConversation() {
   knownPlaces = [];
   fuelShortlist = []; fuelDialIdx = 0;
   Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
-  clearCampRound();                 // a fresh conversation ends any ring-around
+  clearCampRound(); lastBookedSite = null;   // a fresh conversation ends any ring-around
   clearOptionPins();
   window._pendingPins = null;
   const ui = document.getElementById('userInput'); if (ui) ui.value = '';
@@ -4476,6 +4510,8 @@ async function sendMessage(silent){
   // ── RING-AROUND by voice (part 4): "no room, try the next one" advances the
   // call loop WITHOUT repeating the search. Only fires when a round is live.
   if (handleRingAroundVoice(text)) { inp.value=''; inp.style.height='auto'; return; }
+  // "take me there" after a booking — navigate to the STORED booked site.
+  if (handleNavigateBooked(text)) { inp.value=''; inp.style.height='auto'; return; }
 
   // A destination statement sets or updates the trip — no AI round-trip needed.
   const trip = parseTripIntent(text, { currentDest: currentRunDest });
