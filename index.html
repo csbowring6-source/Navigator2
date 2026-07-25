@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 06:03 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 03:42 AM AEST</div>
   </div>
 </div>
 
@@ -3715,6 +3715,15 @@ function matchPendingAnswer(text, pending) {
       return { action: 'declined' };
     return null;
   }
+  if (pending.type === 'number-which') {
+    // Answer to "Which one — A, B, C? Or all of them." A collective -> all; a
+    // named site -> that one. Resolves against the DISPLAYED records only.
+    if (/\b(all|both|any|each|every|the (three|lot)|all of (them|these|three)|any of (them|these))\b/i.test(t) || /\bnumbers\b/i.test(t))
+      return { action: 'get-all' };
+    const site = matchListedSite(text);
+    if (site && !site.ambiguous) return { action: 'get-one', name: site.name };
+    return null;
+  }
   if (pending.type === 'dial-offer') {
     // "Want to ring them?" — yes readies the one-tap dial (a web app can't dial).
     if (t.length <= 40 && /^(yes|yeah|yep|yup|please|ok(ay)?|sure|go on|do it|call them|ring them|get them|dial)\b/.test(t))
@@ -3946,13 +3955,26 @@ function handleNavigateBooked(text) {
 
 // Is this a "number for <site>" request? Returns the spoken name portion, ''
 // (asked for a number but named no site → ask which), or null (not a request).
+// Classify a phone-number request against the sites on screen. Returns null (not
+// a number request), or a scope:
+//   {scope:'all'}       — every displayed site (plural "numbers" / collective)
+//   {scope:'one', name} — a specific named site
+//   {scope:'ask'}       — a number wanted but no site named -> ask which
+// NOTE: matches "numbers" (plural) — the old \bnumber\b gate silently missed it.
 function extractNumberRequest(text) {
   const t = (text || '').trim();
-  if (!/\b(number|phone)\b/i.test(t)) return null;
-  let m = t.match(/(?:phone\s*)?number\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
-       || t.match(/\bphone\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
-       || t.match(/(.+?)'?s\s+(?:phone\s*)?number\b/i);
-  return m ? m[1] : '';
+  if (!/\b(numbers?|phones?|contacts?)\b/i.test(t)) return null;
+  const collective = /\b(all|both|any|each|every|these|them|their|the (three|lot|parks|sites))\b/i.test(t);
+  const plural = /\bnumbers\b/i.test(t);   // "numbers" implies more than one
+  let m = t.match(/(?:phone\s*)?numbers?\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
+       || t.match(/\bphones?\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
+       || t.match(/(.+?)'?s\s+(?:phone\s*)?numbers?\b/i);
+  const named = m ? m[1].trim() : '';
+  const nameIsCollective = named && (/\b(all|both|any|each|these|them|those)\b/i.test(named) || /^(the\s+)?(caravan\s?parks?|parks?|sites?|camps?|three|lot)$/i.test(named));
+  if ((plural || collective) && (!named || nameIsCollective)) return { scope: 'all' };
+  if (named && !nameIsCollective) return { scope: 'one', name: named };
+  if (plural || collective) return { scope: 'all' };
+  return { scope: 'ask' };
 }
 // Match spoken text to ONE of the sites on screen. Returns a site record, the
 // sentinel {ambiguous:true}, or null (no clear match) — caller asks which one.
@@ -3971,8 +3993,9 @@ function matchListedSite(spoken) {
 }
 function askWhichSite() {
   const names = campRound.sites.map(s => s.name).join(', ');
-  const msg = `Which one — ${names}?`;
+  const msg = `Which one — ${names}? Or say "all of them".`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  setPending({ type: 'number-which' });   // a bare "all three" / a site name answers this
 }
 // Ask the Worker for ONE site's number, bound to its stored id (never the name).
 async function fetchPlacePhone(site) {
@@ -4032,13 +4055,52 @@ async function getNumberFor(site) {
   if (phone) { site.phone = phone; saveCampRound(); presentNumber(site, phone); }   // now callable in the loop
   else denyNumber(site);
 }
+// Plural request — fetch EVERY displayed site's number in one go (parallel), then
+// show each against its own site. A found site gets a one-press dial (which hooks
+// the ring-around). A site with no verified number is shown as such — NO dial,
+// NO "want to ring them?" — the ring offer only ever fires where found is true.
+async function getNumbersForAll() {
+  const sites = campRound.sites.slice();
+  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+  const results = await Promise.all(sites.map(async s => {
+    if (s.phone) return { site: s, phone: s.phone };
+    let phone = null; try { phone = await fetchPlacePhone(s); } catch (e) {}
+    if (phone) s.phone = phone;                       // bind into the stored record
+    return { site: s, phone };
+  }));
+  saveCampRound();                                    // persist any newly-found numbers
+  hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+  const found = results.filter(r => r.phone);
+  const head = !found.length ? `No verified number for any of the ${sites.length}.`
+             : found.length === sites.length ? `Here are the numbers — tap any to call.`
+             : `Got a number for ${found.length} of the ${sites.length} — tap any to call.`;
+  addMsg('nav', head); lastNavReply = head; lastSpoken = head; speak(head);   // no digits spoken
+  const bub = lastNavBubble();
+  if (!bub) return;
+  results.forEach(r => {
+    if (r.phone) {
+      const line = document.createElement('div');
+      line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
+      line.textContent = `${r.site.name}: ${localPhone(r.phone)}`;
+      bub.appendChild(line);
+      roundCallButton(bub, { name: r.site.name, phone: r.phone });   // one-tap dial (found only)
+    } else {
+      const line = document.createElement('div');
+      line.style.cssText = 'margin-top:6px;font-size:12px;color:var(--gray3);';
+      line.textContent = `${r.site.name}: no verified number`;
+      bub.appendChild(line);                                          // shown, but no dial
+    }
+  });
+}
 // Voice entry point — returns true if it handled the utterance.
 async function handleNumberRequest(text) {
   if (!campRound || !campRound.sites.length) return false;
-  const asked = extractNumberRequest(text);
-  if (asked === null) return false;
+  const req = extractNumberRequest(text);
+  if (!req) return false;
   addMsg('user', text);
-  const match = matchListedSite(asked);
+  if (req.scope === 'all') { await getNumbersForAll(); return true; }
+  if (req.scope === 'ask') { askWhichSite(); return true; }
+  const match = matchListedSite(req.name);
   if (!match || match.ambiguous) { askWhichSite(); return true; }
   await getNumberFor(match);
   return true;
@@ -4729,6 +4791,10 @@ async function sendMessage(silent){
       } else if (pa.action === 'get-number') {
         // "Yes" to "want the number for <next site>?" — look up THAT stored site.
         await getNumberFor(campSite(pa.site));
+      } else if (pa.action === 'get-all') {
+        await getNumbersForAll();
+      } else if (pa.action === 'get-one') {
+        await getNumberFor(campSite(pa.name));
       } else if (pa.action === 'dial') {
         // "Yes" to "want to ring them?" — ready the one-tap dial (can't auto-dial).
         readyDial(campSite(pa.site));
