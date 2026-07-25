@@ -227,6 +227,7 @@ function osmPlacesNearest(elements, typeLabel, lat, lon, limit) {
         type: typeLabel || t.amenity || t.leisure || t.shop || t.tourism || "",
         lat: plat, lon: plon,
         km: hav(lat, lon, plat, plon),
+        osmid: (e.type || "node") + "/" + e.id,   // stable site id (for the phone-lookup cache key)
         tags: t,
       };
     })
@@ -287,6 +288,7 @@ async function handleCamps(request) {
   const res = await overpass(q);
   if (res.error) return jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503);
   const results = osmPlacesNearest(res.data.elements, "", lat, lon, 12).map(p => ({
+    id: p.osmid,   // stable OSM id — the /place-phone cache key (never the name)
     name: p.name,
     type: p.tags.tourism === "caravan_site" ? "caravan park" : "camp site",
     lat: p.lat, lon: p.lon,
@@ -346,8 +348,86 @@ async function handleWeather(request, env) {
   return new Response(r.body, { status: r.status, headers: { ...corsHeaders, "content-type": "application/json" } });
 }
 
+// ═══ POST-less /place-phone — one campsite's phone number, ON REQUEST only ═══
+// OSM rarely carries a phone tag, so the app can ask here for a single named
+// site. Keyed on the site's OSM id (never the name). KV is checked first; a
+// Google call happens only on a miss. The returned number is BOUND to the site
+// id in the response so the frontend can never attach it to the wrong site.
+// A number for a DIFFERENT site is the worst failure this can produce, so the
+// match is verified within ~500m before returning — otherwise: no number.
+async function handlePlacePhone(request, env) {
+  const u = new URL(request.url);
+  const id = u.searchParams.get("id") || "";          // OSM id — the cache key
+  const name = u.searchParams.get("name") || "";
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  if (!id || !name || isNaN(lat) || isNaN(lon)) return jsonResp({ error: "id, name, lat and lon required" }, 400);
+
+  const kv = env.PLACES_KV;
+  const cacheKey = "phone:" + id;
+
+  // 1) KV FIRST — return a cached hit OR miss without any Google call (no re-bill).
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey, { type: "json" });
+      if (cached) return jsonResp({ id, name, phone: cached.phone || "", found: !!cached.phone, cached: true });
+    } catch (e) {}
+  }
+
+  // Never configured? Honest "no number", never a guess.
+  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ id, name, phone: "", found: false, error: "place lookup not configured" });
+
+  // 2) Places API (New) Text Search — biased to the site coords, tight radius.
+  //    Field mask drives the price, so request ONLY what we need.
+  let place = null;
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.nationalPhoneNumber,places.location",
+      },
+      body: JSON.stringify({
+        textQuery: name,
+        maxResultCount: 5,
+        locationBias: { circle: { center: { latitude: lat, longitude: lon }, radius: 500 } },
+      }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.places && d.places.length) {
+        // Pick the returned place CLOSEST to the site, then verify it below.
+        place = d.places
+          .map(p => ({ p, km: p.location ? hav(lat, lon, p.location.latitude, p.location.longitude) : Infinity }))
+          .sort((a, b) => a.km - b.km)[0].p;
+      }
+    }
+  } catch (e) { place = null; }
+
+  // 3) VERIFY the match within ~500m. A number belonging to a different site is
+  //    the single worst outcome — so if it isn't clearly THIS site, return none.
+  let phone = "";
+  if (place && place.location && place.nationalPhoneNumber &&
+      hav(lat, lon, place.location.latitude, place.location.longitude) <= 0.5) {
+    phone = place.nationalPhoneNumber;
+  }
+
+  // 4) Cache: 90 days for a hit, 7 days for a miss (negative caching so repeated
+  //    misses don't keep re-billing Google).
+  if (kv) {
+    try {
+      await kv.put(cacheKey, JSON.stringify({ phone, ts: Date.now() }),
+        { expirationTtl: phone ? 90 * 24 * 3600 : 7 * 24 * 3600 });
+    } catch (e) {}
+  }
+
+  // 5) Bound to the site id so the frontend can never attach it to another site.
+  return jsonResp({ id, name, phone, found: !!phone, cached: false });
+}
+
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 24 Jul 2026, 1:05 PM AEST (adds /transcribe, /version, Australian place-name hints)";
+const WORKER_BUILD = "Navigator Worker — 25 Jul 2026, 2:10 PM AEST (adds /place-phone via Google Places New + KV cache)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -434,6 +514,7 @@ export default {
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
       "/transcribe": () => handleTranscribe(request, env),
+      "/place-phone": () => handlePlacePhone(request, env),
       "/version": () => handleVersion(),
     };
     if (routes[url.pathname]) {
