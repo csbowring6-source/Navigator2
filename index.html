@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 08:46 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 09:28 AM AEST</div>
   </div>
 </div>
 
@@ -3749,12 +3749,12 @@ async function geocodePlace(name) {
 // "caravan parks in Cardwell" — they mean Cardwell, not wherever they are now.
 // Nearest-to-the-town first; rig-fit still a hard filter; drive time is time-to-
 // ARRIVE from the driver's GPS (how far until I'm there), or km from town if no GPS.
-async function getCampsNear(place) {
-  // If this IS the committed trip destination, use its committed coords — never
-  // geocode the name independently (that's how camps searched a different
-  // "Cardwell" than the route committed to). Only geocode a place that isn't the
-  // trip destination (a different town the driver named).
-  const c = committedCoordsFor(place) || await geocodePlace(place);
+async function getCampsNear(place, coords) {
+  // Anchor precedence: explicit committed coords (the trip destination) → the
+  // committed record by name → a fresh geocode (only for a DIFFERENT town the
+  // driver named). Never GPS/origin — that decoupling searched a different
+  // "Cardwell" than the route, or the driver's origin instead of the destination.
+  const c = (coords && coords.lat != null) ? coords : (committedCoordsFor(place) || await geocodePlace(place));
   if (!c) return { error: 'no-place', place };
   let d;
   try {
@@ -4382,10 +4382,17 @@ async function answerCamps(scanText) {
   let named = (namedMatch && !alongWay) ? namedMatch[1] : null;
   // With a live trip, the trip IS the context: "when I get there", "at the
   // destination", a lowercase "in cardwell", or a bare camps ask all mean the
-  // DESTINATION — not wherever the car happens to be right now. The corridor
-  // is only for explicit "along the way / next hour" phrasing (above).
-  if (!named && !alongWay && currentRunDest) named = currentRunDest;
-  const ans = formatCampsAnswer(named ? await getCampsNear(named) : await getCorridorCamps());
+  // DESTINATION — not wherever the car (or a manually-set ORIGIN) happens to be.
+  // Anchor on the COMMITTED record's coords directly, so a bare ask can never
+  // silently fall through to GPS/origin via the corridor. The corridor is only
+  // for explicit "along the way / next hour / near me" phrasing (above), or when
+  // there is genuinely no trip.
+  let anchorCoords = null;
+  if (!named && !alongWay) {
+    if (committedDest && committedDest.lat != null) { named = committedDest.name; anchorCoords = { lat: committedDest.lat, lon: committedDest.lon }; }
+    else if (currentRunDest) named = currentRunDest;   // name-only trip, coords not resolved yet
+  }
+  const ans = formatCampsAnswer(named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps());
   if (ans.sites.length) {
     addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
     startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
