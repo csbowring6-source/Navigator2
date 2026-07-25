@@ -181,8 +181,10 @@
   .wake-bar{margin-bottom:8px;}
   .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
   .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
-  .wake-word-btn.active{background:rgba(245,166,35,0.12);border-color:var(--amber);color:var(--amber);animation:wakePulse 2s infinite;}
-  @keyframes wakePulse{0%,100%{border-color:var(--amber);}50%{border-color:rgba(245,166,35,0.3);}}
+  /* Conversation session state — colour AND word both change (never colour alone). */
+  .wake-word-btn.convo-on{background:rgba(46,204,113,0.15);border-color:#2ECC71;color:#2ECC71;font-weight:600;animation:convoPulse 2s infinite;}
+  .wake-word-btn.convo-off{background:rgba(231,76,60,0.10);border-color:#E74C3C;color:#E74C3C;}
+  @keyframes convoPulse{0%,100%{border-color:#2ECC71;}50%{border-color:rgba(46,204,113,0.4);}}
   .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
   .voice-status.listening-state{color:var(--red);}
   .voice-status.speaking-state{color:var(--amber);}
@@ -564,7 +566,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 04:18 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 05:24 AM AEST</div>
   </div>
 </div>
 
@@ -615,7 +617,7 @@
 
     <div class="input-area">
       <div class="wake-bar">
-        <button class="wake-word-btn" id="wakeBtn" onclick="toggleWakeWord()">🎙 Conversation: Off</button>
+        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="toggleConversation()">🎙 Off</button>
       </div>
       <div class="input-row" id="inputRow">
         <textarea id="userInput" placeholder="Type here…" rows="1"
@@ -2312,30 +2314,171 @@ function applyConditions() {
 }
 
 // ── CONVERSATION MODE — mic reopens after each spoken reply ──────────────────
-// Opt-in. True always-listening wake words beep constantly on Android (OS
-// behaviour, unsuppressable from a browser) — reserved for the native app.
-let convoEnabled = false;
+// ── CONVERSATION SESSION (rebuilt as a session model) ────────────────────────
+// One tap OPENS a session that stays open across turns with no further taps.
+// The tap is a real user gesture — it unlocks an AudioContext and creates ONE
+// SpeechRecognition, both kept alive for the whole session (iOS mitigation).
+// The recogniser is restarted (never recreated) within the session; the mic
+// permission stream is kept warm. Closes on: tap again · a closing phrase · 45s
+// silence · an "anything else?" offer that goes unanswered. If WebKit can't
+// sustain continuous listening despite the mitigations, the session fails
+// honestly (closes, red state, "tap per question") — it never silently degrades.
+let convoActive = false;        // session open?
+let convoRec = null;            // the ONE SpeechRecognition — alive for the session
+let convoRecRunning = false;    // is it currently started
+let convoSpeaking = false;      // app is speaking a reply — listening paused
+let convoStream = null;         // kept-warm permission stream
+let convoAudioCtx = null;       // unlocked on the opening tap, kept alive
+let convoSilenceTimer = null;   // 45s hard close
+let convoOfferTimer = null;     // "anything else?" nudge before the close
+let convoOffered = false;       // nudge already made this quiet spell
+let convoHadExchange = false;   // app has replied at least once
+let convoLastStart = 0;         // when convoRec last started (WebKit fast-fail check)
+let convoFastFails = 0;         // consecutive instant onends (WebKit can't hold)
+const CONVO_OFFER_MS = 20000;
+const CONVO_CLOSE_MS = 45000;
 
-let convoSilentTurns = 0;   // how many times the mic opened and heard nothing
+function convoSupported() { return ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window); }
 
-function setConvo(on) {
-  convoEnabled = on;
-  const b = document.getElementById('wakeBtn');
-  if (on) {
-    convoSilentTurns = 0;
-    b.textContent = '🎙 Conversation: On — say "close" when done';
-    b.classList.add('active');
-    unlockAudio();
-  } else {
-    b.textContent = '🎙 Conversation: Off';
-    b.classList.remove('active');
-    // Close the mic properly — a bare stop() would just be restarted by onend
-    if (captureActive) stopCapture(false);
+function toggleConversation() {
+  if (convoActive) closeConversation('tap');
+  else openConversation();
+}
+
+// The opening TAP (a real gesture): unlock audio + start the ONE recogniser here,
+// synchronously, before any await — this is what makes it hold on iOS.
+function openConversation() {
+  if (!convoSupported()) {
+    const m = "This browser can't do hands-free listening — tap the mic for each question.";
+    addMsg('nav', m); lastSpoken = m; speak(m); return;
+  }
+  try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !convoAudioCtx) convoAudioCtx = new Ctx(); convoAudioCtx && convoAudioCtx.resume && convoAudioCtx.resume(); } catch(e) {}
+  unlockAudio();
+  try { if (captureActive) stopCapture(false); } catch(e) {}   // don't let two mics fight
+  convoActive = true; convoOffered = false; convoHadExchange = false; convoFastFails = 0;
+  setConvoUI(true);
+  convoStartRecogniser();          // creates + starts convoRec IN the gesture
+  convoArmSilence();
+  // Warm the mic in the background — keep the stream, don't stop it (iOS).
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(s => { if (convoActive) convoStream = s; else s.getTracks().forEach(t => t.stop()); })
+      .catch(() => {});
   }
 }
 
-function toggleWakeWord() {
-  setConvo(!convoEnabled);
+function convoStartRecogniser() {
+  if (!convoActive) return;
+  if (!convoRec) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    convoRec = new SR();                 // the ONE instance — never recreated per turn
+    convoRec.lang = 'en-AU';
+    convoRec.continuous = true;
+    convoRec.interimResults = true;
+    convoRec.onstart = () => { convoRecRunning = true; setConvoUI(true); };
+    convoRec.onspeechstart = () => convoArmSilence();
+    convoRec.onresult = e => {
+      let fin = '';
+      for (let i = 0; i < e.results.length; i++) if (e.results[i].isFinal) fin += (e.results[i][0] && e.results[i][0].transcript) || '';
+      fin = fin.trim();
+      if (fin) { convoFastFails = 0; convoArmSilence(); convoHandleUtterance(fin); }
+    };
+    convoRec.onerror = e => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') convoFailHonestly();
+      // no-speech / aborted / network fall through to onend, which restarts
+    };
+    convoRec.onend = () => {
+      convoRecRunning = false;
+      if (!convoActive || convoSpeaking) return;   // a deliberate pause (speaking) or a close
+      // WebKit that can't hold onends instantly, over and over, with no result.
+      if (Date.now() - convoLastStart < 800) convoFastFails++; else convoFastFails = 0;
+      if (convoFastFails >= 5) { convoFailHonestly(); return; }
+      try { convoRec.start(); convoLastStart = Date.now(); }   // RESTART the same instance
+      catch (e) { setTimeout(() => { if (convoActive && !convoSpeaking) { try { convoRec.start(); convoLastStart = Date.now(); } catch(_) {} } }, 300); }
+    };
+  }
+  try { convoRec.start(); convoRecRunning = true; convoLastStart = Date.now(); } catch (e) { /* already running */ }
+}
+function convoStopRecogniser() {
+  if (convoRec && convoRecRunning) { try { convoRec.stop(); } catch(e) {} }
+  convoRecRunning = false;
+}
+
+function convoHandleUtterance(text) {
+  if (isConvoClosePhrase(text)) { closeConversation('phrase'); return; }
+  deliverTranscript(text, 'basic');   // through the normal pipeline; the reply's speak() pauses us
+}
+function isConvoClosePhrase(text) {
+  const t = cleanTranscript(text).toLowerCase();
+  return t.length <= 25 && /^(that'?s it|that'?s all|that is all|thanks|thank you|cheers|done|all done|i'?m done|no that'?s it|that will do|bye|goodbye|close|stop( listening)?)\b/.test(t);
+}
+
+// Silence handling: nudge at 20s, hard close at 45s. Reset on any speech/reply.
+function convoArmSilence() {
+  clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer);
+  convoOffered = false;
+  if (convoHadExchange) convoOfferTimer = setTimeout(convoOffer, CONVO_OFFER_MS);
+  convoSilenceTimer = setTimeout(() => closeConversation('silence'), CONVO_CLOSE_MS);
+}
+// The OFFER — "anything else?". Not a close: answering it keeps the session going;
+// the 45s close timer keeps running underneath so silence still ends it.
+function convoOffer() {
+  if (!convoActive || convoOffered) return;
+  convoOffered = true;
+  convoSpeaking = true; convoStopRecogniser();
+  try {
+    synth && synth.cancel();
+    const u = new SpeechSynthesisUtterance('Anything else?');
+    u.lang = 'en-AU'; u.rate = 0.95;
+    u.onend = () => { convoSpeaking = false; convoStartRecogniser(); };   // resume; do NOT re-arm
+    u.onerror = () => { convoSpeaking = false; convoStartRecogniser(); };
+    synth ? synth.speak(u) : (convoSpeaking = false, convoStartRecogniser());
+  } catch (e) { convoSpeaking = false; convoStartRecogniser(); }
+}
+
+// A short beep so a driver not looking at the screen knows the session closed.
+// Uses the gesture-created AudioContext, so it sounds even on a timer-driven close.
+function convoCloseCue() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = convoAudioCtx || (Ctx && new Ctx());
+    if (!ctx) return; convoAudioCtx = ctx;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = 420;
+    g.gain.setValueAtTime(0.16, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.3);
+  } catch (e) {}
+}
+
+function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().forEach(t => t.stop()); } catch(e) {} convoStream = null; }
+
+function closeConversation(reason) {
+  const wasActive = convoActive;
+  convoActive = false; convoSpeaking = false; convoRecRunning = false;
+  clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer);
+  if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
+  convoRec = null;                       // fresh instance next session; alive across THIS one
+  releaseConvoStream();
+  setConvoUI(false);
+  if (wasActive) convoCloseCue();        // audible close cue
+  if (reason === 'honest') {
+    const m = "Hands-free listening won't hold on this browser — tap the mic for each question.";
+    addMsg('nav', m); lastSpoken = m; speak(m);
+  } else if (reason === 'phrase' || reason === 'silence') {
+    const m = 'Righto — tap the mic when you need me.';
+    addMsg('nav', m); lastSpoken = m; speak(m);
+  }
+}
+function convoFailHonestly() { closeConversation('honest'); }
+
+function setConvoUI(on) {
+  const b = document.getElementById('wakeBtn');
+  if (!b) return;
+  b.textContent = on ? '🎙 Listening' : '🎙 Off';
+  b.classList.toggle('convo-on', on);
+  b.classList.toggle('convo-off', !on);
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
@@ -2687,6 +2830,7 @@ async function finishCloudCapture() {
 // link in a noisy cab (SPEC §4). Web Speech stays as the silent per-turn
 // fallback whenever recording or the transcription round-trip fails.
 async function startListening() {
+  if (convoActive) return;   // a conversation session owns the mic — don't open a second one
   const hasWebSpeech = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
   if (!hasWebSpeech && !cloudEarsSupported()) {
     alert('Voice not supported on this browser — type it instead.'); return;
@@ -2727,20 +2871,6 @@ function startWebSpeechCapture() {
   heardSpeech = false; restartBurst = 0;
   showCaptured('');
   startRecogniser();
-  // Conversation mode only: if nothing is ever said, go back to sleep.
-  clearTimeout(noSpeechTimer);
-  if (convoEnabled) {
-    noSpeechTimer = setTimeout(() => {
-      if (!captureActive || heardSpeech) return;
-      stopCapture(false);
-      convoSilentTurns++;
-      if (convoSilentTurns >= 2) {
-        setConvo(false);
-        setVoiceStatus('', '🎙 Conversation ended — tap the mic when you need me');
-        setTimeout(() => setVoiceStatus('',''), 4000);
-      }
-    }, 9000);
-  }
 }
 
 function startRecogniser() {
@@ -2827,7 +2957,6 @@ function deliverTranscript(text, source) {
   // once HERE so "Cardwell." and "Cardwell" are the same word everywhere after.
   text = cleanTranscript(text);
   if (text.length <= 1 || busy) return;
-  convoSilentTurns = 0;                // they spoke — still in the conversation
   // DIAGNOSTIC (display only, no routing effect): show WHAT was heard and WHICH
   // ears heard it — ☁️ cloud/Whisper, 📱 basic/Web Speech. The input keeps the
   // clean text (that's what gets sent); the tag rides in the status line.
@@ -2863,6 +2992,7 @@ function stopListening() { stopCapture(true); }   // legacy name — same endpoi
 
 function speak(text) {
   if(!synth) return;
+  if (convoActive) { convoSpeaking = true; convoStopRecogniser(); }   // don't hear our own reply
   synth.cancel();
   let clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
   // Speak abbreviations as words — "300m" must not be read as "three hundred em"
@@ -2882,8 +3012,9 @@ function speak(text) {
   utt.onend = () => {
     setVoiceStatus('','🎙 Tap to reply');
     setTimeout(()=>setVoiceStatus('',''), 3000);
-    // Conversation mode: your turn — mic reopens by itself
-    if (convoEnabled && !busy && !isListening && !captureActive) setTimeout(startListening, 600);
+    // Conversation session: reply done — resume the SAME recogniser and reset the
+    // quiet clock. This is the per-turn re-listen, with no re-tap and no new SR().
+    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoStartRecogniser(); convoArmSilence(); }
   };
   synth.speak(utt);
 }
@@ -4558,7 +4689,7 @@ function copyLocation() {
 function resetConversation() {
   synth?.cancel();
   try { if (recognition && isListening) recognition.stop(); } catch(e) {}
-  if (convoEnabled) setConvo(false);   // don't leave the mic listening at the front door
+  if (convoActive) closeConversation('reset');   // don't leave a session listening at the front door
   try { localStorage.removeItem(SESSION_KEY); } catch(e) {}   // fresh start = no session to restore
   messages.length = 0;              // forget the exchange
   lastNavReply = ''; lastSpoken = '';
@@ -4705,14 +4836,11 @@ async function sendMessage(silent){
     return;
   }
 
-  // "Close" / "that's all" — turn off conversation mode without a round-trip
+  // "Close" / "that's all" — end a conversation session without a round-trip
   if (/^(close|that'?s all|that is all|i'?m (all )?(done|finished)|finished|stop listening|goodbye|bye|thanks that'?s all)\b/i.test(text)) {
     inp.value=''; inp.style.height='auto';
-    if (convoEnabled) {
-      setConvo(false);
-      const bye = 'Righto — conversation off. Tap the mic when you need me.';
-      addMsg('nav', bye); lastSpoken = bye; speak(bye);
-    }
+    if (convoActive) closeConversation('phrase');
+    else { const bye = 'Righto — tap the mic when you need me.'; addMsg('nav', bye); lastSpoken = bye; speak(bye); }
     return;
   }
 
