@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 05:29 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 06:03 PM AEST</div>
   </div>
 </div>
 
@@ -886,6 +886,88 @@ function adoptTrip(dest) {
     localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest, fuel:'', cond:'', passengers:'' }));
   } catch(e) {}
   plotTripRoute(dest);
+}
+// Commit a trip using ALREADY-RESOLVED coordinates — seed the route cache so
+// plotTripRoute reuses them instead of geocoding the name again (which is how a
+// "Cardwell" can re-resolve to "Caldwell"). Binds the name to its own coords.
+function adoptTripAt(dest, lat, lon) {
+  window._tripRoute = { dest, dlat: lat, dlon: lon };
+  adoptTrip(dest);
+}
+
+// Small-string Levenshtein — for spotting a near-miss geocode (Cardwell/Caldwell).
+function editDistance(a, b) {
+  a = (a || '').toLowerCase(); b = (b || '').toLowerCase();
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => { const row = new Array(n + 1).fill(0); row[0] = i; return row; });
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[m][n];
+}
+const AU_TRIP_SANITY_KM = 3000;   // beyond this straight-line for ONE spoken ask, confirm
+
+// Resolve a spoken destination and SANITY-CHECK it before committing. Returns
+// {verdict:'ok'|'notfound'|'confirm', name, lat, lon, km, reason, drift}. The
+// two confirm triggers: a similarly-spelled DIFFERENT place (name drift), or a
+// route wildly out of proportion for one request (scale). Australia-biased.
+async function resolveDestination(spoken) {
+  let r;
+  try {
+    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(spoken + ', Australia')}&format=json&limit=1&addressdetails=1&countrycodes=au`, { headers: { 'Accept-Language': 'en' } });
+    r = await g.json();
+  } catch (e) { return { verdict: 'notfound' }; }
+  if (!r || !r.length) return { verdict: 'notfound' };
+  const hit = r[0];
+  const lat = parseFloat(hit.lat), lon = parseFloat(hit.lon);
+  const a = hit.address || {};
+  const name = a.town || a.city || a.village || a.hamlet || a.municipality || a.suburb || a.county || (hit.display_name || '').split(',')[0].trim() || spoken;
+  const km = gps ? Math.round(distKm(gps.lat, gps.lon, lat, lon)) : null;
+  // Name drift — the map matched a place spelled almost like what was said, but
+  // it's a DIFFERENT name (not a substring). Cardwell → Caldwell is edit 1.
+  const sl = spoken.toLowerCase().trim(), nl = name.toLowerCase().trim();
+  const contained = sl === nl || sl.includes(nl) || nl.includes(sl);
+  const ed = editDistance(sl, nl);
+  if (!contained && ed > 0 && ed <= 2) return { verdict: 'confirm', reason: 'name', name, lat, lon, km, drift: true };
+  // Scale — a single spoken request landing thousands of km away is suspect.
+  if (km != null && km > AU_TRIP_SANITY_KM) return { verdict: 'confirm', reason: 'scale', name, lat, lon, km, drift: false };
+  return { verdict: 'ok', name, lat, lon, km };
+}
+
+// Re-resolve a name PREFERRING somewhere near the driver — used when they insist
+// on the local candidate the global geocoder skipped over.
+async function geocodeLocal(name) {
+  if (!gps) return geocodePlace(name);
+  const d = 5;   // ~550km viewbox around the driver
+  try {
+    const vb = `${gps.lon - d},${gps.lat + d},${gps.lon + d},${gps.lat - d}`;
+    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Australia')}&format=json&limit=1&countrycodes=au&viewbox=${vb}&bounded=1`, { headers: { 'Accept-Language': 'en' } });
+    const r = await g.json();
+    if (r && r.length) return { lat: parseFloat(r[0].lat), lon: parseFloat(r[0].lon) };
+  } catch (e) {}
+  return null;
+}
+
+// After a trip is committed: run any compound follow-ups from the same sentence
+// (day plan / camps), else ask the day-out-vs-journey question. Shared by the
+// direct create path and the post-disambiguation commit.
+async function proceedAfterTrip(trip, wantsPlan, wantsCamps, text) {
+  if (wantsPlan || wantsCamps) {
+    busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+    try {
+      let msg;
+      if (wantsPlan) { try { await plotTripRoute(trip.dest); } catch (e) {} msg = formatDayBrief(trip.dest, trip.origin, window._tripRoute, currentVehicle); }
+      else msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}.`;
+      if (wantsCamps && wantsPlan) { msg += ' Want the caravan sites now?'; setPending({ type: 'camps-offer', ask: text }); addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
+      else if (wantsCamps) { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); await answerCamps(text); }
+      else { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
+    } finally { hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false; }
+    return;
+  }
+  let msg;
+  if (trip.action === 'create') { msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Out for the day, or on a journey?`; setPending({ type: 'trip-mode', dest: trip.dest }); }
+  else { msg = `Already on the ${trip.dest} run. What do you need?`; }
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
 let pendingTripSwitch = null;   // a proposed destination change, awaiting yes/no
 
@@ -1771,7 +1853,7 @@ async function plotTripRoute(dest) {
     if (window._tripRoute && window._tripRoute.dest === dest && window._tripRoute.dlat) {
       dlat = window._tripRoute.dlat; dlon = window._tripRoute.dlon;
     } else {
-      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
+      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1&countrycodes=au`, {headers:{'Accept-Language':'en'}});
       const gd = await g.json();
       if (!gd || !gd.length) return;
       dlat = parseFloat(gd[0].lat); dlon = parseFloat(gd[0].lon);
@@ -3641,6 +3723,23 @@ function matchPendingAnswer(text, pending) {
       return { action: 'dial-no', site: pending.site };
     return null;
   }
+  if (pending.type === 'dest-confirm') {
+    // Carry the data forward — the pending is cleared the moment it's consumed.
+    const carry = { origin: pending.origin, wantsPlan: pending.wantsPlan, wantsCamps: pending.wantsCamps, ask: pending.ask };
+    if (pending.drift) {
+      // "Which one — <spoken> near you, or <resolved>?" — pick by name.
+      const near = pending.spoken.toLowerCase(), far = pending.resolved.toLowerCase();
+      const saysNear = t.includes(near) || /\b(near(er|est)?|closer|close one|first one?|the near|near me|local)\b/.test(t);
+      const saysFar  = t.includes(far)  || /\b(further|farther|far one|second one?|the far|the other)\b/.test(t);
+      if (saysNear && !saysFar) return { action: 'dest-pick', which: 'spoken', dest: pending.spoken, ...carry };
+      if (saysFar && !saysNear) return { action: 'dest-pick', which: 'resolved', dest: pending.resolved, lat: pending.rlat, lon: pending.rlon, ...carry };
+      return null;
+    }
+    // Scale-only: same place, so a plain yes/no — yes commits it, no/closer re-asks.
+    if (/^(yes|yeah|yep|yup|correct|that'?s right|sure|it is)\b/.test(t)) return { action: 'dest-pick', which: 'resolved', dest: pending.resolved, lat: pending.rlat, lon: pending.rlon, ...carry };
+    if (/^(no|nah|nope)\b/.test(t) || /\b(closer|somewhere closer|not that|different (place|town))\b/.test(t)) return { action: 'dest-reask' };
+    return null;
+  }
   return null;   // not an answer to what was asked — treat as a new query
 }
 
@@ -4571,15 +4670,19 @@ async function sendMessage(silent){
       inp.value=''; inp.style.height='auto';
       addMsg('user', text);
       if (pa.action === 'destination') {
-        // Geocode the bare name before committing to it. NEVER re-ask blind:
-        // if it can't be found, say what was actually heard (SPEC §0).
+        // Resolve + SANITY-CHECK the bare name before committing (same scale /
+        // name-drift guard as a spoken trip). NEVER re-ask blind (SPEC §0).
         busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-        let found = null;
-        try { found = await geocodePlace(pa.place); } catch(e) {}
+        const v = await resolveDestination(pa.place);
         hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
         let msg;
-        if (found) {
-          adoptTrip(pa.place);
+        if (v.verdict === 'confirm') {
+          setPending({ type: 'dest-confirm', spoken: pa.place, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: null, wantsPlan: false, wantsCamps: false, ask: pa.place });
+          msg = v.drift
+            ? `I heard ${pa.place}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${pa.place} near you, or ${v.name}?`
+            : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or somewhere closer?`;
+        } else if (v.verdict === 'ok') {
+          adoptTripAt(pa.place, v.lat, v.lon);
           msg = `Trip set to ${pa.place}. Out for the day, or on a journey?`;
           setPending({ type: 'trip-mode', dest: pa.place });
         } else {
@@ -4634,6 +4737,29 @@ async function sendMessage(silent){
         const m = s ? `No worries — the number's on screen if you want it.` : `No worries.`;
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
         const bub = lastNavBubble(); if (bub && s && s.phone) roundCallButton(bub, { name: s.name, phone: s.phone });
+      } else if (pa.action === 'dest-pick') {
+        // The driver chose which place. Commit with bound coords, then run any
+        // follow-ups the original sentence asked for (plan / camps).
+        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+        let lat = pa.lat, lon = pa.lon, ok = true;
+        if (pa.which === 'spoken') {   // they want the LOCAL one — re-resolve near GPS
+          const local = await geocodeLocal(pa.dest);
+          if (local) { lat = local.lat; lon = local.lon; } else ok = false;
+        }
+        hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+        if (!ok || lat == null) {
+          const m = `Still can't pin ${pa.dest} near you — what's the nearest bigger town?`;
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+          setPending({ type: 'destination' });
+        } else {
+          adoptTripAt(pa.dest, lat, lon);
+          if (pa.origin) tripContext = `Origin: ${pa.origin}. Destination: ${pa.dest}.`;
+          await proceedAfterTrip({ action: 'create', dest: pa.dest, origin: pa.origin }, pa.wantsPlan, pa.wantsCamps, pa.ask);
+        }
+      } else if (pa.action === 'dest-reask') {
+        const m = `No worries — where did you mean? Give me the town.`;
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        setPending({ type: 'destination' });
       } else {
         const msg = 'No worries — leaving it there. What else do you need?';
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
@@ -4661,50 +4787,35 @@ async function sendMessage(silent){
       addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       return;
     }
-    if (trip.action === 'create') {
-      adoptTrip(trip.dest);                        // FROM defaults to current GPS
-      if (trip.origin) tripContext = `Origin: ${trip.origin}. Destination: ${trip.dest}.`;
-    }
-    // COMPOUND ASK (never interview — the sentence already answered): "going to
-    // Cardwell, plan me a day journey and find three caravan sites" sets the
-    // trip, DELIVERS the day brief, then holds ONE offer for the camps part.
+    // Compound follow-ups from the same sentence ("going to Cardwell, plan a day
+    // and find camps") — detected here so they survive a disambiguation detour.
     const wantsPlan  = /\b(plan|itinerary|day journey|journey plan|day plan|legs?\b|break (?:up|down))\b/i.test(text);
     const wantsCamps = isCampsQuery(text);
-    if (wantsPlan || wantsCamps) {
-      busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-      try {
-        let msg;
-        if (wantsPlan) {
-          try { await plotTripRoute(trip.dest); } catch(e) {}
-          msg = formatDayBrief(trip.dest, trip.origin, window._tripRoute, currentVehicle);
-        } else {
-          msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}.`;
-        }
-        if (wantsCamps && wantsPlan) {
-          msg += ' Want the caravan sites now?';
-          setPending({ type: 'camps-offer', ask: text });
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-        } else if (wantsCamps) {
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-          await answerCamps(text);
-        } else {
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-        }
-      } finally {
-        hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-      }
-      return;
-    }
-    // Simple destination statement — ONE question that shapes everything after:
-    // day out (back tonight, no overnight prompts) vs journey (travelling on).
-    let msg;
     if (trip.action === 'create') {
-      msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Out for the day, or on a journey?`;
-      setPending({ type: 'trip-mode', dest: trip.dest });
-    } else {
-      msg = `Already on the ${trip.dest} run. What do you need?`;
+      // SCALE / DISAMBIGUATION CHECK — resolve BEFORE committing. Don't silently
+      // plan a whole trip to the wrong place (Cardwell→Caldwell, a 32h route).
+      busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+      const v = await resolveDestination(trip.dest);
+      hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+      if (v.verdict === 'notfound') {
+        const m = `I heard ${trip.dest} but can't find it on the map. Say it again, or give me the nearest town?`;
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        setPending({ type: 'destination' });
+        return;
+      }
+      if (v.verdict === 'confirm') {
+        // DO NOT commit — ask, naming both candidates plainly, and wait.
+        setPending({ type: 'dest-confirm', spoken: trip.dest, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: trip.origin, wantsPlan, wantsCamps, ask: text });
+        const msg = v.drift
+          ? `I heard ${trip.dest}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${trip.dest} near you, or ${v.name}?`
+          : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or did you mean somewhere closer?`;
+        addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+        return;
+      }
+      adoptTripAt(trip.dest, v.lat, v.lon);          // bind name to its resolved coords
+      if (trip.origin) tripContext = `Origin: ${trip.origin}. Destination: ${trip.dest}.`;
     }
-    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+    await proceedAfterTrip(trip, wantsPlan, wantsCamps, text);
     return;
   }
 
