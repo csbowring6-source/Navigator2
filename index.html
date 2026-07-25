@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 11:55 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 03:30 PM AEST</div>
   </div>
 </div>
 
@@ -3568,7 +3568,7 @@ function formatCampsAnswer(res) {
   return {
     text: [head, lines.join(' '), textFinish].join(' '),
     spoken: spokenBits.join(' '),
-    sites: sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s) })),
+    sites: sites.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s) })),
   };
 }
 
@@ -3625,6 +3625,14 @@ function matchPendingAnswer(text, pending) {
       return { action: 'declined' };
     return null;
   }
+  if (pending.type === 'number-offer') {
+    // "Want the number for <next site>?" after a not-found.
+    if (t.length <= 40 && /^(yes|yeah|yep|yup|please|ok(ay)?|sure|go on|that one|do it)\b/.test(t))
+      return { action: 'get-number', site: pending.site };
+    if (t.length <= 40 && /^(no|nah|nope|no thanks|leave it|forget it)\b/.test(t))
+      return { action: 'declined' };
+    return null;
+  }
   return null;   // not an answer to what was asked — treat as a new query
 }
 
@@ -3664,7 +3672,7 @@ function startCampRound(place, query, sites) {
   campRound = {
     place: place || '',
     query: query || '',
-    sites: (sites || []).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '' })),
+    sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '' })),
     tried: [], calledSite: null, ts: Date.now(),
   };
   campOutcomePending = null;
@@ -3818,6 +3826,100 @@ function handleNavigateBooked(text) {
   if (!(nav && deictic)) return false;
   addMsg('user', text);
   navigateTo(lastBookedSite.name, lastBookedSite.lat, lastBookedSite.lon);   // from the STORED record
+  return true;
+}
+
+// ── NUMBER-ON-REQUEST (/place-phone wiring) ──────────────────────────────────
+// The driver asks for a listed site's phone number by voice ("give me the
+// number for X"). We match the spoken name against the THREE ROUND RECORDS
+// ALREADY ON SCREEN — never re-parse a place name from speech — and call
+// /place-phone with THAT site's stored id/name/lat/lon. Found → a one-press dial
+// button (digits shown, never spoken), hooked into the ring-around. Not found →
+// say so plainly and offer the next site. No guessing, no substitutes.
+
+// Is this a "number for <site>" request? Returns the spoken name portion, ''
+// (asked for a number but named no site → ask which), or null (not a request).
+function extractNumberRequest(text) {
+  const t = (text || '').trim();
+  if (!/\b(number|phone)\b/i.test(t)) return null;
+  let m = t.match(/(?:phone\s*)?number\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
+       || t.match(/\bphone\s+(?:for|of|at)\s+(.+?)[.?!]*$/i)
+       || t.match(/(.+?)'?s\s+(?:phone\s*)?number\b/i);
+  return m ? m[1] : '';
+}
+// Match spoken text to ONE of the sites on screen. Returns a site record, the
+// sentinel {ambiguous:true}, or null (no clear match) — caller asks which one.
+function matchListedSite(spoken) {
+  if (!campRound) return null;
+  const t = cleanTranscript(spoken).toLowerCase();
+  if (!t) return null;
+  let hits = campRound.sites.filter(s => { const nl = s.name.toLowerCase(); return t.includes(nl) || nl.includes(t); });
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) return { ambiguous: true };
+  const GENERIC = /^(park|parks|caravan|van|camp|camps|camping|tourist|holiday|site|sites|free|powered|beach|creek|river|point|the|one|number|phone|for)$/;
+  hits = campRound.sites.filter(s => s.name.toLowerCase().split(/\s+/).some(w => w.length >= 4 && !GENERIC.test(w) && t.includes(w)));
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) return { ambiguous: true };
+  return null;
+}
+function askWhichSite() {
+  const names = campRound.sites.map(s => s.name).join(', ');
+  const msg = `Which one — ${names}?`;
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+}
+// Ask the Worker for ONE site's number, bound to its stored id (never the name).
+async function fetchPlacePhone(site) {
+  const q = `${API_URL}place-phone?id=${encodeURIComponent(site.id || '')}&name=${encodeURIComponent(site.name)}&lat=${site.lat}&lon=${site.lon}`;
+  const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(q, { signal: ctrl.signal });
+    clearTimeout(to);
+    const d = await r.json();
+    return (d && d.found && d.phone) ? String(d.phone) : null;
+  } catch (e) { clearTimeout(to); return null; }
+}
+// Show the number with a one-press dial. Digits are VISIBLE, never spoken. The
+// dial button is the ring-around's own (records the call), so tapping it feeds
+// straight into the Booked / No room / No answer loop on return.
+function presentNumber(site, phone) {
+  const msg = `I've got a number for ${site.name} — tap to call.`;
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  const bub = lastNavBubble(); if (!bub) return;
+  const line = document.createElement('div');
+  line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
+  line.textContent = `${site.name}: ${localPhone(phone)}`;
+  bub.appendChild(line);
+  roundCallButton(bub, { name: site.name, phone });
+}
+// No number — say so plainly, name the site, offer the next one (never a guess).
+function denyNumber(site) {
+  const idx = campRound.sites.findIndex(s => s.name === site.name);
+  const next = campRound.sites.slice(idx + 1).concat(campRound.sites.slice(0, idx)).find(s => s.name !== site.name);
+  let msg = `No number listed for ${site.name}.`;
+  if (next) { msg += ` Want the number for ${next.name}?`; setPending({ type: 'number-offer', site: next.name }); }
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+}
+// Resolve a site's number: use its stored one if we already have it, else ask
+// the Worker; present or deny. Shared by the voice request and the "yes" offer.
+async function getNumberFor(site) {
+  if (!site) return;
+  if (site.phone) { presentNumber(site, site.phone); return; }
+  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+  let phone = null;
+  try { phone = await fetchPlacePhone(site); } catch (e) {}
+  hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+  if (phone) { site.phone = phone; saveCampRound(); presentNumber(site, phone); }   // now callable in the loop
+  else denyNumber(site);
+}
+// Voice entry point — returns true if it handled the utterance.
+async function handleNumberRequest(text) {
+  if (!campRound || !campRound.sites.length) return false;
+  const asked = extractNumberRequest(text);
+  if (asked === null) return false;
+  addMsg('user', text);
+  const match = matchListedSite(asked);
+  if (!match || match.ambiguous) { askWhichSite(); return true; }
+  await getNumberFor(match);
   return true;
 }
 
@@ -4499,6 +4601,9 @@ async function sendMessage(silent){
           addMsg('nav', m); speak(m);
         }
         hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+      } else if (pa.action === 'get-number') {
+        // "Yes" to "want the number for <next site>?" — look up THAT stored site.
+        await getNumberFor(campSite(pa.site));
       } else {
         const msg = 'No worries — leaving it there. What else do you need?';
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
@@ -4512,6 +4617,8 @@ async function sendMessage(silent){
   if (handleRingAroundVoice(text)) { inp.value=''; inp.style.height='auto'; return; }
   // "take me there" after a booking — navigate to the STORED booked site.
   if (handleNavigateBooked(text)) { inp.value=''; inp.style.height='auto'; return; }
+  // "give me the number for X" — /place-phone for a listed site (never re-parsed).
+  if (await handleNumberRequest(text)) { inp.value=''; inp.style.height='auto'; return; }
 
   // A destination statement sets or updates the trip — no AI round-trip needed.
   const trip = parseTripIntent(text, { currentDest: currentRunDest });
