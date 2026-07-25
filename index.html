@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 08:43 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 10:52 AM AEST</div>
   </div>
 </div>
 
@@ -2437,11 +2437,21 @@ function releaseRecordingStream() {
 
 // End the turn after ~1.5s of quiet, but only once they've actually spoken —
 // a driver still thinking keeps the mic until they tap.
-function armRecordingSilence() {
+async function armRecordingSilence() {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    recAudioCtx = new Ctx();
+    if (!recAudioCtx) {
+      // The gesture path didn't make one (e.g. conversation-mode auto-listen) —
+      // try now; it may start suspended, which the discard logic accounts for.
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      recAudioCtx = new Ctx();
+    }
+    // iOS: resume BEFORE reading the analyser, or it stays suspended and flatlines.
+    // If resume rejects, carry on — the meter just won't run, and the discard
+    // logic will not treat that flatline as silence.
+    try { await recAudioCtx.resume(); }
+    catch (e) { console.warn('[cloud ears] AudioContext resume failed:', e && e.message); }
+    if (!cloudActive) return;   // recording ended while we awaited the resume
     const src = recAudioCtx.createMediaStreamSource(mediaStream);
     const an = recAudioCtx.createAnalyser();
     an.fftSize = 512;
@@ -2550,18 +2560,24 @@ function nothingCaught() {
 async function finishCloudCapture() {
   const chunks = recChunks; recChunks = [];
   const type = (mediaRecorder && mediaRecorder.mimeType) || pickRecordingMime() || 'audio/webm';
+  // Was the silence analyser GENUINELY running? On iOS the AudioContext can stay
+  // suspended (flatline meter), which must NEVER be read as silence. Check the
+  // real context state BEFORE releaseRecordingStream() tears it down.
+  const analyserRan = recAnalyserOn && !!recAudioCtx && recAudioCtx.state === 'running';
   mediaRecorder = null;
   releaseRecordingStream();
   setListeningUI(false);
   if (!cloudSendWanted) { setVoiceStatus('',''); showCaptured(''); return; }
   const blob = new Blob(chunks, { type });
   const durationMs = recStartedAt ? (Date.now() - recStartedAt) : 0;
-  const nearSilent = recAnalyserOn && !recVoiced;   // analyser ran and heard nothing
-  // Nothing worth transcribing: too short, too small, or provably silent. Don't
-  // even POST it — audio like this is exactly what Whisper hallucinates over.
+  // "Silent" is only trustworthy when the analyser was verified running. If the
+  // context was suspended or the analyser never ran properly, DON'T discard on
+  // that basis — send the audio and let Whisper judge, rather than binning speech.
+  const nearSilent = analyserRan && !recVoiced;
+  // Too short or too small are still safe to drop; near-silent only when verified.
   if (blob.size < 1024 || durationMs < REC_MIN_MS || nearSilent) {
     console.warn('[cloud ears] discarded before sending —',
-      `${durationMs}ms, ${blob.size}b, voiced=${recAnalyserOn ? recVoiced : 'unknown'}`);
+      `${durationMs}ms, ${blob.size}b, voiced=${analyserRan ? recVoiced : 'unverified'}`);
     nothingCaught();
     return;
   }
@@ -2598,14 +2614,25 @@ async function startListening() {
   // Starting a fresh recording after the question went stale: drop it now so
   // this turn is a clean new query, not a late answer to something forgotten.
   if (pendingQuestion && !pendingIsFresh()) setPending(null);
+  // iOS: create the silence-detection AudioContext NOW — synchronously, inside
+  // the tap gesture and BEFORE any await — or Safari starts it suspended and the
+  // analyser reads flatline. The mic stream is wired into it later, in
+  // armRecordingSilence, which resumes it before reading.
+  if (cloudEarsSupported() && !recAudioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) recAudioCtx = new Ctx();
+    } catch (e) { recAudioCtx = null; }
+  }
   // Gate on a confirmed mic grant so we never open a deaf recogniser (the iOS
   // first-run race). In steady state this resolves instantly (micGranted).
   micPending = true;
   const allowed = await ensureMicPermission();
   micPending = false;
-  if (!allowed) { resetVoiceUI(); return; }
+  if (!allowed) { releaseRecordingStream(); resetVoiceUI(); return; }
   if (cloudEarsSupported()) {
     if (await startCloudCapture()) return;
+    releaseRecordingStream();   // cloud didn't start — close the gesture-made context
     console.warn('[cloud ears] recording unavailable — Web Speech for this turn');
   }
   if (hasWebSpeech) startWebSpeechCapture();
