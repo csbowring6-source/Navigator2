@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 03:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 05:29 PM AEST</div>
   </div>
 </div>
 
@@ -3633,6 +3633,14 @@ function matchPendingAnswer(text, pending) {
       return { action: 'declined' };
     return null;
   }
+  if (pending.type === 'dial-offer') {
+    // "Want to ring them?" — yes readies the one-tap dial (a web app can't dial).
+    if (t.length <= 40 && /^(yes|yeah|yep|yup|please|ok(ay)?|sure|go on|do it|call them|ring them|get them|dial)\b/.test(t))
+      return { action: 'dial', site: pending.site };
+    if (t.length <= 40 && /^(no|nah|nope|no thanks|not (yet|now)|later|leave it|don'?t)\b/.test(t))
+      return { action: 'dial-no', site: pending.site };
+    return null;
+  }
   return null;   // not an answer to what was asked — treat as a new query
 }
 
@@ -3878,18 +3886,32 @@ async function fetchPlacePhone(site) {
     return (d && d.found && d.phone) ? String(d.phone) : null;
   } catch (e) { clearTimeout(to); return null; }
 }
-// Show the number with a one-press dial. Digits are VISIBLE, never spoken. The
-// dial button is the ring-around's own (records the call), so tapping it feeds
-// straight into the Booked / No room / No answer loop on return.
+// Show the number (VISIBLE, never spoken) and ASK before readying the dial. A
+// web app cannot place the call itself — iOS Safari and Android Chrome both
+// require a physical tap plus the OS's own call confirmation, and a code-fired
+// tel: from a voice "yes" has no user gesture, so it silently no-ops. The honest
+// floor is: on a spoken yes, ONE tap on the button and you're through.
 function presentNumber(site, phone) {
-  const msg = `I've got a number for ${site.name} — tap to call.`;
+  const msg = `I've got a number for ${site.name}. Want to ring them?`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-  const bub = lastNavBubble(); if (!bub) return;
-  const line = document.createElement('div');
-  line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
-  line.textContent = `${site.name}: ${localPhone(phone)}`;
-  bub.appendChild(line);
-  roundCallButton(bub, { name: site.name, phone });
+  const bub = lastNavBubble();
+  if (bub) {
+    const line = document.createElement('div');
+    line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
+    line.textContent = `${site.name}: ${localPhone(phone)}`;
+    bub.appendChild(line);
+  }
+  setPending({ type: 'dial-offer', site: site.name });
+}
+// The spoken "yes": readies the one-tap dial. The button is the ring-around's own
+// (records the call), so tapping it feeds straight into the Booked / No room /
+// No answer loop. Honest wording — we never claim to dial for them.
+function readyDial(site) {
+  if (!site || !site.phone) return;
+  const msg = `Tap the green button and you're straight through to ${site.name}.`;
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  const bub = lastNavBubble();
+  if (bub) roundCallButton(bub, { name: site.name, phone: site.phone });
 }
 // No number — say so plainly, name the site, offer the next one (never a guess).
 function denyNumber(site) {
@@ -4604,6 +4626,14 @@ async function sendMessage(silent){
       } else if (pa.action === 'get-number') {
         // "Yes" to "want the number for <next site>?" — look up THAT stored site.
         await getNumberFor(campSite(pa.site));
+      } else if (pa.action === 'dial') {
+        // "Yes" to "want to ring them?" — ready the one-tap dial (can't auto-dial).
+        readyDial(campSite(pa.site));
+      } else if (pa.action === 'dial-no') {
+        const s = campSite(pa.site);
+        const m = s ? `No worries — the number's on screen if you want it.` : `No worries.`;
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        const bub = lastNavBubble(); if (bub && s && s.phone) roundCallButton(bub, { name: s.name, phone: s.phone });
       } else {
         const msg = 'No worries — leaving it there. What else do you need?';
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
