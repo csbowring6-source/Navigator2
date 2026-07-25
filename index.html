@@ -175,19 +175,23 @@
   .voice-btn{width:40px;height:40px;border-radius:50%;border:2px solid rgba(245,166,35,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;background:rgba(245,166,35,0.08);color:var(--amber);transition:all 0.2s;flex-shrink:0;}
   .reset-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;background:transparent;color:var(--gray2);transition:all 0.2s;flex-shrink:0;align-self:center;}
   .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
-  .voice-btn.listening{background:var(--red);border-color:var(--red);color:var(--white);}
+  /* #voiceBtn is a neutral tap target now — it never reports state; setMicState does. */
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
   .wake-bar{margin-bottom:8px;}
   .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
   .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
-  /* Conversation session state — colour AND word both change (never colour alone). */
+  /* Mic button — ONE state machine (setMicState) drives it. Colour AND label both
+     change (never colour alone); the label says what a TAP does right now. */
   .wake-word-btn.convo-on{background:rgba(46,204,113,0.15);border-color:#2ECC71;color:#2ECC71;font-weight:600;animation:convoPulse 2s infinite;}
   .wake-word-btn.convo-off{background:rgba(231,76,60,0.10);border-color:#E74C3C;color:#E74C3C;}
+  .wake-word-btn.convo-busy{background:rgba(245,166,35,0.15);border-color:var(--amber);color:var(--amber);font-weight:600;}
   @keyframes convoPulse{0%,100%{border-color:#2ECC71;}50%{border-color:rgba(46,204,113,0.4);}}
+  /* The ONE status element — its colour matches the button; five states only. */
   .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
-  .voice-status.listening-state{color:var(--red);}
-  .voice-status.speaking-state{color:var(--amber);}
+  .voice-status.mic-red{color:var(--red);}
+  .voice-status.mic-green{color:#2ECC71;}
+  .voice-status.mic-amber{color:var(--amber);}
 
   .chat-area::-webkit-scrollbar{width:3px;}
   .chat-area::-webkit-scrollbar-thumb{background:var(--navy3);border-radius:2px;}
@@ -566,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 06:46 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 07:23 AM AEST</div>
   </div>
 </div>
 
@@ -617,7 +621,7 @@
 
     <div class="input-area">
       <div class="wake-bar">
-        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="toggleConversation()">🎙 Off</button>
+        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="micTap()">🎙 Tap to talk</button>
       </div>
       <div class="input-row" id="inputRow">
         <textarea id="userInput" placeholder="Type here…" rows="1"
@@ -2346,7 +2350,7 @@ function openConversation() {
   try { if (captureActive) stopCapture(false); } catch(e) {}   // don't let two mics fight
   convoActive = true; convoOffered = false; convoHadExchange = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
-  setConvoUI(true);
+  setMicState('listening');        // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoArmSilence();
   // Warm the mic ONLY where it demonstrably helps. On Android Chrome a held
@@ -2368,8 +2372,8 @@ function convoStartRecogniser() {
     convoRec.lang = 'en-AU';
     convoRec.continuous = true;
     convoRec.interimResults = true;
-    convoRec.onstart = () => { convoRecRunning = true; setConvoUI(true); console.log('[convo] recogniser started'); };
-    convoRec.onspeechstart = () => convoArmSilence();
+    convoRec.onstart = () => { convoRecRunning = true; if (convoActive && !convoSpeaking) setMicState('listening'); console.log('[convo] recogniser started'); };
+    convoRec.onspeechstart = () => { convoArmSilence(); if (convoActive) setMicState('recording'); };
     convoRec.onresult = e => {
       let fin = '';
       for (let i = 0; i < e.results.length; i++) if (e.results[i].isFinal) fin += (e.results[i][0] && e.results[i][0].transcript) || '';
@@ -2431,15 +2435,16 @@ function convoArmSilence() {
 function convoOffer() {
   if (!convoActive || convoOffered) return;
   convoOffered = true;
-  convoSpeaking = true; convoStopRecogniser();
+  convoSpeaking = true; convoStopRecogniser(); setMicState('speaking');
+  const resume = () => { convoSpeaking = false; if (convoActive) setMicState('listening'); convoStartRecogniser(); };
   try {
     synth && synth.cancel();
     const u = new SpeechSynthesisUtterance('Anything else?');
     u.lang = 'en-AU'; u.rate = 0.95;
-    u.onend = () => { convoSpeaking = false; convoStartRecogniser(); };   // resume; do NOT re-arm
-    u.onerror = () => { convoSpeaking = false; convoStartRecogniser(); };
-    synth ? synth.speak(u) : (convoSpeaking = false, convoStartRecogniser());
-  } catch (e) { convoSpeaking = false; convoStartRecogniser(); }
+    u.onend = resume;    // resume; do NOT re-arm
+    u.onerror = resume;
+    synth ? synth.speak(u) : resume();
+  } catch (e) { resume(); }
 }
 
 // A short beep so a driver not looking at the screen knows the session closed.
@@ -2469,7 +2474,7 @@ function closeConversation(reason) {
   if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
   convoRec = null;                       // fresh instance next session; alive across THIS one
   releaseConvoStream();
-  setConvoUI(false);
+  setMicState('off');
   if (wasActive) convoCloseCue();        // audible close cue
   if (reason === 'honest') {
     const m = "Hands-free listening won't hold on this browser — tap the mic for each question.";
@@ -2494,12 +2499,53 @@ function closeConversation(reason) {
 }
 function convoFailHonestly() { closeConversation('honest'); }
 
-function setConvoUI(on) {
+// ── ONE MIC STATE MACHINE — the SOLE writer of every mic indicator ───────────
+// Five states: off · listening · recording · thinking · speaking. The status
+// element (#voiceStatus) shows the state word + colour; the button (#wakeBtn)
+// shows what a TAP does right now. Both derive from HERE and nowhere else, so no
+// two visible elements can report mic state independently (they can't disagree).
+// The button label also carries the ENGINE distinction: a one-shot cloud/basic
+// capture ends on SEND, an open Web-Speech session ends on CLOSE — so the driver
+// always knows whether the next tap sends or closes, even though the state word
+// and colour are shared. Any old "second indicator" is gone: #voiceBtn no longer
+// carries its own listening styling, and setVoiceStatus/setListeningUI are gone.
+let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
+const MIC_META = {      // state → [status word, colour]
+  off:       ['Off', 'red'], listening: ['Listening', 'green'], recording: ['Recording', 'green'],
+  thinking:  ['Thinking', 'amber'], speaking: ['Speaking', 'amber'],
+};
+function setMicState(state) {
+  if (!MIC_META[state]) state = 'off';
+  micState = state;
+  const [word, colour] = MIC_META[state];
+  // THE status element — five states, colour matches the button.
+  const s = document.getElementById('voiceStatus');
+  if (s) { s.textContent = word; s.className = 'voice-status mic-' + colour; }
+  // THE button — label = the tap action NOW, including which engine is live.
+  const capturing = cloudActive || captureActive;   // one-shot capture: a tap SENDS
+  const session   = convoActive;                     // hands-free session: a tap CLOSES
+  let label;
+  if (state === 'off') label = '🎙 Tap to talk';
+  else if (state === 'recording') label = capturing ? '🎙 Recording · tap to send' : '🎙 Recording · tap to close';
+  else if (state === 'listening') label = '🎙 Listening · tap to close';
+  else if (state === 'thinking') label = '🎙 Thinking…';
+  else /* speaking */ label = session ? '🎙 Speaking · tap to close' : '🎙 Speaking…';
+  const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
   const b = document.getElementById('wakeBtn');
-  if (!b) return;
-  b.textContent = on ? '🎙 Listening' : '🎙 Off';
-  b.classList.toggle('convo-on', on);
-  b.classList.toggle('convo-off', !on);
+  if (b) { b.textContent = label; b.className = 'wake-word-btn ' + cls; }
+  // Cosmetic ring on the mic entry points — driven from HERE (not independent).
+  const live = (state === 'listening' || state === 'recording');
+  document.getElementById('homeMic')?.classList.toggle('listening', live);
+  document.getElementById('inputRow')?.classList.toggle('listening', live);
+}
+// The one mic button (#wakeBtn). A tap does the right thing for whatever is live:
+// send a one-shot capture, close a session, or (idle) open a session.
+function micTap() {
+  unlockAudio();
+  if (cloudActive || captureActive) { stopCapture(true); return; }   // one-shot capture → send
+  if (convoActive) { closeConversation('tap'); return; }             // session → close
+  if (micState === 'thinking') return;                               // processing — ignore taps
+  openConversation();                                                // idle → open a hands-free session
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
@@ -2572,12 +2618,6 @@ function showCaptured(text) {
   const ui = document.getElementById('userInput');
   if (ui) { ui.value = text; try { autoResize(ui); } catch(e) {} }
 }
-function setListeningUI(on) {
-  document.getElementById('voiceBtn')?.classList.toggle('listening', on);
-  document.getElementById('inputRow')?.classList.toggle('listening', on);
-  document.getElementById('homeMic')?.classList.toggle('listening', on);
-  if (on) setVoiceStatus('listening', '🔴 Listening — tap again to send');
-}
 // Only ever armed after real speech: a driver who hasn't spoken yet keeps the
 // mic until they tap. Any new speech resets the clock, so pauses are safe.
 function armSilenceTimer() {
@@ -2602,21 +2642,23 @@ async function ensureMicPermission() {
       const st = await navigator.permissions.query({ name: 'microphone' });
       if (st.state === 'granted') { micGranted = true; return true; }
       if (st.state === 'denied') {
-        setVoiceStatus('', '🎙 Microphone is blocked — allow it for this site in Safari settings, then tap again');
+        setMicState('off');
+        addMsg('nav', 'Microphone is blocked — allow it for this site in your browser settings, then tap the mic again.');
         return false;
       }
     }
   } catch (e) { /* Safari can't query 'microphone' — fall through to a real prompt */ }
   // Unknown or 'prompt': ask now and WAIT for the grant before starting.
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    setVoiceStatus('listening', '🎙 I need the mic — tap Allow when Safari asks');
+    addMsg('nav', 'I need the mic — tap Allow when the browser asks.');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(t => t.stop());   // only needed the grant; SR opens its own
       micGranted = true;
       return true;
     } catch (e) {
-      setVoiceStatus('', '🎙 I need the mic — tap Allow when Safari asks, or type it below');
+      setMicState('off');
+      addMsg('nav', 'I need the mic — tap Allow when the browser asks, or type it below.');
       return false;
     }
   }
@@ -2754,8 +2796,7 @@ async function startCloudCapture() {
   }
   cloudActive = true; captureActive = true;
   showCaptured('');
-  setListeningUI(true);
-  setVoiceStatus('listening', '🔴 Recording — tap again to send');
+  setMicState('recording');    // one-shot cloud capture is live — a tap SENDS
   armRecordingSilence();
   clearTimeout(recMaxTimer);
   recMaxTimer = setTimeout(() => { if (cloudActive) stopCloudCapture(true); }, REC_MAX_MS);
@@ -2799,8 +2840,8 @@ async function transcribeBlob(blob) {
 // (or handing to Web Speech) here would just re-record the same silence.
 function nothingCaught() {
   showCaptured('');
-  setVoiceStatus('', '🎙 I didn\'t catch anything — try again');
-  setTimeout(() => setVoiceStatus('',''), 3000);
+  setMicState('off');
+  addMsg('nav', "I didn't catch anything — tap to try again.");   // guidance lives in chat now
 }
 
 async function finishCloudCapture() {
@@ -2812,8 +2853,7 @@ async function finishCloudCapture() {
   const analyserRan = recAnalyserOn && !!recAudioCtx && recAudioCtx.state === 'running';
   mediaRecorder = null;
   releaseRecordingStream();
-  setListeningUI(false);
-  if (!cloudSendWanted) { setVoiceStatus('',''); showCaptured(''); return; }
+  if (!cloudSendWanted) { setMicState('off'); showCaptured(''); return; }
   const blob = new Blob(chunks, { type });
   const durationMs = recStartedAt ? (Date.now() - recStartedAt) : 0;
   // "Silent" is only trustworthy when the analyser was verified running. If the
@@ -2827,7 +2867,7 @@ async function finishCloudCapture() {
     nothingCaught();
     return;
   }
-  setVoiceStatus('speaking', '💭 Thinking…');
+  setMicState('thinking');
   try {
     const text = await transcribeBlob(blob);
     // Whisper answers silence with boilerplate. If the audio was short or we
@@ -2838,13 +2878,13 @@ async function finishCloudCapture() {
       nothingCaught();
       return;
     }
-    if (text) { setVoiceStatus('',''); deliverTranscript(text, 'cloud'); return; }
+    if (text) { deliverTranscript(text, 'cloud'); return; }   // deliverTranscript → thinking → send
     console.warn('[cloud ears] empty transcript — Web Speech for this turn');
   } catch (e) {
     console.warn('[cloud ears] /transcribe failed:', (e && e.message) || e, '— Web Speech for this turn');
   }
-  setVoiceStatus('','');
   if (('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window)) startWebSpeechCapture();
+  else setMicState('off');
 }
 
 // V2: RECORDING is the primary path — the phone's own recogniser is the weak
@@ -2883,7 +2923,7 @@ async function startListening() {
     console.warn('[cloud ears] recording unavailable — Web Speech for this turn');
   }
   if (hasWebSpeech) startWebSpeechCapture();
-  else setVoiceStatus('', '🎙 Mic unavailable — type it instead');
+  else { setMicState('off'); addMsg('nav', 'Mic unavailable on this browser — type it instead.'); }
 }
 
 function startWebSpeechCapture() {
@@ -2910,7 +2950,7 @@ function startRecogniser() {
   recognition.continuous = true;       // hold the line through pauses
   recognition.interimResults = true;   // so partials can be shown and stitched
 
-  recognition.onstart = () => { isListening = true; setListeningUI(true); };
+  recognition.onstart = () => { isListening = true; setMicState('recording'); };   // basic ears open — a tap SENDS
 
   recognition.onresult = e => {
     // Rebuild both segments from scratch every event (e.results is cumulative).
@@ -2936,7 +2976,7 @@ function startRecogniser() {
       micGranted = false;   // permission was pulled — re-prompt on the next tap
       clearTimeout(silenceTimer); clearTimeout(noSpeechTimer);
       resetVoiceUI();
-      setVoiceStatus('', '🎙 Microphone is blocked — allow it for this site in Safari settings, then tap again');
+      addMsg('nav', 'Microphone is blocked — allow it for this site in your browser settings, then tap the mic again.');
     }
     // no-speech / network / aborted fall through to onend, which restarts
   };
@@ -2955,8 +2995,7 @@ function startRecogniser() {
     restartBurst++;
     if (restartBurst > 12 && !heardSpeech) {
       stopCapture(false);
-      setVoiceStatus('', '🎙 Mic keeps dropping out — tap to try again, or type it');
-      setTimeout(() => setVoiceStatus('',''), 5000);
+      addMsg('nav', 'Mic keeps dropping out — tap to try again, or type it.');
       return;
     }
     try { startRecogniser(); } catch(err) {
@@ -2978,13 +3017,12 @@ function deliverTranscript(text, source) {
   // once HERE so "Cardwell." and "Cardwell" are the same word everywhere after.
   text = cleanTranscript(text);
   if (text.length <= 1 || busy) return;
-  // DIAGNOSTIC (display only, no routing effect): show WHAT was heard and WHICH
-  // ears heard it — ☁️ cloud/Whisper, 📱 basic/Web Speech. The input keeps the
-  // clean text (that's what gets sent); the tag rides in the status line.
-  const tag = source === 'basic' ? '📱' : '☁️';
+  // DIAGNOSTIC (console only now): WHICH ears heard it — ☁️ cloud/Whisper vs
+  // 📱 basic/Web Speech. The status element shows only the five mic states, so the
+  // source tag no longer rides the status line (it stays in the console log).
   console.info('[ears] transcript via ' + (source === 'basic' ? 'BASIC (Web Speech)' : 'CLOUD (Whisper)') + ': ' + JSON.stringify(text));
   showCaptured(text);
-  setVoiceStatus('', 'Heard: “' + text.slice(0, 55) + (text.length > 55 ? '…' : '') + '” ' + tag);
+  setMicState('thinking');   // heard — now processing
   setTimeout(() => { if (!busy) sendMessage(); }, 600);
 }
 
@@ -3005,8 +3043,7 @@ function stopCapture(send) {
 function resetVoiceUI() {
   isListening = false;
   recognition = null;
-  setListeningUI(false);
-  setVoiceStatus('','');
+  if (!convoActive) setMicState('off');   // a live session keeps its own state
 }
 
 function stopListening() { stopCapture(true); }   // legacy name — same endpoint
@@ -3027,24 +3064,19 @@ function speak(text) {
   const voices=synth.getVoices();
   const v=voices.find(v=>v.lang.startsWith('en-AU'))||voices.find(v=>v.lang.startsWith('en-GB'))||voices.find(v=>v.lang.startsWith('en'));
   if(v) utt.voice=v;
-  utt.onstart=()=>setVoiceStatus('speaking','🔊 Navigator speaking...');
-  utt.onerror=()=>setVoiceStatus('','');
-  // Clear the hint after 3 seconds
-  utt.onend = () => {
-    setVoiceStatus('','🎙 Tap to reply');
-    setTimeout(()=>setVoiceStatus('',''), 3000);
-    // Conversation session: reply done — resume the SAME recogniser and reset the
-    // quiet clock. This is the per-turn re-listen, with no re-tap and no new SR().
-    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoRestarts = 0; convoStartRecogniser(); convoArmSilence(); }
+  utt.onstart = () => setMicState('speaking');
+  // Reply finished (or TTS failed). A conversation session resumes listening on
+  // the SAME recogniser — no re-tap, no new SR(); a one-shot returns to Off. One
+  // path for both end + error so a failed utterance can't strand the session.
+  const afterSpeak = () => {
+    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoRestarts = 0; setMicState('listening'); convoStartRecogniser(); convoArmSilence(); }
+    else setMicState('off');
   };
+  utt.onerror = afterSpeak;
+  utt.onend = afterSpeak;
   synth.speak(utt);
 }
 
-function setVoiceStatus(state,text){
-  const el=document.getElementById('voiceStatus');
-  el.className='voice-status'+(state==='listening'?' listening-state':state==='speaking'?' speaking-state':'');
-  el.textContent=text;
-}
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,80)+'px';}
