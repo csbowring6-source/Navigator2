@@ -566,7 +566,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 05:24 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 05:39 AM AEST</div>
   </div>
 </div>
 
@@ -876,7 +876,45 @@ let pendingTripDest = null;
 // 👍 on an answer about a place = adopt it as the trip, no form needed
 let tripMode = '';   // '' unknown · 'day' (back tonight) · 'journey' (travelling on)
 
-function adoptTrip(dest) {
+// ── THE COMMITTED DESTINATION — resolve once, reuse everywhere ────────────────
+// One record is the trip's coordinate source of truth: { name, lat, lon,
+// resolvedAt, source }. Route, camps and navigation all read THESE coords — none
+// of them geocodes the name a second time (that decoupling is how the route went
+// to "Cardwell" while camps went to "Caldwell"). The name (currentRunDest) is
+// still the display truth; committedDest is the coordinate truth bound to it.
+let committedDest = null;
+const COMMITTED_KEY = 'navigator_committed_dest';
+function commitDestination(name, lat, lon, source) {
+  committedDest = { name, lat: +lat, lon: +lon, resolvedAt: Date.now(), source: source || 'resolved' };
+  try { localStorage.setItem(COMMITTED_KEY, JSON.stringify(committedDest)); } catch(e) {}
+  window._tripRoute = { dest: name, dlat: +lat, dlon: +lon };   // seed the route cache
+  return committedDest;
+}
+function loadCommittedDest() {
+  try { const c = JSON.parse(localStorage.getItem(COMMITTED_KEY) || 'null'); if (c && c.name && c.lat != null) committedDest = c; } catch(e) {}
+  return committedDest;
+}
+// Coordinates for the CURRENT trip destination — or null if `name` isn't the
+// committed one (a different town the driver just named).
+function committedCoordsFor(name) {
+  if (!committedDest) loadCommittedDest();
+  if (committedDest && committedDest.name === name && committedDest.lat != null)
+    return { lat: committedDest.lat, lon: committedDest.lon };
+  return null;
+}
+// Guarantee a committed record for `name` before the route is drawn. If we
+// already hold its coords (in memory or persisted) we reuse them — the ONLY time
+// this geocodes is a legacy/recalled trip whose coords weren't stored, and it
+// COMMITS the result so nothing downstream re-resolves. Not a per-step resolve.
+async function ensureCommittedDest(name) {
+  if (!name) return null;
+  if (committedCoordsFor(name)) return committedDest;
+  const g = await geocodePlace(name);
+  if (g) return commitDestination(name, g.lat, g.lon, 'restore');
+  return null;
+}
+
+async function adoptTrip(dest) {
   currentRunDest = dest;
   tripMode = '';         // new trip — mode not known until the driver says
   updateSuggestions();   // chips announce route-aware mode
@@ -887,13 +925,14 @@ function adoptTrip(dest) {
     localStorage.setItem('navigator_last_trip', tripContext);
     localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest, fuel:'', cond:'', passengers:'' }));
   } catch(e) {}
+  await ensureCommittedDest(dest);   // resolve ONCE here if coords aren't already held
   plotTripRoute(dest);
 }
-// Commit a trip using ALREADY-RESOLVED coordinates — seed the route cache so
-// plotTripRoute reuses them instead of geocoding the name again (which is how a
-// "Cardwell" can re-resolve to "Caldwell"). Binds the name to its own coords.
+// Commit a trip using ALREADY-RESOLVED coordinates — the resolve happened up in
+// resolveDestination (or the disambiguation pick). Store it as the committed
+// record and draw. This path never geocodes the name again.
 function adoptTripAt(dest, lat, lon) {
-  window._tripRoute = { dest, dlat: lat, dlon: lon };
+  commitDestination(dest, lat, lon, 'resolved');
   adoptTrip(dest);
 }
 
@@ -1390,19 +1429,10 @@ function routeStartSpeech(text) {
     (/^(take me|get me)\b/i.test(t) && /\b(nearest|closest|servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist)\b/i.test(t)) ||
     (!/^(take me|get me)\b/i.test(t) && /\b(servo|fuel|petrol|diesel|coffee|toilet|food|eat|breakfast|lunch|dinner|camp|gym|chemist|nearest|closest|cheapest)\b/i.test(t));
 
-  const destMatch = looksLikeQuestion ? null : t.match(/(?:going to|off to|heading (?:to|for)|drive to|driving to|travelling to|take me to|get me to|we'?re (?:going|off) to|plan (?:me )?a (?:journey|trip) to|to)\s+([A-Za-z][A-Za-z\s'\-]{2,30}?)(?:\s+(?:for|today|tomorrow|this|next|and)\b|[.,!?]|$)/i);
-  if (destMatch) {
-    let dest = destMatch[1].trim();
-    // Strip trailing pleasantries — "Cairns please" must never become the town name
-    dest = dest.replace(/\s+(please|thanks|thank you|mate|cheers|now|eh|okay|ok)\s*$/i, '').trim();
-    // Must look like a real place — not "the nearest", "somewhere", "a servo"
-    const notAPlace = /^(the|a|an|some|any|somewhere|anywhere|nearest|closest|next)\b/i.test(dest);
-    if (dest && !notAPlace) {
-      document.getElementById('whereInput').value = dest;
-      whereTo();
-      return;
-    }
-  }
+  // A spoken destination ("we're off to Toowoomba") falls through to the live
+  // trip path below: quickStart + sendMessage → parseTripIntent → resolveDestination
+  // → the committed record. (The old #whereInput/whereTo widget is gone.)
+
   // Anything else — treat it as a question and answer it straight away
   quickStart();
   unlockAudio();          // make sure the reply will actually be spoken
@@ -1428,67 +1458,6 @@ function hideWhere() {
   const w = document.getElementById('whereWrap');
   w.style.display = 'none';
   document.getElementById('whereInput').value = '';
-}
-
-async function whereTo() {
-  const q = document.getElementById('whereInput').value.trim();
-  if (!q) { quickStart(); return; }
-  openAppView();
-  addMsg('user', 'Heading to ' + q);
-  showTyping();
-  try {
-    if (!gps) {
-      hideTyping();
-      adoptTrip(q);
-      const msg = `${q} it is — set as your trip. I'll draw the route once I know where you are: tap the 📍 pin to set your location.`;
-      addMsg('nav', msg); speak(msg);
-      return;
-    }
-    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-    const gd = await g.json();
-    if (!gd || !gd.length) {
-      hideTyping();
-      addMsg('nav', `Couldn't place "${q}" — try the town plus state, or just ask me things as you go.`);
-      return;
-    }
-    const dlat = parseFloat(gd[0].lat), dlon = parseFloat(gd[0].lon);
-    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=false`);
-    const rd = await r.json();
-    hideTyping();
-    if (!rd.routes || !rd.routes.length) {
-      addMsg('nav', `Couldn't route to ${q} — ask me anything and we'll work it out as we go.`);
-      return;
-    }
-    const km = Math.round(rd.routes[0].distance / 1000);
-    const rawHrs = rd.routes[0].duration / 3600;
-    // Adjust for what they're driving — a big day towing is bigger
-    const factor = (currentVehicle==='caravan'||currentVehicle==='campervan') ? 1.3 : (currentVehicle==='truck' ? 1.2 : 1.1);
-    const hrs = Math.round(rawHrs * factor * 10) / 10;
-    const vLabel = VEHICLES[currentVehicle].label.toLowerCase();
-    if (hrs >= 9) {
-      // Multi-day run
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrsMinsSpoken(hrs * 60)} in the ${vLabel}: a multi-day run. Set as your trip and the route's on the map. Ask me to plan your days and I'll break it into overnights.`;
-      addMsg('nav', msg); speak(msg);
-    } else if (hrs >= 5) {
-      // A big single day — put the safety choice to the driver
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrsMinsSpoken(hrs * 60)} in the ${vLabel}. That's a big day to do safely in one hit. Tough it out with proper breaks, or want me to find an overnight stop partway?`;
-      addMsg('nav', msg); speak(msg);
-    } else if (hrs >= 3 || km >= 250) {
-      // A solid day trip — full trip treatment
-      adoptTrip(q);
-      const msg = `${q} — ${km}km, about ${hrsMinsSpoken(hrs * 60)} in the ${vLabel}. Set as your trip and the route's on the map. Ask me for fuel and stops as you go.`;
-      addMsg('nav', msg); speak(msg);
-    } else {
-      // A local run — no ceremony
-      const msg = `${q} is ${km}km, about ${hrsMinsSpoken(hrs * 60)}. Local run — what do you need on the way: fuel, coffee, or straight there?`;
-      addMsg('nav', msg); speak(msg);
-    }
-  } catch(e) {
-    hideTyping();
-    addMsg('nav', 'Routing hiccup — ask me anything and we\'ll sort it as we go.');
-  }
 }
 
 // ── WHAT ARE YOU DRIVING? ─────────────────────────────────────────────────────
@@ -1599,7 +1568,7 @@ function saveTripSetup() {
   if (dest) {
     currentRunDest = dest;
     try { localStorage.removeItem('navigator_trip_plan'); } catch(e) {}
-    plotTripRoute(dest);
+    drawCommittedRoute(dest);
     try {
       let runs = JSON.parse(localStorage.getItem('navigator_saved_trips') || '[]');
       runs = runs.filter(r => r.dest.toLowerCase() !== dest.toLowerCase());
@@ -1621,9 +1590,11 @@ function clearThisTrip() {
     localStorage.removeItem('navigator_last_trip');
     localStorage.removeItem('navigator_last_trip_raw');
     localStorage.removeItem('navigator_trip_plan');
+    localStorage.removeItem(COMMITTED_KEY);
   } catch(e) {}
   tripContext = '';
   currentRunDest = '';
+  committedDest = null;
   window._tripRoute = null;
   if (routeLine && window._navMap) { try { window._navMap.removeLayer(routeLine); } catch(e) {} routeLine = null; }
   if (routeDestMarker && window._navMap) { try { window._navMap.removeLayer(routeDestMarker); } catch(e) {} routeDestMarker = null; }
@@ -1653,7 +1624,7 @@ function resumeTrip() {
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     openAppView();
-    plotTripRoute(currentRunDest);
+    drawCommittedRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
     // The Navigate offer comes from TRIP STATE — never scraped from chat text.
     if (currentRunDest) {
@@ -1723,7 +1694,7 @@ function recallTrip(i) {
     if (r.vehicle && VEHICLES[r.vehicle]) selectVehicle(r.vehicle);
     if (r.passengers && r.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     openAppView();
-    plotTripRoute(currentRunDest);
+    drawCommittedRoute(currentRunDest);
     addMsg('nav', `Back on the ${r.dest} run. Conditions and fuel range are fresh — set them if today's different. What do you need?`);
   } catch(e) {}
 }
@@ -1843,23 +1814,31 @@ function showOptionPins(places) {
 }
 let routeDestMarker = null;
 
+// Draw the route for a RESTORED / RECALLED trip. plotTripRoute reads committed
+// coords only and raises if they're missing, so on a reload (in-memory record
+// gone) we re-establish the committed record ONCE here — from localStorage, or a
+// single geocode for a legacy/recalled trip — then draw. If it can't be resolved
+// at all we simply don't draw; downstream steps still never re-resolve per-step.
+function drawCommittedRoute(name) {
+  if (!name) return;
+  ensureCommittedDest(name).then(c => { if (c) plotTripRoute(name); }).catch(() => {});
+}
+
 async function plotTripRoute(dest) {
   if (!dest) return;
   if (!gps || !window._navMap || !window.L) {
     window._pendingRouteDest = dest; // map not ready yet — draw when it is
     return;
   }
+  // Where is the destination? ONLY from the committed record — the trip was
+  // resolved once at commit time and every step reuses those coords. No cold-
+  // cache fall-through to a fresh geocode (that's how the route drifted off the
+  // camps/nav answer). Coords missing when they should exist = an upstream bug
+  // (a commit that never resolved); surface it, don't silently re-resolve.
+  const cc = committedCoordsFor(dest);
+  if (!cc) throw new Error(`plotTripRoute: no committed coords for "${dest}" — destination was not resolved at commit time`);
+  const dlat = cc.lat, dlon = cc.lon;
   try {
-    // Where is the destination? (cached from a previous plot of the same trip)
-    let dlat, dlon;
-    if (window._tripRoute && window._tripRoute.dest === dest && window._tripRoute.dlat) {
-      dlat = window._tripRoute.dlat; dlon = window._tripRoute.dlon;
-    } else {
-      const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest + ', Australia')}&format=json&limit=1&countrycodes=au`, {headers:{'Accept-Language':'en'}});
-      const gd = await g.json();
-      if (!gd || !gd.length) return;
-      dlat = parseFloat(gd[0].lat); dlon = parseFloat(gd[0].lon);
-    }
     // The driving route
     const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${gps.lon},${gps.lat};${dlon},${dlat}?overview=full&geometries=geojson`);
     const rd = await r.json();
@@ -2105,7 +2084,7 @@ function initOSMMap() {
   setTimeout(() => {
     map.invalidateSize(true);
     map.setView([gps.lat, gps.lon], 15);
-    if (window._pendingRouteDest) { plotTripRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
+    if (window._pendingRouteDest) { drawCommittedRoute(window._pendingRouteDest); window._pendingRouteDest = null; }
     if (window._pendingOptionPins) { showOptionPins(window._pendingOptionPins); window._pendingOptionPins = null; }
   }, 500);
 
@@ -2249,13 +2228,18 @@ let currentNavCoords = null;
 
 function openInMap(app) {
   const dest = currentNavDest;
-  const c = currentNavCoords;
-  // Coordinates beat a name search every time
+  // Coordinates beat a name search every time. If we're navigating to the trip
+  // destination itself (no pin coords passed), use its COMMITTED coords — never
+  // hand the name to Google/Apple, whose geocoder can re-drift it to the wrong town.
+  let c = currentNavCoords || committedCoordsFor(dest);
   const q = c ? `${c.lat},${c.lon}` : encodeURIComponent(dest + ' Australia');
   const android = /Android/i.test(navigator.userAgent);
-  // Mid-trip stop? Google can navigate via the stop to the trip destination in one route
-  const finalDest = (currentRunDest && currentRunDest.toLowerCase() !== dest.toLowerCase())
-    ? encodeURIComponent(currentRunDest + ' Australia') : null;
+  // Mid-trip stop? Route via the stop to the trip destination in one route — and
+  // that destination waypoint is the COMMITTED lat/lon, with the name kept only
+  // as the visible label, so the map app can't re-resolve it to a different place.
+  const dc = committedCoordsFor(currentRunDest);
+  const finalDest = (currentRunDest && currentRunDest.toLowerCase() !== dest.toLowerCase() && dc)
+    ? `${dc.lat},${dc.lon}` : null;
 
   const urls = {
     apple:    `https://maps.apple.com/?daddr=${q}&dirflg=d`,
@@ -3649,7 +3633,11 @@ async function geocodePlace(name) {
 // Nearest-to-the-town first; rig-fit still a hard filter; drive time is time-to-
 // ARRIVE from the driver's GPS (how far until I'm there), or km from town if no GPS.
 async function getCampsNear(place) {
-  const c = await geocodePlace(place);
+  // If this IS the committed trip destination, use its committed coords — never
+  // geocode the name independently (that's how camps searched a different
+  // "Cardwell" than the route committed to). Only geocode a place that isn't the
+  // trip destination (a different town the driver named).
+  const c = committedCoordsFor(place) || await geocodePlace(place);
   if (!c) return { error: 'no-place', place };
   let d;
   try {
@@ -4790,7 +4778,7 @@ function restoreSession() {
     // delay, which silently failed if the map hadn't finished initialising.
     if (window._navMap) {
       // Map's already up — draw straight away
-      if (currentRunDest) plotTripRoute(currentRunDest);
+      if (currentRunDest) drawCommittedRoute(currentRunDest);
       if (s.pins && s.pins.length) showOptionPins(s.pins);
     } else {
       // Map's still loading — queue for the moment it's ready
