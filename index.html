@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 10:52 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 25 Jul 2026, 11:48 AM AEST</div>
   </div>
 </div>
 
@@ -3376,7 +3376,7 @@ function selectCorridorCamps(camps, opts) {
 async function getCorridorCamps() {
   if (!gps) return { error: 'no-gps' };
   const onTrip = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
-  const radius = onTrip ? 90 : 40;
+  const radius = Math.min((onTrip ? 90 : 40) * campWidenScale, 100);   // campWidenScale is 1 unless the ring-around widens
   let d;
   try {
     const ctrl = new AbortController();
@@ -3421,7 +3421,7 @@ async function getCampsNear(place) {
   let d;
   try {
     const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch(`${API_URL}camps?lat=${c.lat}&lon=${c.lon}&radius=25`, { signal: ctrl.signal });
+    const r = await fetch(`${API_URL}camps?lat=${c.lat}&lon=${c.lon}&radius=${Math.min(25 * campWidenScale, 100)}`, { signal: ctrl.signal });
     clearTimeout(to);
     d = await r.json();
   } catch (e) {
@@ -3628,6 +3628,175 @@ function matchPendingAnswer(text, pending) {
   return null;   // not an answer to what was asked — treat as a new query
 }
 
+// ── RING-AROUND (call-outcome loop over the current camps set) ───────────────
+// A layer ON TOP of the camps answer: it persists the produced set, prompts for
+// the outcome of each call, and offers the next site's number. It never re-runs
+// or alters the search/results logic — only the widen action re-invokes the
+// existing search (with a bigger area via campWidenScale, default 1 = no change).
+const CAMP_ROUND_KEY = 'navigator_camp_round';
+const CAMP_ROUND_MAX_AGE = 6 * 60 * 60 * 1000;   // one night's ring-around, not forever
+let campRound = null;            // {place, query, sites:[{name,lat,lon,km,mins,phone}], tried:[names], calledSite, ts}
+let campOutcomePending = null;   // the site we've already shown an outcome prompt for (dedupe focus events)
+let campWidenScale = 1;          // radius multiplier the search reads; only "widen" changes it
+
+function saveCampRound() {
+  try {
+    if (campRound && (campRound.sites || []).length) localStorage.setItem(CAMP_ROUND_KEY, JSON.stringify(campRound));
+    else localStorage.removeItem(CAMP_ROUND_KEY);
+  } catch(e) {}
+}
+function loadCampRound() {
+  try {
+    const raw = localStorage.getItem(CAMP_ROUND_KEY);
+    if (!raw) { campRound = null; return null; }
+    const r = JSON.parse(raw);
+    if (!r || !r.ts || Date.now() - r.ts > CAMP_ROUND_MAX_AGE || !(r.sites || []).length) {
+      localStorage.removeItem(CAMP_ROUND_KEY); campRound = null; return null;
+    }
+    campRound = r; return r;
+  } catch(e) { campRound = null; return null; }
+}
+function clearCampRound() { campRound = null; campOutcomePending = null; try { localStorage.removeItem(CAMP_ROUND_KEY); } catch(e) {} }
+
+// Start a fresh round from a produced answer (part 1) — persisted immediately.
+function startCampRound(place, query, sites) {
+  campRound = {
+    place: place || '',
+    query: query || '',
+    sites: (sites || []).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '' })),
+    tried: [], calledSite: null, ts: Date.now(),
+  };
+  campOutcomePending = null;
+  saveCampRound();
+}
+function campSite(name) { return campRound && campRound.sites.find(s => s.name === name); }
+function nextUntriedCallable() { return campRound ? (campRound.sites.find(s => s.phone && !campRound.tried.includes(s.name)) || null) : null; }
+// The site an outcome refers to: the one just dialled, else the head of the loop.
+function currentRingSite() {
+  if (!campRound) return null;
+  if (campRound.calledSite && campSite(campRound.calledSite)) return campRound.calledSite;
+  const n = nextUntriedCallable();
+  return n ? n.name : null;
+}
+// A Call button was tapped — remember which site so focus-return knows what to
+// ask about. Persisted because the call backgrounds (or reloads) the app.
+function noteCampCalled(name) {
+  if (!campRound) return;
+  campRound.calledSite = name; campRound.ts = Date.now();
+  campOutcomePending = null;   // a fresh call re-arms the outcome prompt
+  saveCampRound();
+}
+function lastNavBubble() { const b = document.querySelectorAll('#chatArea .msg.nav .msg-bubble'); return b[b.length - 1] || null; }
+function roundCallButton(bub, s) {
+  const call = document.createElement('a'); call.className = 'nav-btn';
+  call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
+  call.href = 'tel:' + s.phone.replace(/[^\d+]/g, ''); call.textContent = `📞 Call ${s.name}`;
+  call.addEventListener('click', () => noteCampCalled(s.name));
+  bub.appendChild(call);
+}
+
+// The three-option prompt shown when we regain focus after a Call (part 2).
+function promptCallOutcome(name) {
+  if (!campSite(name)) return;
+  const msg = `Any luck at ${name}?`;
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  const bub = lastNavBubble(); if (!bub) return;
+  const mk = (label, colour, fn) => {
+    const b = document.createElement('button'); b.className = 'nav-btn';
+    b.style.cssText = `margin-top:6px;background:transparent;border:1px solid ${colour};color:${colour};`;
+    b.textContent = label; b.onclick = fn; bub.appendChild(b);
+  };
+  mk('✅ Booked it', 'var(--green)', () => campOutcome(name, 'booked'));
+  mk('🚫 No room',   'var(--amber)', () => campOutcome(name, 'noroom'));
+  mk('📵 No answer', 'var(--amber)', () => campOutcome(name, 'noanswer'));
+}
+
+// Apply a call outcome (parts 3 + 5). Booked → clear + confirm. Otherwise mark
+// tried and offer the next site's number, or announce exhaustion + widen offer.
+function campOutcome(name, outcome) {
+  if (!campRound) return;
+  campRound.calledSite = null; campOutcomePending = null;
+  if (outcome === 'booked') {
+    const msg = `Great — you're sorted at ${name}. Anything else?`;
+    clearCampRound();
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+    return;
+  }
+  if (name && !campRound.tried.includes(name)) campRound.tried.push(name);
+  saveCampRound();
+  const prefix = outcome === 'noanswer' ? `No answer at ${name}.` : `No room at ${name}.`;
+  const next = nextUntriedCallable();
+  if (!next) {
+    // Part 5 — exhausted. Say so plainly and offer to widen the search area.
+    const where = campRound.place ? ` near ${campRound.place}` : '';
+    const msg = `${prefix} That's everyone I had a number for${where}, and you've tried each one. Want me to widen the search area?`;
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+    const bub = lastNavBubble();
+    if (bub) {
+      const b = document.createElement('button'); b.className = 'nav-btn';
+      b.style.cssText = 'margin-top:8px;background:transparent;border:1px solid var(--amber);color:var(--amber);';
+      b.textContent = '🔍 Widen the search'; b.onclick = () => widenCampSearch();
+      bub.appendChild(b);
+    }
+    return;
+  }
+  const msg = `${prefix} Next up: ${next.name}${next.mins != null ? ', ' + hrsMinsSpoken(next.mins) : ''} — give them a ring.`;
+  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  const bub = lastNavBubble();
+  if (bub) {
+    // Keep the tried ones visible but greyed, then a one-press dial for the next.
+    campRound.sites.forEach(s => {
+      if (!s.phone || !campRound.tried.includes(s.name)) return;
+      const t = document.createElement('div');
+      t.style.cssText = 'margin-top:6px;font-size:12px;color:var(--gray3);text-decoration:line-through;opacity:0.6;';
+      t.textContent = `✗ ${s.name} — tried`;
+      bub.appendChild(t);
+    });
+    roundCallButton(bub, next);
+  }
+}
+
+// Part 5 action — re-run the EXISTING search over a bigger area (campWidenScale),
+// producing a fresh set + fresh round. Search/ranking logic is untouched.
+async function widenCampSearch() {
+  if (!campRound || busy) return;
+  const q = campRound.query || '';
+  clearCampRound();
+  campWidenScale = 2;
+  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+  try { await answerCamps(q); }
+  catch (e) { const m = "Couldn't widen the search just now — try again in a minute."; addMsg('nav', m); speak(m); }
+  finally { campWidenScale = 1; hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false; }
+}
+
+// A voice command in the ring-around (part 4): advance WITHOUT re-searching.
+// Returns true if it handled the utterance. Called from sendMessage.
+function handleRingAroundVoice(text) {
+  if (!campRound || !campRound.sites.length) return false;
+  const t = text.toLowerCase().trim();
+  const cur = currentRingSite();
+  let action = null, outcome = null;
+  if (/^(booked|got in|sorted|all booked|book it|we're in|got a spot)\b/.test(t) && cur) { action = 'outcome'; outcome = 'booked'; }
+  else if (cur && /\b(no room|full up|full|booked out|no vacanc|no answer|didn'?t answer|no reply|not answering|try the next|next one|next place|move on|try another)\b/.test(t)) {
+    action = 'outcome'; outcome = /no answer|didn'?t answer|no reply|not answering/.test(t) ? 'noanswer' : 'noroom';
+  }
+  else if (!nextUntriedCallable() && /\b(widen|wider|further afield|bigger area|search wider|look further|cast wider)\b/.test(t)) { action = 'widen'; }
+  if (!action) return false;
+  addMsg('user', text);                          // echo the driver BEFORE the reply
+  if (action === 'widen') widenCampSearch(); else campOutcome(cur, outcome);
+  return true;
+}
+
+// On regaining focus (or reload) after a Call, prompt for how it went (part 2).
+function checkCampReturn() {
+  if (!campRound) loadCampRound();
+  if (campRound && campRound.calledSite && campSite(campRound.calledSite) && campRound.calledSite !== campOutcomePending) {
+    campOutcomePending = campRound.calledSite;
+    if (document.getElementById('appView')?.classList.contains('hidden')) openAppView();
+    promptCallOutcome(campRound.calledSite);
+  }
+}
+
 async function answerCamps(scanText) {
   // ROUTING: when the driver NAMES a place ("caravan parks in Cardwell"), search
   // AROUND that place — not the corridor. The corridor (ahead / within the hour)
@@ -3642,7 +3811,10 @@ async function answerCamps(scanText) {
   // is only for explicit "along the way / next hour" phrasing (above).
   if (!named && !alongWay && currentRunDest) named = currentRunDest;
   const ans = formatCampsAnswer(named ? await getCampsNear(named) : await getCorridorCamps());
-  if (ans.sites.length) { addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name)); }
+  if (ans.sites.length) {
+    addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
+    startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
+  }
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
   // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
@@ -3663,6 +3835,7 @@ async function answerCamps(scanText) {
     const call = document.createElement('a'); call.className = 'nav-btn';
     call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
     call.href = 'tel:' + s.phone.replace(/[^\d+]/g,''); call.textContent = `📞 Call ${s.name}`;
+    call.addEventListener('click', () => noteCampCalled(s.name));   // feed the ring-around
     after(call, navFor);
   });
 }
@@ -4053,6 +4226,7 @@ function resetConversation() {
   knownPlaces = [];
   fuelShortlist = []; fuelDialIdx = 0;
   Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
+  clearCampRound();                 // a fresh conversation ends any ring-around
   clearOptionPins();
   window._pendingPins = null;
   const ui = document.getElementById('userInput'); if (ui) ui.value = '';
@@ -4164,9 +4338,12 @@ function restoreSession() {
 // Save whenever the app goes to the background, or anything important changes
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveSession();
+  else checkCampReturn();   // back in focus after a Call? ask how it went (part 2)
 });
 window.addEventListener('pagehide', saveSession);
 window.addEventListener('beforeunload', saveSession);
+window.addEventListener('focus', checkCampReturn);
+window.addEventListener('pageshow', checkCampReturn);
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
 async function sendMessage(silent){
@@ -4295,6 +4472,11 @@ async function sendMessage(silent){
       return;
     }
   }
+
+  // ── RING-AROUND by voice (part 4): "no room, try the next one" advances the
+  // call loop WITHOUT repeating the search. Only fires when a round is live.
+  if (handleRingAroundVoice(text)) { inp.value=''; inp.style.height='auto'; return; }
+
   // A destination statement sets or updates the trip — no AI round-trip needed.
   const trip = parseTripIntent(text, { currentDest: currentRunDest });
   if (trip) {
@@ -4660,6 +4842,10 @@ loadMapPreference();
 loadProfile();          // returning → home; first run → setup interview
 // Coming back after switching apps? Pick up exactly where we left off.
 restoreSession();
+// If a phone call (and maybe a reload) interrupted a ring-around, resume the
+// call-outcome prompt now that the app is back (part 1 + 2).
+loadCampRound();
+checkCampReturn();
 setInterval(fetchWeather,600000);
 checkVersion();
 setInterval(checkVersion, 900000);
