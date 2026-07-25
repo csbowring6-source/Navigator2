@@ -564,7 +564,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 03:42 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 04:18 AM AEST</div>
   </div>
 </div>
 
@@ -1810,7 +1810,7 @@ function showOptionPins(places) {
     });
     const m = L.marker([p.lat, p.lon], { icon, interactive: true, keyboard: false, riseOnHover: true }).addTo(window._navMap);
     const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
-    const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${p.mins}'` : '')) : '';
+    const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${hrsMins(p.mins)}` : '')) : '';
     const safeName = p.name.replace(/'/g, "").replace(/"/g, '');
     const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:155px;">
         <b>${i+1}. ${p.name}</b><br>
@@ -2943,7 +2943,7 @@ function addMsg(role,text,spoken){
         const btn=document.createElement('button'); btn.className='nav-btn';
         btn.style.marginTop = idx === 0 ? '8px' : '6px';
         const c = coordsFor(nm);
-        btn.textContent = '📍 ' + (idx+1) + '. ' + nm + (c?.mins ? ` — ${c.mins}'` : '');
+        btn.textContent = '📍 ' + (idx+1) + '. ' + nm + (c?.mins ? ` — ${hrsMins(c.mins)}` : '');
         btn.onclick = () => navigateTo(nm, c?.lat, c?.lon);
         bub.appendChild(btn);
       });
@@ -2958,7 +2958,7 @@ function addMsg(role,text,spoken){
       if(dest){
         const btn=document.createElement('button'); btn.className='nav-btn';
         const c1 = coordsFor(dest);
-        btn.textContent='📍 Navigate to '+dest+(c1?.mins ? ` (${c1.mins}')` : '')+' — '+mapNames[selectedMap];
+        btn.textContent='📍 Navigate to '+dest+(c1?.mins ? ` (${hrsMins(c1.mins)})` : '')+' — '+mapNames[selectedMap];
         btn.onclick=()=>navigateTo(dest, c1?.lat, c1?.lon);
         bub.appendChild(btn);
         // Star: remember this stop for the active run
@@ -3452,6 +3452,26 @@ function selectCorridorCamps(camps, opts) {
   return { directional, widened, rigFiltered, total: inWindow.length, sites: inWindow.slice(0, 6) };
 }
 
+// Two OSM records for the SAME park (e.g. "BIG4 Innisfail" and "BIG 4 Innisfail
+// Mango Tree Tourist Park"): within 250m of each other AND one name a substring
+// of the other once punctuation and spacing are stripped. Keep the LONGER name,
+// drop the other. Applied BEFORE the top-3 slice, so the next-nearest fills the
+// gap and three distinct options are shown. Order (nearest-first) is preserved.
+function dedupeCampSites(sites) {
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const out = [];
+  for (const s of (sites || [])) {
+    const sn = norm(s.name);
+    const j = out.findIndex(o => {
+      const on = norm(o.name);
+      return distKm(s.lat, s.lon, o.lat, o.lon) <= 0.25 && (sn.includes(on) || on.includes(sn));
+    });
+    if (j === -1) out.push(s);
+    else if (sn.length > norm(out[j].name).length) out[j] = s;   // keep the longer-named record
+  }
+  return out;
+}
+
 // Async: fetch OSM camps, attach real drive times, run the pure selector.
 // Returns STRUCTURED data (sites carry phone/amenity tags) or {error}. A 15s
 // deadline means a stalled fetch fails honestly instead of hanging.
@@ -3477,7 +3497,7 @@ async function getCorridorCamps() {
   cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
   const sel = selectCorridorCamps(cands, { gps, routePath: onTrip ? window._tripRoute.path : null, rig: currentVehicle, windowMins: 60 });
   if (!sel.sites.length) return { error: onTrip ? 'none-ahead' : 'empty', directional: onTrip };
-  return { sites: sel.sites.slice(0, 3), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered };
+  return { sites: dedupeCampSites(sel.sites).slice(0, 3), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered };
 }
 
 // Geocode a named place browser-side (Nominatim, no key) → {lat,lon} or null.
@@ -3528,7 +3548,7 @@ async function getCampsNear(place) {
   } else {
     cands.forEach(s => { s.km = s.crow; s.mins = null; });
   }
-  return { sites: cands.slice(0, 3), directional: false, near: true, place };
+  return { sites: dedupeCampSites(cands).slice(0, 3), directional: false, near: true, place };
 }
 
 // ── ANSWER SHAPE + CALL HANDOFF (S2.3) — deterministic, so the TRUST RULE is
@@ -4509,7 +4529,7 @@ async function openSOS() {
     const clinic = shortlist.filter(p=>p.kind==='clinic').sort((a,b)=>a.km-b.km)[0];
     const pol    = shortlist.filter(p=>p.kind==='police').sort((a,b)=>a.km-b.km)[0];
 
-    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? `, ${p.mins}'` : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
+    const row=(icon,p,typeNote)=> p ? `<div class="sos-help-row"><div><div class="sos-help-name">${icon} ${p.name}</div><div class="sos-help-dist">${p.km.toFixed(0)}km${p.mins ? `, ${hrsMins(p.mins)}` : ''} by road${typeNote}</div></div><button class="sos-nav" onclick="navigateTo('${p.name.replace(/'/g,"")}', ${p.lat}, ${p.lon})">Navigate</button></div>` : '';
     let html = '';
     if (hosp)   html += row('🏥', hosp, hosp.hasED ? ' · listed with emergency dept' : ' · hospital');
     if (clinic && (!hosp || clinic.km < hosp.km)) html += row('➕', clinic, ' · medical centre, may be daytime only');
@@ -4625,7 +4645,7 @@ function restoreSession() {
             const btn = document.createElement('button');
             btn.className = 'nav-btn';
             btn.style.marginTop = idx === 0 ? '8px' : '6px';
-            const t = p.mins ? ` — ${p.mins}'` : '';
+            const t = p.mins ? ` — ${hrsMins(p.mins)}` : '';
             btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}${t}` : `📍 Navigate to ${p.name}${t}`;
             btn.onclick = () => navigateTo(p.name, p.lat, p.lon);
             lastBub.appendChild(btn);
@@ -5001,7 +5021,7 @@ async function sendMessage(silent){
     if (distKm(gps.lat, gps.lon, window._tripRoute.originLat, window._tripRoute.originLon) > 20) {
       await plotTripRoute(currentRunDest);
     }
-    routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${window._tripRoute.hours} driving hours at car pace.`;
+    routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${hrsMinsSpoken(window._tripRoute.hours * 60)} of driving at car pace (state durations as hours and minutes; there is no decimal to read out).`;
   }
 
   // Are we somewhere the maps actually know? If not, every distance is suspect.
