@@ -1,2 +1,4 @@
 .DS_Store
 worker-camps.js
+wrangler.toml
+.wrangler/
