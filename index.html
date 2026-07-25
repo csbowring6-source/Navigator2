@@ -566,7 +566,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 05:39 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 06:38 AM AEST</div>
   </div>
 </div>
 
@@ -2317,8 +2317,13 @@ let convoSilenceTimer = null;   // 45s hard close
 let convoOfferTimer = null;     // "anything else?" nudge before the close
 let convoOffered = false;       // nudge already made this quiet spell
 let convoHadExchange = false;   // app has replied at least once
-let convoLastStart = 0;         // when convoRec last started (WebKit fast-fail check)
-let convoFastFails = 0;         // consecutive instant onends (WebKit can't hold)
+let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
+let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
+let convoCued = false;          // close cue already played this session? (at most once)
+let convoLastError = '';        // last onerror reason, for the honest-fail log
+const CONVO_MAX_RESTARTS = 3;   // after this many rapid empty reopens, stop + honest fallback
+const CONVO_HEALTHY_MS = 2000;  // an onend later than this = genuine listening (just quiet), not a fail
+const CONVO_ANDROID = /Android/i.test(navigator.userAgent || '');
 const CONVO_OFFER_MS = 20000;
 const CONVO_CLOSE_MS = 45000;
 
@@ -2339,12 +2344,16 @@ function openConversation() {
   try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !convoAudioCtx) convoAudioCtx = new Ctx(); convoAudioCtx && convoAudioCtx.resume && convoAudioCtx.resume(); } catch(e) {}
   unlockAudio();
   try { if (captureActive) stopCapture(false); } catch(e) {}   // don't let two mics fight
-  convoActive = true; convoOffered = false; convoHadExchange = false; convoFastFails = 0;
+  convoActive = true; convoOffered = false; convoHadExchange = false;
+  convoRestarts = 0; convoCued = false; convoLastError = '';
   setConvoUI(true);
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoArmSilence();
-  // Warm the mic in the background — keep the stream, don't stop it (iOS).
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  // Warm the mic ONLY where it demonstrably helps. On Android Chrome a held
+  // getUserMedia stream blocks SpeechRecognition from acquiring the mic (the
+  // restart-loop bug), so we never keep one there — the recogniser owns the mic.
+  // iOS WebKit keeps the best-effort warm hold.
+  if (!CONVO_ANDROID && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(s => { if (convoActive) convoStream = s; else s.getTracks().forEach(t => t.stop()); })
       .catch(() => {});
@@ -2359,26 +2368,39 @@ function convoStartRecogniser() {
     convoRec.lang = 'en-AU';
     convoRec.continuous = true;
     convoRec.interimResults = true;
-    convoRec.onstart = () => { convoRecRunning = true; setConvoUI(true); };
+    convoRec.onstart = () => { convoRecRunning = true; setConvoUI(true); console.log('[convo] recogniser started'); };
     convoRec.onspeechstart = () => convoArmSilence();
     convoRec.onresult = e => {
       let fin = '';
       for (let i = 0; i < e.results.length; i++) if (e.results[i].isFinal) fin += (e.results[i][0] && e.results[i][0].transcript) || '';
       fin = fin.trim();
-      if (fin) { convoFastFails = 0; convoArmSilence(); convoHandleUtterance(fin); }
+      if (fin) { convoRestarts = 0; convoArmSilence(); convoHandleUtterance(fin); }
     };
     convoRec.onerror = e => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') convoFailHonestly();
-      // no-speech / aborted / network fall through to onend, which restarts
+      convoLastError = (e && e.error) || 'unknown';
+      console.warn('[convo] recogniser onerror:', convoLastError);
+      // A hard permission denial is terminal — fail honestly now. Everything else
+      // (no-speech / aborted / audio-capture / network) falls through to onend,
+      // which restarts under the bounded cap below.
+      if (convoLastError === 'not-allowed' || convoLastError === 'service-not-allowed') convoFailHonestly();
     };
     convoRec.onend = () => {
       convoRecRunning = false;
       if (!convoActive || convoSpeaking) return;   // a deliberate pause (speaking) or a close
-      // WebKit that can't hold onends instantly, over and over, with no result.
-      if (Date.now() - convoLastStart < 800) convoFastFails++; else convoFastFails = 0;
-      if (convoFastFails >= 5) { convoFailHonestly(); return; }
-      try { convoRec.start(); convoLastStart = Date.now(); }   // RESTART the same instance
-      catch (e) { setTimeout(() => { if (convoActive && !convoSpeaking) { try { convoRec.start(); convoLastStart = Date.now(); } catch(_) {} } }, 300); }
+      // Bounded restart. A recogniser that stayed open past CONVO_HEALTHY_MS was
+      // genuinely listening (the driver was just quiet) — reset the fail count and
+      // let the 45s silence timer own the close. A rapid empty reopen (mic never
+      // acquired) does NOT reset, so it climbs to the cap and then stops honestly.
+      const alive = Date.now() - convoLastStart;
+      if (alive >= CONVO_HEALTHY_MS) convoRestarts = 0;
+      convoRestarts++;
+      if (convoRestarts > CONVO_MAX_RESTARTS) {
+        console.warn('[convo] giving up after ' + (convoRestarts - 1) + ' rapid restarts with no capture (last alive=' + alive + 'ms, last onerror: ' + (convoLastError || 'none') + ')');
+        convoFailHonestly(); return;
+      }
+      const backoff = 250 * convoRestarts;   // 250 / 500 / 750 ms
+      console.warn('[convo] restart ' + convoRestarts + '/' + CONVO_MAX_RESTARTS + ' in ' + backoff + 'ms (alive=' + alive + 'ms, last onerror: ' + (convoLastError || 'none') + ')');
+      setTimeout(() => { if (convoActive && !convoSpeaking) { try { convoRec.start(); convoLastStart = Date.now(); } catch(_) {} } }, backoff);
     };
   }
   try { convoRec.start(); convoRecRunning = true; convoLastStart = Date.now(); } catch (e) { /* already running */ }
@@ -2423,6 +2445,8 @@ function convoOffer() {
 // A short beep so a driver not looking at the screen knows the session closed.
 // Uses the gesture-created AudioContext, so it sounds even on a timer-driven close.
 function convoCloseCue() {
+  if (convoCued) return;   // at most ONE close cue per session — never per restart
+  convoCued = true;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     const ctx = convoAudioCtx || (Ctx && new Ctx());
@@ -2998,7 +3022,7 @@ function speak(text) {
     setTimeout(()=>setVoiceStatus('',''), 3000);
     // Conversation session: reply done — resume the SAME recogniser and reset the
     // quiet clock. This is the per-turn re-listen, with no re-tap and no new SR().
-    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoStartRecogniser(); convoArmSilence(); }
+    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoRestarts = 0; convoStartRecogniser(); convoArmSilence(); }
   };
   synth.speak(utt);
 }
