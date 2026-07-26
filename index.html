@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 09:28 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 10:39 AM AEST</div>
   </div>
 </div>
 
@@ -2339,6 +2339,15 @@ let convoTurn = '';             // full final text this session-run (grows monot
 let convoDelivered = '';        // the prefix of convoTurn already handed off
 let convoDeliverTimer = null;   // fires the turn after a real pause
 const CONVO_TURN_MS = 2800;     // end-of-turn silence — matches the cloud/basic paths
+// TTS suppression + oscillation guard. The recogniser must NOT hear the app's own
+// reply: we keep it shut through playback AND a short tail (the speaker is still
+// emitting and the room echoes). If the mic still flips recording<->listening
+// without making progress, an echo loop is running — cap it and close honestly.
+let convoResumeTimer = null;    // deferred mic reopen after playback ends
+let convoFlips = 0;             // recording<->listening flips since real progress
+let convoLastState = '';        // last convo-driven mic state (for flip detection)
+const CONVO_TTS_TAIL_MS = 600;  // keep the mic shut this long AFTER playback ends
+const CONVO_MAX_FLIPS = 8;      // oscillation ceiling — close honestly beyond this
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
 let convoCued = false;          // close cue already played this session? (at most once)
@@ -2369,7 +2378,8 @@ function openConversation() {
   convoActive = true; convoOffered = false; convoHadExchange = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
-  setMicState('listening');        // session open, waiting for speech
+  convoFlips = 0; convoLastState = ''; clearTimeout(convoResumeTimer);    // fresh oscillation guard
+  convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoArmSilence();
   // Warm the mic ONLY where it demonstrably helps. On Android Chrome a held
@@ -2383,6 +2393,26 @@ function openConversation() {
   }
 }
 
+// Every convo-driven mic state goes through here so an echo loop can't run
+// forever. A flip between the two LIVE states (recording<->listening) with no
+// progress (no new transcript, no delivered turn) counts toward a ceiling; past
+// it, the session closes honestly with the reason on screen. Real speech and a
+// delivered turn reset the count, so normal multi-turn use never trips it.
+function convoSetState(state) {
+  if ((state === 'recording' || state === 'listening') &&
+      (convoLastState === 'recording' || convoLastState === 'listening') &&
+      state !== convoLastState) {
+    convoFlips++;
+    if (convoFlips > CONVO_MAX_FLIPS) {
+      console.warn('[convo] oscillation ceiling hit (' + convoFlips + ' flips, no progress) — closing honestly');
+      convoLastError = 'oscillation'; convoFailHonestly();
+      return;
+    }
+  }
+  convoLastState = state;
+  setMicState(state);
+}
+
 function convoStartRecogniser() {
   if (!convoActive) return;
   if (!convoRec) {
@@ -2391,9 +2421,10 @@ function convoStartRecogniser() {
     convoRec.lang = 'en-AU';
     convoRec.continuous = true;
     convoRec.interimResults = true;
-    convoRec.onstart = () => { convoRecRunning = true; if (convoActive && !convoSpeaking) setMicState('listening'); console.log('[convo] recogniser started'); };
-    convoRec.onspeechstart = () => { convoArmSilence(); if (convoActive) setMicState('recording'); };
+    convoRec.onstart = () => { convoRecRunning = true; if (convoActive && !convoSpeaking) convoSetState('listening'); console.log('[convo] recogniser started'); };
+    convoRec.onspeechstart = () => { if (convoSpeaking) return; convoArmSilence(); if (convoActive) convoSetState('recording'); };
     convoRec.onresult = e => {
+      if (convoSpeaking) return;             // ignore anything heard during playback/tail (our own voice)
       convoRestarts = 0; convoArmSilence();   // any speech resets the SESSION close timers
       let fin = '', interim = '';
       for (let i = 0; i < e.results.length; i++) {
@@ -2402,9 +2433,11 @@ function convoStartRecogniser() {
       }
       // Grow the turn's final text overlap-aware (mergeFinal drops Android's
       // re-heard chunks, so this survives mid-phrase restarts without dupes).
+      const before = convoTurn.length;
       if (fin) convoTurn = mergeFinal(convoTurn, fin);
+      if (convoTurn.length > before) convoFlips = 0;   // real new speech = progress, not an echo loop
       if (convoTurn.length > convoDelivered.length || interim.trim()) {
-        if (convoActive) setMicState('recording');
+        if (convoActive) convoSetState('recording');
         armConvoDeliver();                    // deliver only after the driver pauses
       }
     };
@@ -2450,6 +2483,7 @@ function convoDeliverTurn() {
   const pending = convoTurn.length > convoDelivered.length ? convoTurn.slice(convoDelivered.length).trim() : '';
   if (!pending) return;
   convoDelivered = convoTurn;                          // consume — never re-delivered
+  convoFlips = 0;                                      // a real turn broke any oscillation
   convoHandleUtterance(pending, 'silence');            // a session turn always ends on a pause
 }
 function convoHandleUtterance(text, endReason) {
@@ -2474,7 +2508,8 @@ function convoOffer() {
   if (!convoActive || convoOffered) return;
   convoOffered = true;
   convoSpeaking = true; convoStopRecogniser(); setMicState('speaking');
-  const resume = () => { convoSpeaking = false; if (convoActive) setMicState('listening'); convoStartRecogniser(); };
+  // Same echo discipline as speak(): stay shut through a tail, THEN reopen.
+  const resume = () => { clearTimeout(convoResumeTimer); convoResumeTimer = setTimeout(() => { convoSpeaking = false; if (convoActive) { convoSetState('listening'); convoStartRecogniser(); } }, CONVO_TTS_TAIL_MS); };
   try {
     synth && synth.cancel();
     const u = new SpeechSynthesisUtterance('Anything else?');
@@ -2508,8 +2543,8 @@ function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().f
 function closeConversation(reason) {
   const wasActive = convoActive;
   convoActive = false; convoSpeaking = false; convoRecRunning = false;
-  clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer); clearTimeout(convoDeliverTimer);
-  convoTurn = ''; convoDelivered = '';   // drop any half-heard turn — never deliver on close
+  clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer); clearTimeout(convoDeliverTimer); clearTimeout(convoResumeTimer);
+  convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = '';   // drop any half-heard turn / oscillation state
   if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
   convoRec = null;                       // fresh instance next session; alive across THIS one
   releaseConvoStream();
@@ -3117,8 +3152,17 @@ function speak(text) {
   // the SAME recogniser — no re-tap, no new SR(); a one-shot returns to Off. One
   // path for both end + error so a failed utterance can't strand the session.
   const afterSpeak = () => {
-    if (convoActive) { convoSpeaking = false; convoHadExchange = true; convoRestarts = 0; setMicState('listening'); convoStartRecogniser(); convoArmSilence(); }
-    else setMicState('off');
+    if (!convoActive) { setMicState('off'); return; }
+    convoHadExchange = true; convoRestarts = 0;
+    // Do NOT reopen the mic the instant playback ends — the speaker is still
+    // emitting the tail and the room echoes; the recogniser would hear the app's
+    // own reply, finalise, restart and oscillate. Stay shut (convoSpeaking stays
+    // TRUE) for a short tail, THEN resume the SAME recogniser.
+    clearTimeout(convoResumeTimer);
+    convoResumeTimer = setTimeout(() => {
+      convoSpeaking = false;
+      if (convoActive) { convoSetState('listening'); convoStartRecogniser(); convoArmSilence(); }
+    }, CONVO_TTS_TAIL_MS);
   };
   utt.onerror = afterSpeak;
   utt.onend = afterSpeak;
@@ -3828,14 +3872,16 @@ function timePhrase(s) {
   if (s.mins == null) return `${Math.round(s.km)} km`;
   return hrsMins(s.mins);
 }
-// Field-tester vocabulary ONLY: powered, pool, showers, toilets, wi-fi. Confirmed
-// (=='yes') is spoken; blank is "unconfirmed"; an explicit 'no' is silently absent.
+// Field-tester vocabulary ONLY: powered, pool, showers, toilets, wi-fi. Two states,
+// never three: a confirmed 'yes' is PRESENT; anything else — missing, blank, or even
+// an explicit 'no' — is UNCONFIRMED. We never drop a field, because OSM silence (and
+// OSM negatives, which are unreliable for camps) must never imply absence by omission.
 function campAmenities(s) {
   const known = [], unknown = [];
-  const add = (v, label) => { if (v === 'yes') known.push(label); else if (v !== 'no') unknown.push(label); };
+  const add = (v, label) => { if (v === 'yes') known.push(label); else unknown.push(label); };
   add(s.powered, 'power'); add(s.swimming_pool, 'a pool'); add(s.shower, 'showers'); add(s.toilets, 'toilets');
   const w = (s.internet_access || '').toLowerCase();
-  if (/^(wlan|yes|wired|terminal)$/.test(w)) known.push('wi-fi'); else if (!w) unknown.push('wi-fi');
+  if (/^(wlan|yes|wired|terminal)$/.test(w)) known.push('wi-fi'); else unknown.push('wi-fi');
   return { known, unknown };
 }
 
@@ -3865,8 +3911,12 @@ function formatCampsAnswer(res) {
                                   : `Nothing inside the hour — the ${n === 2 ? 'two' : 'three'} nearest ${where}:`;
   const lines = sites.map(s => {
     const am = campAmenities(s);
-    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? 'paid' : 'price unconfirmed');
-    let line = `${s.name}, ${timePhrase(s)} — ${price}`;
+    // 'paid' is gone: every commercial park charges, so it says nothing and read
+    // like an amenity. Only 'free' (meaningful) and 'price unconfirmed' (a missing
+    // fee tag) appear; a plain paid park simply carries no price word.
+    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? null : 'price unconfirmed');
+    let line = `${s.name}, ${timePhrase(s)}`;
+    if (price) line += ` — ${price}`;
     if (am.known.length) line += ` — ${am.known.join(', ')}`;
     line += '.';
     if (am.unknown.length) line += ` ${cap(am.unknown.join(', '))} unconfirmed — worth asking when you call.`;
@@ -3880,8 +3930,8 @@ function formatCampsAnswer(res) {
     const am = campAmenities(s);
     if (am.unknown.length) anyGaps = true;
     const t = s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);   // TTS says the words in full
-    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? 'paid' : null);
-    if (!price) anyGaps = true;
+    const price = s.fee === 'no' ? 'free' : null;            // 'paid' removed — noise; only 'free' is spoken
+    if (s.fee !== 'no' && s.fee !== 'yes') anyGaps = true;   // a MISSING fee is a gap; 'yes' (charges) is known, just unsaid
     const facts = [...am.known];
     if (price) facts.push(price);                            // price last, never "unconfirmed"
     // Digits are NEVER spoken — presence of a number is handed to the Call button.
@@ -4433,9 +4483,9 @@ async function fetchCamps() {
   }
   const list = res.sites.map(s => {
     const am = campAmenities(s);
-    const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? 'paid' : 'price unconfirmed');
+    const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? null : 'price unconfirmed');   // 'paid' removed — noise
     const ph = verifiedPhone(s) ? `phone ${verifiedPhone(s)}` : 'NO VERIFIED NUMBER';
-    return `${s.name} (${s.type}) — ${timePhrase(s)}, ${price}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}; ${ph}`;
+    return `${s.name} (${s.type}) — ${timePhrase(s)}${price ? ', ' + price : ''}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}; ${ph}`;
   }).join(' | ');
   return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here.`;
 }
