@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 10:39 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 10:57 AM AEST</div>
   </div>
 </div>
 
@@ -3841,6 +3841,10 @@ function verifiedPhone(s) {
   const p = (s && (s.phone || s['contact:phone'])) || '';
   return (p.replace(/[^\d]/g,'').length >= 6) ? p.trim() : null;
 }
+// A phone-lookup MISS is a fact about OUR lookup, not the park — every commercial
+// caravan park has a number. Word it as ours ("couldn't find"), never the site's
+// ("has no number"). One source for the phrasing, used spoken and on screen.
+function phoneMiss(name) { return `Couldn't find a number for ${name} — worth a search, or ask when you arrive.`; }
 // VISIBLE ONLY — Australian local grouping (07 4066 8550 / 0412 345 678). Never
 // spoken; the spoken answer says "tap Call" instead.
 function localPhone(p) {
@@ -3943,13 +3947,15 @@ function formatCampsAnswer(res) {
   // name — so a number can only ever be surfaced bound to a site in this set.
   const best = sites[0];
   const bp = verifiedPhone(best);
-  // No capability to search the web for a number, so we never offer to. A missing
-  // number just names the specific site, honestly (SPEC §0).
+  // A miss is OURS, not the site's: every commercial park has a number, so we
+  // attribute the gap to the lookup ("couldn't find"), never to the park ("has
+  // no number"). We can't search the web ourselves (SPEC §0), so we point the
+  // driver at a search or asking on arrival — we never offer to do it for them.
   const spokenFinish = bp ? `I've got the number — tap Call for ${best.name}.`
-                          : `No verified number for ${best.name}.`;
+                          : phoneMiss(best.name);
   // TEXT banner: the digits, in readable local format (visible, never spoken).
   const textFinish   = bp ? `Call ${best.name} on ${localPhone(bp)} to check tonight.`
-                          : `No verified number for ${best.name}.`;
+                          : phoneMiss(best.name);
   const spokenBits = [head, spokenLines.join(' ')];
   if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
   spokenBits.push(spokenFinish);   // Call handoff, or an honest "no number for <site>"
@@ -4345,7 +4351,7 @@ function readyDial(site) {
 function denyNumber(site) {
   const idx = campRound.sites.findIndex(s => s.name === site.name);
   const next = campRound.sites.slice(idx + 1).concat(campRound.sites.slice(0, idx)).find(s => s.name !== site.name);
-  let msg = `No number listed for ${site.name}.`;
+  let msg = phoneMiss(site.name);
   if (next) { msg += ` Want the number for ${next.name}?`; setPending({ type: 'number-offer', site: next.name }); }
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
@@ -4377,7 +4383,7 @@ async function getNumbersForAll() {
   saveCampRound();                                    // persist any newly-found numbers
   hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
   const found = results.filter(r => r.phone);
-  const head = !found.length ? `No verified number for any of the ${sites.length}.`
+  const head = !found.length ? `Couldn't find a number for any of the ${sites.length} — worth a search, or ask when you arrive.`
              : found.length === sites.length ? `Here are the numbers — tap any to call.`
              : `Got a number for ${found.length} of the ${sites.length} — tap any to call.`;
   addMsg('nav', head); lastNavReply = head; lastSpoken = head; speak(head);   // no digits spoken
@@ -4393,7 +4399,7 @@ async function getNumbersForAll() {
     } else {
       const line = document.createElement('div');
       line.style.cssText = 'margin-top:6px;font-size:12px;color:var(--gray3);';
-      line.textContent = `${r.site.name}: no verified number`;
+      line.textContent = `${r.site.name}: couldn't find a number`;
       bub.appendChild(line);                                          // shown, but no dial
     }
   });
@@ -4484,10 +4490,10 @@ async function fetchCamps() {
   const list = res.sites.map(s => {
     const am = campAmenities(s);
     const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? null : 'price unconfirmed');   // 'paid' removed — noise
-    const ph = verifiedPhone(s) ? `phone ${verifiedPhone(s)}` : 'NO VERIFIED NUMBER';
+    const ph = verifiedPhone(s) ? `phone ${verifiedPhone(s)}` : 'NUMBER NOT FOUND BY LOOKUP';
     return `${s.name} (${s.type}) — ${timePhrase(s)}${price ? ', ' + price : ''}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}; ${ph}`;
   }).join(' | ');
-  return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here.`;
+  return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here. "NUMBER NOT FOUND BY LOOKUP" means OUR lookup missed it — never say the park has no phone; say we couldn't find it and they can search or ask on arrival.`;
 }
 
 // ── NEARBY FUEL STATIONS — proximity ground truth (OSM, all brands, no prices) ─
