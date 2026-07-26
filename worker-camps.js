@@ -497,8 +497,50 @@ async function handlePlacePhone(request, env) {
   return jsonResp(debug ? { ...out, diag: dbg } : out);
 }
 
+// ═══ TEMPORARY — /places-probe  (REMOVE AT PHASE 4) ══════════════════════════
+// A raw window onto Google Places Text Search so a REAL regional-town query can be
+// run with the EXACT production field mask and the result inspected before the
+// Places-sourced camps architecture (phase 1) is built. Returns Google's JSON
+// UNMODIFIED, no caching. Uses the GOOGLE_PLACES_KEY already configured.
+//   GET /places-probe?q=caravan parks in Cardwell QLD        (text only)
+//   GET /places-probe?q=caravan parks&lat=-18.26&lon=146.03  (adds a locationBias)
+// The field mask below MUST stay identical to production: id, displayName,
+// formattedAddress, location, nationalPhoneNumber, regularOpeningHours — no
+// ratings/reviews/photos/editorial (those are a further SKU).
+// >>> Listed for removal at phase 4 of the camps-architecture change. <<<
+const PLACES_PROBE_FIELD_MASK =
+  "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours";
+async function handlePlacesProbe(request, env) {
+  const u = new URL(request.url);
+  const q = u.searchParams.get("q") || "";
+  if (!q) return jsonResp({ error: "q required — e.g. ?q=caravan parks in Cardwell QLD" }, 400);
+  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "GOOGLE_PLACES_KEY not configured" }, 500);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const body = { textQuery: q };
+  if (!isNaN(lat) && !isNaN(lon)) body.locationBias = { circle: { center: { latitude: lat, longitude: lon }, radius: 15000 } };
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
+        "X-Goog-FieldMask": PLACES_PROBE_FIELD_MASK,
+      },
+      body: JSON.stringify(body),
+    });
+    // Google's response, byte-for-byte, no caching, no wrapping.
+    return new Response(r.body, {
+      status: r.status,
+      headers: { ...corsHeaders, "content-type": "application/json", "cache-control": "no-store" },
+    });
+  } catch (e) {
+    return jsonResp({ error: "probe fetch failed", detail: String((e && e.message) || e) }, 502);
+  }
+}
+
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 26 Jul 2026, 11:25 AM AEST (place-phone: bbox extent guard + required name check + ?debug)";
+const WORKER_BUILD = "Navigator Worker — 26 Jul 2026, 12:07 PM AEST (temporary /places-probe for the Places coverage test — remove at phase 4)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -522,6 +564,34 @@ const PLACE_HINT = [
 
 function handleVersion() {
   return jsonResp({ version: WORKER_BUILD });
+}
+
+// ═══ GET /places-probe?q=... — TEMPORARY coverage probe ══════════════════════
+// ⚠ TEMPORARY — coverage verification only, REMOVE AT PHASE 4 (see TODO.md).
+// One Places (New) Text Search using EXACTLY the intended production field mask,
+// returning Google's raw JSON unmodified. No caching, no KV, no scoring — this
+// exists solely to answer "does Places cover regional towns?" before phase 1 is
+// built. It bills as one Enterprise-tier Text Search per call (phone + hours).
+async function handlePlacesProbe(request, env) {
+  const q = (new URL(request.url).searchParams.get("q") || "").trim();
+  if (!q) return jsonResp({ error: "q (search text) required" }, 400);
+  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "GOOGLE_PLACES_KEY not configured" }, 500);
+  const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
+      // EXACT production field mask — these six fields only (Enterprise SKU; no atmosphere fields).
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours",
+    },
+    body: JSON.stringify({ textQuery: q }),
+  });
+  const raw = await r.text(); // pass Google's response straight back, byte-for-byte
+  return new Response(raw, {
+    status: r.status,
+    headers: { ...corsHeaders, "content-type": "application/json" },
+  });
 }
 
 // ═══ POST /transcribe — audio blob in, { text } out ═══
@@ -586,6 +656,7 @@ export default {
       "/weather": () => handleWeather(request, env),
       "/transcribe": () => handleTranscribe(request, env),
       "/place-phone": () => handlePlacePhone(request, env),
+      "/places-probe": () => handlePlacesProbe(request, env),   // TEMPORARY — remove at phase 4
       "/version": () => handleVersion(),
     };
     if (routes[url.pathname]) {
