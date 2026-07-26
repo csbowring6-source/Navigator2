@@ -348,38 +348,98 @@ async function handleWeather(request, env) {
   return new Response(r.body, { status: r.status, headers: { ...corsHeaders, "content-type": "application/json" } });
 }
 
-// ═══ POST-less /place-phone — one campsite's phone number, ON REQUEST only ═══
-// OSM rarely carries a phone tag, so the app can ask here for a single named
-// site. Keyed on the site's OSM id (never the name). KV is checked first; a
-// Google call happens only on a miss. The returned number is BOUND to the site
-// id in the response so the frontend can never attach it to the wrong site.
-// A number for a DIFFERENT site is the worst failure this can produce, so the
-// match is verified within ~500m before returning — otherwise: no number.
+// ═══ /place-phone verification helpers ══════════════════════════════════════
+// Generic words carry no identity — two unrelated "caravan parks" share them all.
+// Strip them so the name check turns on the DISTINCTIVE token (the town, the brand).
+const PP_GENERIC = new Set(["caravan","van","vans","park","parks","tourist","holiday",
+  "motel","camp","camps","camping","campground","campgrounds","site","sites","resort",
+  "big4","top","the","and","of","a","at","on","in"]);
+function ppTokens(s) {
+  return (s || "").toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !PP_GENERIC.has(w));
+}
+// Distinctive tokens in common. Required, not advisory: a result that passes
+// distance but shares no distinctive token (a "Beachcomber" restaurant beside the
+// "Beachcomber" park) is rejected.
+function ppNameOverlap(osmName, placeName) {
+  const a = new Set(ppTokens(osmName)), b = new Set(ppTokens(placeName));
+  let n = 0; for (const t of a) if (b.has(t)) n++;
+  return n;
+}
+// Distance from a point to the park's ACTUAL EXTENT: 0 inside the bbox, else the
+// great-circle distance to the nearest edge/corner (clamp the point to the box).
+function ppDistToExtentKm(plat, plon, bb, clat, clon) {
+  if (!bb) return hav(clat, clon, plat, plon);           // node — measure from the point
+  const qlat = Math.max(bb.minlat, Math.min(plat, bb.maxlat));
+  const qlon = Math.max(bb.minlon, Math.min(plon, bb.maxlon));
+  return hav(plat, plon, qlat, qlon);
+}
+// locationBias radius (metres): a park-sized circle derived from the bbox (centre
+// to a corner + margin, capped); a plain 1km for nodes with no extent.
+function ppBiasRadiusM(bb, clat, clon) {
+  if (!bb) return 1000;
+  const cornerM = hav(clat, clon, bb.maxlat, bb.maxlon) * 1000;
+  return Math.round(Math.min(Math.max(cornerM + 300, 800), 5000));
+}
+// The way/relation's bounding box, by OSM id. Nodes (points) return null. Any
+// Overpass trouble returns null too, so the caller falls back to the radius guard.
+async function ppOsmBbox(id) {
+  const m = /^(way|relation)\/(\d+)$/.exec(id || "");
+  if (!m) return null;                                   // a node has no extent
+  try {
+    const res = await overpass(`[out:json][timeout:20];${m[1]}(${m[2]});out bb;`);
+    const b = res && res.data && res.data.elements && res.data.elements[0] && res.data.elements[0].bounds;
+    if (b && typeof b.minlat === "number") return { minlat: b.minlat, minlon: b.minlon, maxlat: b.maxlat, maxlon: b.maxlon };
+  } catch (e) {}
+  return null;
+}
+
+// ═══ /place-phone — one campsite's phone number, ON REQUEST only ═════════════
+// OSM rarely carries a phone tag, so the app asks here for a single named site
+// (only AFTER an OSM phone tag has already been tried and missed — that check is
+// on the frontend). Keyed on the OSM id; KV first, Google only on a miss. The
+// number is BOUND to the id in the response so it can't attach to the wrong site.
+// Wrong-number protection = TWO required gates: the Places pin must fall within
+// the park's real extent (bbox + 500m of its edge, not a point in a paddock), AND
+// its name must share a distinctive token with the OSM name. Fail either → none.
+// ?debug=1 bypasses the cache and returns the full reasoning (no console on a phone).
 async function handlePlacePhone(request, env) {
   const u = new URL(request.url);
   const id = u.searchParams.get("id") || "";          // OSM id — the cache key
   const name = u.searchParams.get("name") || "";
   const lat = parseFloat(u.searchParams.get("lat"));
   const lon = parseFloat(u.searchParams.get("lon"));
+  const debug = u.searchParams.get("debug") === "1" || u.searchParams.get("diag") === "1";
   if (!id || !name || isNaN(lat) || isNaN(lon)) return jsonResp({ error: "id, name, lat and lon required" }, 400);
 
   const kv = env.PLACES_KV;
   const cacheKey = "phone:" + id;
+  const dbg = { id, name, centre: { lat, lon }, textQuery: name };
 
-  // 1) KV FIRST — return a cached hit OR miss without any Google call (no re-bill).
-  if (kv) {
+  // KV FIRST — a cached hit OR miss without any Google call (no re-bill). Debug
+  // skips the cache so the field tester always sees a live computation.
+  if (kv && !debug) {
     try {
       const cached = await kv.get(cacheKey, { type: "json" });
       if (cached) return jsonResp({ id, name, phone: cached.phone || "", found: !!cached.phone, cached: true });
     } catch (e) {}
   }
+  if (!env.GOOGLE_PLACES_KEY) {
+    const out = { id, name, phone: "", found: false, error: "place lookup not configured" };
+    return jsonResp(debug ? { ...out, diag: { ...dbg, decision: "no GOOGLE_PLACES_KEY" } } : out);
+  }
 
-  // Never configured? Honest "no number", never a guess.
-  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ id, name, phone: "", found: false, error: "place lookup not configured" });
+  // 1) The park's real extent (ways/relations); null for nodes -> radius guard.
+  const bb = await ppOsmBbox(id);
+  dbg.bbox = bb;
+  const biasM = ppBiasRadiusM(bb, lat, lon);
+  dbg.locationBiasRadiusM = biasM;
 
-  // 2) Places API (New) Text Search — biased to the site coords, tight radius.
-  //    Field mask drives the price, so request ONLY what we need.
-  let place = null;
+  // 2) Places (New) Text Search, biased to a park-sized circle.
+  let places = [];
   try {
     const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
@@ -391,43 +451,54 @@ async function handlePlacePhone(request, env) {
       body: JSON.stringify({
         textQuery: name,
         maxResultCount: 5,
-        locationBias: { circle: { center: { latitude: lat, longitude: lon }, radius: 500 } },
+        locationBias: { circle: { center: { latitude: lat, longitude: lon }, radius: biasM } },
       }),
     });
-    if (r.ok) {
-      const d = await r.json();
-      if (d.places && d.places.length) {
-        // Pick the returned place CLOSEST to the site, then verify it below.
-        place = d.places
-          .map(p => ({ p, km: p.location ? hav(lat, lon, p.location.latitude, p.location.longitude) : Infinity }))
-          .sort((a, b) => a.km - b.km)[0].p;
-      }
-    }
-  } catch (e) { place = null; }
+    if (r.ok) { const d = await r.json(); places = d.places || []; }
+    else dbg.placesHttp = r.status;
+  } catch (e) { dbg.placesError = String((e && e.message) || e); }
 
-  // 3) VERIFY the match within ~500m. A number belonging to a different site is
-  //    the single worst outcome — so if it isn't clearly THIS site, return none.
-  let phone = "";
-  if (place && place.location && place.nationalPhoneNumber &&
-      hav(lat, lon, place.location.latitude, place.location.longitude) <= 0.5) {
-    phone = place.nationalPhoneNumber;
-  }
+  // 3) Score every candidate: distance to the extent AND distinctive-name overlap.
+  const scored = places.map(p => {
+    const plat = p.location ? p.location.latitude : null, plon = p.location ? p.location.longitude : null;
+    const distKm = (plat != null) ? ppDistToExtentKm(plat, plon, bb, lat, lon) : Infinity;
+    const pname = (p.displayName && p.displayName.text) || "";
+    const overlap = ppNameOverlap(name, pname);
+    return {
+      name: pname, lat: plat, lon: plon, phone: p.nationalPhoneNumber || "",
+      distKm: Math.round(distKm * 1000) / 1000, nameOverlap: overlap,
+      passDist: distKm <= 0.5, passName: overlap >= 1,
+    };
+  });
+  dbg.places = scored;
 
-  // 4) Cache: 90 days for a hit, 7 days for a miss (negative caching so repeated
-  //    misses don't keep re-billing Google).
-  if (kv) {
+  // 4) Pick: must pass BOTH gates and carry a phone; prefer the strongest name
+  //    match, then the closest — so the park beats a same-name neighbour.
+  const passing = scored.filter(s => s.passName && s.passDist && s.phone);
+  passing.sort((a, b) => (b.nameOverlap - a.nameOverlap) || (a.distKm - b.distKm));
+  const chosen = passing[0] || null;
+  const phone = chosen ? chosen.phone : "";
+  dbg.chosen = chosen ? { name: chosen.name, phone: chosen.phone, distKm: chosen.distKm, nameOverlap: chosen.nameOverlap } : null;
+  dbg.decision = chosen ? "matched"
+    : !places.length ? "no Places result"
+    : scored.some(s => s.phone && s.passName && !s.passDist) ? "rejected: outside the park extent"
+    : scored.some(s => s.phone && s.passDist && !s.passName) ? "rejected: name mismatch"
+    : "no phone on any candidate";
+
+  // 5) Cache (skipped in debug): 90 days for a hit, 7 for a miss (negative cache).
+  if (kv && !debug) {
     try {
       await kv.put(cacheKey, JSON.stringify({ phone, ts: Date.now() }),
         { expirationTtl: phone ? 90 * 24 * 3600 : 7 * 24 * 3600 });
     } catch (e) {}
   }
 
-  // 5) Bound to the site id so the frontend can never attach it to another site.
-  return jsonResp({ id, name, phone, found: !!phone, cached: false });
+  const out = { id, name, phone, found: !!phone, cached: false };
+  return jsonResp(debug ? { ...out, diag: dbg } : out);
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 25 Jul 2026, 2:10 PM AEST (adds /place-phone via Google Places New + KV cache)";
+const WORKER_BUILD = "Navigator Worker — 26 Jul 2026, 11:25 AM AEST (place-phone: bbox extent guard + required name check + ?debug)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
