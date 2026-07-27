@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 08:19 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 02:13 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=27Jul2026-0819PM"></script>
+<script src="speech.js?v=28Jul2026-0213AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1067,15 +1067,37 @@ function matchTowns(candidate, state) {
   out.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   return out;
 }
+// Collapse a suburb into its parent town: if one candidate's name CONTAINS
+// another's (whole-word, normalised) AND they sit within 10km, they're the same
+// destination for a driver — drop the longer/containing name, keep the shorter
+// plain one ("East Innisfail" vs "Innisfail" -> "Innisfail"). Two same-stem towns
+// far apart are a REAL choice and are left alone (the >10km guard).
+function collapseNearbyDuplicates(list) {
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const drop = new Set();
+  for (let i = 0; i < list.length; i++) {
+    for (let j = 0; j < list.length; j++) {
+      if (i === j || drop.has(i) || drop.has(j)) continue;
+      const a = list[i], b = list[j], na = norm(a.name), nb = norm(b.name);
+      if (na === nb || nb.length >= na.length) continue;              // b must be the SHORTER name
+      if (!(' ' + na + ' ').includes(' ' + nb + ' ')) continue;       // a contains b as whole word(s)
+      if (distKm(a.lat, a.lon, b.lat, b.lon) > 10) continue;          // far apart = a genuine choice, keep both
+      drop.add(i);                                                     // a is b's suburb — drop it
+    }
+  }
+  return list.filter((_, i) => !drop.has(i));
+}
 // The offer to make, or null: a single 'did you mean', a two-way choice, or a
 // which-state question when the same name sits in several states.
 function decideOffer(candidate, state) {
   const m = matchTowns(candidate, state); if (!m.length) return null;
   const best = m[0];
-  const close = m.filter(x => x.score - best.score < 0.75).slice(0, 4);
-  const sameName = close.filter(x => x.name.toLowerCase() === best.name.toLowerCase());
-  if (sameName.length >= 2) return { kind: 'state', name: best.name, options: sameName };
-  if (close.length === 1) return { kind: 'one', town: best };
+  let close = m.filter(x => x.score - best.score < 0.75).slice(0, 4);
+  close = collapseNearbyDuplicates(close);   // suburb-of-a-town near-dups -> the plain town
+  const top = close[0];
+  const sameName = close.filter(x => x.name.toLowerCase() === top.name.toLowerCase());
+  if (sameName.length >= 2) return { kind: 'state', name: top.name, options: sameName };
+  if (close.length === 1) return { kind: 'one', town: top };
   return { kind: 'two', towns: close.slice(0, 2) };
 }
 // The driver's state abbrev from their position label (for the state-favour bias).
