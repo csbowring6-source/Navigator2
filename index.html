@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:21 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:58 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0421AM"></script>
+<script src="speech.js?v=28Jul2026-0458AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1113,14 +1113,16 @@ function splitTownState(spoken) {
 // state. Nothing -> the mishear is OURS, not the town's: echo what we heard, own it,
 // and say exactly what to do — escalating to town+state on a repeat. Sets the pending
 // and returns the message.
-function respondToUnresolved(candidate) {
+function respondToUnresolved(candidate, orig) {
   const { place, state } = splitTownState(candidate);
   const offer = decideOffer(place, state || driverState());
   if (offer) {
-    if (offer.kind === 'one') { setPending({ type: 'dest-suggest', towns: [offer.town] }); return `Did you mean ${offer.town.name}?`; }
-    if (offer.kind === 'two') { setPending({ type: 'dest-suggest', towns: offer.towns }); return `Did you mean ${offer.towns[0].name} or ${offer.towns[1].name}?`; }
+    // Store the FULL original utterance so day/journey/overnight/camps survive the
+    // "did you mean…" detour and are resolved at commit, not re-asked from scratch.
+    if (offer.kind === 'one') { setPending({ type: 'dest-suggest', towns: [offer.town], orig }); return `Did you mean ${offer.town.name}?`; }
+    if (offer.kind === 'two') { setPending({ type: 'dest-suggest', towns: offer.towns, orig }); return `Did you mean ${offer.towns[0].name} or ${offer.towns[1].name}?`; }
     const sts = offer.options.map(o => o.st);
-    setPending({ type: 'dest-suggest', towns: offer.options });
+    setPending({ type: 'dest-suggest', towns: offer.options, orig });
     return `There's a ${offer.name} in more than one state — which one, ${sts.slice(0, 2).join(' or ')}?`;
   }
   destReaskCount++;
@@ -1160,6 +1162,66 @@ async function proceedAfterTrip(trip, wantsPlan, wantsCamps, text) {
   if (trip.action === 'create') { msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}. Out for the day, or on a journey?`; setPending({ type: 'trip-mode', dest: trip.dest }); }
   else { msg = `Already on the ${trip.dest} run. What do you need?`; }
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+}
+// Commit a chosen mode and deliver the brief (+ carried camps, or the journey
+// overnight offer). Extracted so the trip-mode ANSWER and a disambiguation commit
+// that already knows the mode share ONE path. campsText routes answerCamps.
+async function finishTripMode(mode, wantsCamps, campsText) {
+  tripMode = mode;
+  try {
+    const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
+    raw.mode = mode;
+    localStorage.setItem('navigator_last_trip_raw', JSON.stringify(raw));
+  } catch(e) {}
+  tripContext += mode === 'day'
+    ? ' Mode: day out — returning tonight; do not suggest overnight stops or camps unless asked.'
+    : ' Mode: journey — travelling on.';
+  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+  let msg;
+  try {
+    try { await plotTripRoute(currentRunDest); } catch(e) {}
+    const head = mode === 'day' ? `Day out to ${currentRunDest} — back tonight.` : `Journey to ${currentRunDest}.`;
+    msg = formatDayBrief(currentRunDest, null, window._tripRoute, currentVehicle, head);
+  } finally { hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false; }
+  if (wantsCamps) {
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);   // the brief
+    busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+    Voice.queueReplies(true);   // the camps answer QUEUES after the brief — never cuts it off
+    try { await answerCamps(campsText); } catch(e) {
+      const m = "Couldn't check camps just now — try again in a minute.";
+      addMsg('nav', m); speak(m);
+    } finally { Voice.queueReplies(false); }
+    hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+  } else if (mode === 'journey') {
+    msg += ' Want me to look at overnight stops?';
+    setPending({ type: 'camps-offer', ask: 'overnight stops' });
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  } else {
+    addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  }
+}
+// After a DISAMBIGUATION commit, resolve the trip mode from the driver's ORIGINAL
+// utterance (stored on the pending) instead of re-asking blindly. Ask only what the
+// utterance doesn't settle: a clear day/journey vote commits straight to the brief;
+// mixed asks the overnight question; no vote asks day-or-journey. A camps request in
+// the utterance carries through either way (wantsCamps rides the ask, or fires now).
+async function resolveTripModeFromUtterance(dest, utterance) {
+  const u = utterance || '';
+  const wantsCamps = isCampsQuery(u);
+  const wantsPlan = /\b(plan|itinerary|day journey|journey plan|day plan|legs?\b|break (?:up|down))\b/i.test(u);
+  if (wantsPlan) { await proceedAfterTrip({ action: 'create', dest, origin: null }, true, wantsCamps, u); return; }
+  const mode = tripModeVote(u);
+  if (mode === 'mixed') {
+    const m = `Trip set to ${dest}. Back tonight, or staying over and back tomorrow?`;
+    setPending({ type: 'trip-overnight', wantsCamps });
+    addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+  } else if (mode === 'day' || mode === 'journey') {
+    await finishTripMode(mode, wantsCamps, u);
+  } else {
+    const m = `Trip set to ${dest}. Out for the day, or on a journey?`;
+    setPending({ type: 'trip-mode', dest, wantsCamps });   // carry camps through the day/journey question
+    addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+  }
 }
 let pendingTripSwitch = null;   // a proposed destination change, awaiting yes/no
 
@@ -3389,8 +3451,9 @@ function matchPendingAnswer(text, pending) {
     // on. Negation-aware (see tripModeVote): "not a journey" votes DAY, not journey.
     // A stated camps ask in the SAME answer is carried so it isn't dropped.
     const mode = tripModeVote(t);
-    if (mode === 'mixed') return { action: 'trip-overnight-ask', wantsCamps: isCampsQuery(t) };   // day AND tomorrow — ask
-    if (mode) return { action: 'trip-mode', mode, wantsCamps: isCampsQuery(t) };
+    const camps = isCampsQuery(t) || !!pending.wantsCamps;   // carry a camps ask stored from the original utterance
+    if (mode === 'mixed') return { action: 'trip-overnight-ask', wantsCamps: camps };   // day AND tomorrow — ask
+    if (mode) return { action: 'trip-mode', mode, wantsCamps: camps };
     return null;   // no usable vote — the miss-survival re-asks; never a silent default
   }
   if (pending.type === 'trip-overnight') {
@@ -4487,7 +4550,7 @@ async function sendMessage(silent){
         hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
         let msg;
         if (v.verdict === 'confirm') {
-          setPending({ type: 'dest-confirm', spoken: subject, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: null, wantsPlan: false, wantsCamps: false, ask: subject });
+          setPending({ type: 'dest-confirm', spoken: subject, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: null, wantsPlan: false, wantsCamps: false, ask: subject, orig: text });
           msg = v.drift
             ? `I heard ${subject}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${subject} near you, or ${v.name}?`
             : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or somewhere closer?`;
@@ -4504,7 +4567,7 @@ async function sendMessage(silent){
           // A genuine no-match — try the phonetic gazetteer BEFORE re-asking (a
           // mis-hear, not a missing town). respondToUnresolved offers a match or
           // gives the misheard wording, and sets the pending itself.
-          msg = subject ? respondToUnresolved(subject) : (setPending({ type: 'destination' }), `I didn't catch a town there — which town are we heading to?`);
+          msg = subject ? respondToUnresolved(subject, text) : (setPending({ type: 'destination' }), `I didn't catch a town there — which town are we heading to?`);
         }
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       } else if (pa.action === 'suggest-pick') {
@@ -4512,9 +4575,9 @@ async function sendMessage(silent){
         // the town from the gazetteer's OWN coords — no re-geocode (which just failed).
         const p = pa.pick;
         adoptTripAt(p.name, p.lat, p.lon);
-        const m = `Trip set to ${p.name}${p.st ? ', ' + p.st : ''}. Out for the day, or on a journey?`;
-        setPending({ type: 'trip-mode', dest: p.name });
-        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        // Resolve day/journey/camps from the ORIGINAL utterance stored on the pending
+        // — ask only what it doesn't already settle.
+        await resolveTripModeFromUtterance(p.name + (p.st ? ', ' + p.st : ''), pending.orig);
       } else if (pa.action === 'suggest-no') {
         // Not the town we guessed — own the mishear and ask again (escalates to state).
         destReaskCount++;
@@ -4524,46 +4587,8 @@ async function sendMessage(silent){
         setPending({ type: 'destination' });
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'trip-mode') {
-        // Store the mode ON the trip, then give the road brief. Day out = brief
-        // only, no overnight/camp prompts. Journey = brief, then ONE held offer.
-        tripMode = pa.mode;
-        try {
-          const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
-          raw.mode = pa.mode;
-          localStorage.setItem('navigator_last_trip_raw', JSON.stringify(raw));
-        } catch(e) {}
-        tripContext += pa.mode === 'day'
-          ? ' Mode: day out — returning tonight; do not suggest overnight stops or camps unless asked.'
-          : ' Mode: journey — travelling on.';
-        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-        let msg;
-        try {
-          try { await plotTripRoute(currentRunDest); } catch(e) {}
-          const head = pa.mode === 'day'
-            ? `Day out to ${currentRunDest} — back tonight.`
-            : `Journey to ${currentRunDest}.`;
-          msg = formatDayBrief(currentRunDest, null, window._tripRoute, currentVehicle, head);
-        } finally {
-          hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-        }
-        if (pa.wantsCamps) {
-          // The SAME answer already asked for campsites — deliver the brief, then go
-          // straight to the camps flow. Never drop a stated request for a generic offer.
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);   // the brief
-          busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-          Voice.queueReplies(true);   // the camps answer QUEUES after the brief — never cuts it off
-          try { await answerCamps(text); } catch(e) {
-            const m = "Couldn't check camps just now — try again in a minute.";
-            addMsg('nav', m); speak(m);
-          } finally { Voice.queueReplies(false); }
-          hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-        } else if (pa.mode === 'journey') {
-          msg += ' Want me to look at overnight stops?';
-          setPending({ type: 'camps-offer', ask: 'overnight stops' });
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-        } else {
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-        }
+        // Store the mode + give the brief (+ carried camps / journey overnight offer).
+        await finishTripMode(pa.mode, pa.wantsCamps, text);
       } else if (pa.action === 'trip-overnight-ask') {
         // Contradictory answer (day-words AND tomorrow/staying). Don't pick either —
         // ask, carrying any camps request from the original answer through the pending.
@@ -4600,7 +4625,7 @@ async function sendMessage(silent){
             setPending({ type: 'trip-mode', dest: v.name });
             addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
           } else {
-            const m = respondToUnresolved(nt.dest);   // offers / re-asks, sets its own pending
+            const m = respondToUnresolved(nt.dest, text);   // offers / re-asks, sets its own pending
             addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
           }
         } else {
@@ -4648,7 +4673,7 @@ async function sendMessage(silent){
         } else {
           adoptTripAt(pa.dest, lat, lon);
           if (pa.origin) tripContext = `Origin: ${pa.origin}. Destination: ${pa.dest}.`;
-          await proceedAfterTrip({ action: 'create', dest: pa.dest, origin: pa.origin }, pa.wantsPlan, pa.wantsCamps, pa.ask);
+          await resolveTripModeFromUtterance(pa.dest, pending.orig || pa.ask);   // day/journey/overnight/camps from the original utterance
         }
       } else if (pa.action === 'dest-reask') {
         const m = `No worries — where did you mean? Give me the town.`;
@@ -4726,13 +4751,13 @@ async function sendMessage(silent){
         // Phonetic gazetteer rescue before re-asking — a mis-hear, not a missing
         // town. respondToUnresolved offers a match or gives the misheard wording
         // (owning it as us, not the town), and sets the pending itself.
-        const m = respondToUnresolved(trip.dest);
+        const m = respondToUnresolved(trip.dest, text);
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
         return;
       }
       if (v.verdict === 'confirm') {
         // DO NOT commit — ask, naming both candidates plainly, and wait.
-        setPending({ type: 'dest-confirm', spoken: trip.dest, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: trip.origin, wantsPlan, wantsCamps, ask: text });
+        setPending({ type: 'dest-confirm', spoken: trip.dest, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: trip.origin, wantsPlan, wantsCamps, ask: text, orig: text });
         const msg = v.drift
           ? `I heard ${trip.dest}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${trip.dest} near you, or ${v.name}?`
           : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or did you mean somewhere closer?`;
