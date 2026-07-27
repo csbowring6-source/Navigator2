@@ -900,10 +900,32 @@ function resetVoiceUI() {
 
 function stopListening() { stopCapture(true); }   // legacy name — same endpoint
 
+// ── SPOKEN-REPLY QUEUE ──────────────────────────────────────────────────────
+// A DEFAULT speak() cancels whatever is playing — the DRIVER's new turn interrupts
+// current speech. But the app must NOT interrupt ITSELF: when it chains two replies
+// in one turn (a trip brief, then the carried camps answer), the second must QUEUE
+// and play in full AFTER the first (+ the normal tail), never cut it off mid-word.
+// While draining the queue the mic stays shut until the LAST reply ends — no reopen
+// between our own chained replies. Driver interrupts (cancelSpeech / a default
+// speak) flush the queue.
+let _ttsQueue = [];        // texts waiting to speak after the current one
+let _ttsActive = false;    // an utterance is playing (or just handed to synth)
+let _queueReplies = false; // while true, a new speak() ENQUEUES instead of cancelling
+let _ttsNextTimer = null;  // deferred play of the next queued reply
+function queueReplies(on) { _queueReplies = !!on; }
+
 function speak(text) {
-  if(!synth) return;
+  if (!synth) return;
+  // App-sequential reply while something is already playing → wait our turn.
+  if (_queueReplies && _ttsActive) { _ttsQueue.push(text); return; }
   if (convoActive) { convoSpeaking = true; convoStopRecogniser(); }   // don't hear our own reply
   synth.cancel();
+  _ttsQueue = [];            // a normal/interrupting speak supersedes anything pending
+  _speakNow(text);
+}
+
+function _speakNow(text) {
+  _ttsActive = true;
   let clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
   // Speak abbreviations as words — "300m" must not be read as "three hundred em"
   clean = clean
@@ -917,35 +939,43 @@ function speak(text) {
   const v=voices.find(v=>v.lang.startsWith('en-AU'))||voices.find(v=>v.lang.startsWith('en-GB'))||voices.find(v=>v.lang.startsWith('en'));
   if(v) utt.voice=v;
   utt.onstart = () => { logEvent('tts.start', ''); setMicState('speaking'); };
-  // Reply finished (or TTS failed). A conversation session resumes listening on
-  // the SAME recogniser — no re-tap, no new SR(); a one-shot returns to Off. One
-  // path for both end + error so a failed utterance can't strand the session.
-  const afterSpeak = () => {
-    logEvent('tts.end', '');
-    if (!convoActive) { setMicState('off'); return; }
-    convoHadExchange = true; convoRestarts = 0;
-    // Do NOT reopen the mic the instant playback ends — the speaker is still
-    // emitting the tail and the room echoes; the recogniser would hear the app's
-    // own reply, finalise, restart and oscillate. Stay shut (convoSpeaking stays
-    // TRUE) for a short tail, THEN resume the SAME recogniser.
-    clearTimeout(convoResumeTimer);
-    convoResumeTimer = setTimeout(() => {
-      convoSpeaking = false;
-      // convoStartRecogniser may close the session (reopen ceiling); re-check
-      // convoActive before arming the silence timer so no stray timer survives.
-      if (convoActive) { convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
-    }, CONVO_TTS_TAIL_MS);
-  };
-  utt.onerror = afterSpeak;
-  utt.onend = afterSpeak;
+  utt.onerror = _afterSpeak;
+  utt.onend = _afterSpeak;
   synth.speak(utt);
+}
+
+// Reply finished (or TTS failed). If more of OUR OWN replies are queued from the
+// same turn, play the next after the tail WITHOUT reopening the mic. Otherwise a
+// conversation session resumes listening on the SAME recogniser — no re-tap, no new
+// SR(); a one-shot returns to Off. One path for both end + error so a failed
+// utterance can't strand the session.
+function _afterSpeak() {
+  logEvent('tts.end', '');
+  _ttsActive = false;
+  if (_ttsQueue.length) {   // more of our own to say — keep the mic shut, play next after the tail
+    clearTimeout(_ttsNextTimer);
+    _ttsNextTimer = setTimeout(() => { if (convoActive) { convoSpeaking = true; convoStopRecogniser(); } _speakNow(_ttsQueue.shift()); }, CONVO_TTS_TAIL_MS);
+    return;
+  }
+  if (!convoActive) { setMicState('off'); return; }
+  convoHadExchange = true; convoRestarts = 0;
+  // Do NOT reopen the mic the instant playback ends — the speaker is still emitting
+  // the tail and the room echoes; the recogniser would hear the app's own reply,
+  // finalise, restart and oscillate. Stay shut for a short tail, THEN resume.
+  clearTimeout(convoResumeTimer);
+  convoResumeTimer = setTimeout(() => {
+    convoSpeaking = false;
+    // convoStartRecogniser may close the session (reopen ceiling); re-check
+    // convoActive before arming the silence timer so no stray timer survives.
+    if (convoActive) { convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
+  }, CONVO_TTS_TAIL_MS);
 }
 
   // ── voices warm-up (was the index.html INIT line) ──────────────────────────
   if (synth) synth.onvoiceschanged = () => synth.getVoices();
 
   // ── PUBLIC API — the ONLY surface index.html may touch ─────────────────────
-  function cancelSpeech() { try { synth && synth.cancel(); } catch (e) {} }
+  function cancelSpeech() { _ttsQueue = []; _queueReplies = false; _ttsActive = false; clearTimeout(_ttsNextTimer); try { synth && synth.cancel(); } catch (e) {} }
   // Full voice shutdown for "start again" (was three lines in resetConversation:
   // cancel TTS, stop the basic recogniser if listening, close any live session).
   function voiceReset() {
@@ -957,7 +987,7 @@ function speak(text) {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '28 Jul 2026, 04:02 AM AEST',
+    BUILD: '28 Jul 2026, 04:21 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -966,6 +996,7 @@ function speak(text) {
     reset:        voiceReset,
     // speech out
     speak:        speak,
+    queueReplies: queueReplies,   // app-sequential replies queue (don't self-interrupt)
     cancelSpeech: cancelSpeech,
     unlockAudio:  unlockAudio,
     // state (read-only getters — no external writes to internals)

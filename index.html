@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:02 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:21 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0402AM"></script>
+<script src="speech.js?v=28Jul2026-0421AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1151,7 +1151,7 @@ async function proceedAfterTrip(trip, wantsPlan, wantsCamps, text) {
       if (wantsPlan) { try { await plotTripRoute(trip.dest); } catch (e) {} msg = formatDayBrief(trip.dest, trip.origin, window._tripRoute, currentVehicle); }
       else msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}.`;
       if (wantsCamps && wantsPlan) { msg += ' Want the caravan sites now?'; setPending({ type: 'camps-offer', ask: text }); addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
-      else if (wantsCamps) { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); await answerCamps(text); }
+      else if (wantsCamps) { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); Voice.queueReplies(true); try { await answerCamps(text); } finally { Voice.queueReplies(false); } }
       else { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
     } finally { hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false; }
     return;
@@ -4549,12 +4549,13 @@ async function sendMessage(silent){
         if (pa.wantsCamps) {
           // The SAME answer already asked for campsites — deliver the brief, then go
           // straight to the camps flow. Never drop a stated request for a generic offer.
-          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+          addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);   // the brief
           busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+          Voice.queueReplies(true);   // the camps answer QUEUES after the brief — never cuts it off
           try { await answerCamps(text); } catch(e) {
             const m = "Couldn't check camps just now — try again in a minute.";
             addMsg('nav', m); speak(m);
-          }
+          } finally { Voice.queueReplies(false); }
           hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
         } else if (pa.mode === 'journey') {
           msg += ' Want me to look at overnight stops?';
