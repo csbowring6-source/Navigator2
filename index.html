@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 07:31 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 07:39 PM AEST</div>
   </div>
 </div>
 
@@ -2510,6 +2510,18 @@ let convoFlips = 0;             // recording<->listening flips since real progre
 let convoLastState = '';        // last convo-driven mic state (for flip detection)
 const CONVO_TTS_TAIL_MS = 600;  // keep the mic shut this long AFTER playback ends
 const CONVO_MAX_FLIPS = 8;      // oscillation ceiling — close honestly beyond this
+// Reopen ceiling. The flip ceiling above only catches recording<->listening
+// churn; a post-TTS restart loop can instead reopen the recogniser over and over
+// (Android's early onend) with NO turn ever delivered, emitting the device's own
+// mic earcon ~once a second. Count reopens that had NO delivered turn between
+// them; past this many, we're in a stuck loop → close honestly. The count is
+// cleared on a delivered turn AND on any recogniser that stayed alive past
+// CONVO_HEALTHY_MS (a genuine listen, just quiet) — so a legitimately quiet
+// session keeps its full 45s grace, while a rapid sub-healthy loop (each cycle
+// under CONVO_HEALTHY_MS) climbs to the cap in ~N cycles regardless of exact
+// spacing and closes. Ambient noise no longer resets it (that was the leak).
+const CONVO_MAX_CYCLES = 5;     // empty (no-delivery) reopens before an honest close
+let convoUndelivered = 0;       // consecutive sub-healthy reopens with nothing delivered
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
 let convoCued = false;          // close cue already played this session? (at most once)
@@ -2540,7 +2552,7 @@ function openConversation() {
   convoActive = true; convoOffered = false; convoHadExchange = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
-  convoFlips = 0; convoLastState = ''; clearTimeout(convoResumeTimer);    // fresh oscillation guard
+  convoFlips = 0; convoLastState = ''; convoUndelivered = 0; clearTimeout(convoResumeTimer);    // fresh oscillation guards
   convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoArmSilence();
@@ -2575,8 +2587,24 @@ function convoSetState(state) {
   setMicState(state);
 }
 
+// Record one recogniser (re)open and enforce the ceiling. A healthy session
+// reopens once per reply — the counter is cleared on every DELIVERED turn (and at
+// session open, and whenever a recogniser proved healthy) — so those never
+// accumulate. Only rapid sub-healthy reopens with nothing delivered pile up; past
+// CONVO_MAX_CYCLES we're in a stuck restart loop (the source of the once-a-second
+// native earcon) → close honestly, reason on screen. Returns true if it closed.
+function convoNoteReopen() {
+  convoUndelivered++;
+  if (convoUndelivered >= CONVO_MAX_CYCLES) {
+    console.warn('[convo] ' + convoUndelivered + ' reopens with no delivered turn — closing honestly (stuck restart loop)');
+    convoLastError = 'oscillation'; convoFailHonestly(); return true;
+  }
+  return false;
+}
+
 function convoStartRecogniser() {
   if (!convoActive) return;
+  if (convoNoteReopen()) return;   // stuck reopen loop → honest close, don't restart
   if (!convoRec) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     convoRec = new SR();                 // the ONE instance — never recreated per turn
@@ -2595,9 +2623,11 @@ function convoStartRecogniser() {
       }
       // Grow the turn's final text overlap-aware (mergeFinal drops Android's
       // re-heard chunks, so this survives mid-phrase restarts without dupes).
-      const before = convoTurn.length;
       if (fin) convoTurn = mergeFinal(convoTurn, fin);
-      if (convoTurn.length > before) convoFlips = 0;   // real new speech = progress, not an echo loop
+      // NOTE: growth alone does NOT reset the oscillation guards — ambient noise
+      // the engine finalises grows convoTurn too, and resetting on it let the echo
+      // loop run forever. convoFlips / convoUndelivered reset ONLY on a delivered
+      // turn (convoDeliverTurn), which is real progress.
       if (convoTurn.length > convoDelivered.length || interim.trim()) {
         if (convoActive) convoSetState('recording');
         armConvoDeliver();                    // deliver only after the driver pauses
@@ -2619,7 +2649,7 @@ function convoStartRecogniser() {
       // let the 45s silence timer own the close. A rapid empty reopen (mic never
       // acquired) does NOT reset, so it climbs to the cap and then stops honestly.
       const alive = Date.now() - convoLastStart;
-      if (alive >= CONVO_HEALTHY_MS) convoRestarts = 0;
+      if (alive >= CONVO_HEALTHY_MS) { convoRestarts = 0; convoUndelivered = 0; }   // a genuine listen (just quiet) — not a loop
       convoRestarts++;
       if (convoRestarts > CONVO_MAX_RESTARTS) {
         console.warn('[convo] giving up after ' + (convoRestarts - 1) + ' rapid restarts with no capture (last alive=' + alive + 'ms, last onerror: ' + (convoLastError || 'none') + ')');
@@ -2627,7 +2657,11 @@ function convoStartRecogniser() {
       }
       const backoff = 250 * convoRestarts;   // 250 / 500 / 750 ms
       console.warn('[convo] restart ' + convoRestarts + '/' + CONVO_MAX_RESTARTS + ' in ' + backoff + 'ms (alive=' + alive + 'ms, last onerror: ' + (convoLastError || 'none') + ')');
-      setTimeout(() => { if (convoActive && !convoSpeaking) { try { convoRec.start(); convoLastStart = Date.now(); } catch(_) {} } }, backoff);
+      setTimeout(() => {
+        if (!convoActive || convoSpeaking) return;
+        if (convoNoteReopen()) return;   // wall-clock ceiling: stuck reopen loop → honest close
+        try { convoRec.start(); convoLastStart = Date.now(); } catch(_) {}
+      }, backoff);
     };
   }
   try { convoRec.start(); convoRecRunning = true; convoLastStart = Date.now(); } catch (e) { /* already running */ }
@@ -2645,7 +2679,7 @@ function convoDeliverTurn() {
   const pending = convoTurn.length > convoDelivered.length ? convoTurn.slice(convoDelivered.length).trim() : '';
   if (!pending) return;
   convoDelivered = convoTurn;                          // consume — never re-delivered
-  convoFlips = 0;                                      // a real turn broke any oscillation
+  convoFlips = 0; convoUndelivered = 0;                // a delivered turn is real progress — clear BOTH oscillation guards
   convoHandleUtterance(pending, 'silence');            // a session turn always ends on a pause
 }
 function convoHandleUtterance(text, endReason) {
@@ -2706,7 +2740,7 @@ function closeConversation(reason) {
   const wasActive = convoActive;
   convoActive = false; convoSpeaking = false; convoRecRunning = false;
   clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer); clearTimeout(convoDeliverTimer); clearTimeout(convoResumeTimer);
-  convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = '';   // drop any half-heard turn / oscillation state
+  convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = ''; convoUndelivered = 0;   // drop any half-heard turn / oscillation state
   if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
   convoRec = null;                       // fresh instance next session; alive across THIS one
   releaseConvoStream();
@@ -3323,7 +3357,9 @@ function speak(text) {
     clearTimeout(convoResumeTimer);
     convoResumeTimer = setTimeout(() => {
       convoSpeaking = false;
-      if (convoActive) { convoSetState('listening'); convoStartRecogniser(); convoArmSilence(); }
+      // convoStartRecogniser may close the session (reopen ceiling); re-check
+      // convoActive before arming the silence timer so no stray timer survives.
+      if (convoActive) { convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
     }, CONVO_TTS_TAIL_MS);
   };
   utt.onerror = afterSpeak;
