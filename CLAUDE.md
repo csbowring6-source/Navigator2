@@ -8,7 +8,10 @@ Navigator is a **voice-first travel co-pilot web app for Australian road tripper
 
 ## Shape of the codebase
 
-- **The entire app is a single file: `index.html`** (~3,400 lines, ~185 KB). It contains all markup, all CSS (one `<style>` block), and all JavaScript (one `<script>` block). There is **no build step, no framework, no bundler, no `node_modules`**. What you see in the file is exactly what ships. (`.nojekyll` at the repo root keeps GitHub Pages from running Jekyll — it must stay in every push.)
+- **Two files ship: `index.html` and `speech.js`.** `index.html` holds all markup, all CSS (one `<style>` block), and all app JavaScript (one inline `<script>`). **The voice subsystem lives ONLY in `speech.js`** (conversation session, cloud + Web-Speech capture, the mic state machine, cues, TTS + the suppression tail, the oscillation ceiling, and the event ring buffer). It is loaded as a **classic** script *before* the inline app script (`<script src="speech.js?v=STAMP">`), so the two share one global scope. There is still **no build step, no framework, no bundler, no `node_modules`** — what you see in the files is exactly what ships. (`.nojekyll` at the repo root keeps GitHub Pages from running Jekyll — it must stay in every push.)
+- **The voice boundary is strict.** Nothing outside `speech.js` may touch voice internals. `index.html` reaches voice ONLY through the global **`Voice`** API: `openSession()`, `closeSession(reason)`, `toggleCapture()`, `micTap()`, `reset()`, `speak(text)`, `cancelSpeech()`, `unlockAudio()`, `state()`, `isSessionOpen()`, `isCapturing()`, `onTranscript(cb)`, `setBusyGetter(fn)`, `takeTurnEnd()`, `getLog()`, `clearLog()`, `BUILD`. The two app couplings are **injected** at INIT — `Voice.onTranscript(sendMessage)` (transcript handoff) and `Voice.setBusyGetter(() => busy)` — so the module never reads app state. The module still *calls* a few app globals by name (`addMsg`, `setPending`, `pendingQuestion`, `pendingIsFresh`, `cleanTranscript`, `autoResize`, `API_URL`, `lastSpoken`); a thin global `speak()` shim in `index.html` delegates to `Voice.speak` so the ~40 reply sites are unchanged.
+- **Version pinning across the two files:** the `?v=` on the `speech.js` tag AND `Voice.BUILD` both carry the `#buildStamp`. Bump all three together on every ship. INIT compares `Voice.BUILD` to `#buildStamp` and shows the update banner on any mismatch, so a stale cached module can't hide. The on-phone **voice-log view** (long-press the home mic) shows the event ring buffer + BOTH stamps.
+- **Voice bench rig:** `voice_bench.mjs` (repo root) loads the real `speech.js` under mocked browser globals, drives the state machine (normal turn · early-onend loop · ambient finalisation · TTS overlap · the four close paths), asserts the invariants (cue ≤ once/session; a no-delivery reopen loop closes regardless of cycle length; no capture during TTS), and **replays a pasted field event log**. Run: `node voice_bench.mjs`.
 - Deployed as a static page via **GitHub Pages** at **https://csbowring6-source.github.io/Navigator2** (repo `csbowring6-source/Navigator2`, branch `main`).
 - The app self-updates: on load and every 15 min it re-fetches its own URL, compares an embedded `#buildStamp` against the live copy, and shows a "tap to update" banner if stale (`checkVersion()` near the bottom of `index.html`).
 
@@ -46,11 +49,11 @@ Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped
 
 ## THE IRON RULE: no secrets in the frontend
 
-**No API keys, tokens, or secrets are ever hardcoded in `index.html`.** Everything secret (Anthropic, NSW/TAS fuel, weather, and any future keyed service) lives **only** behind the Cloudflare Worker. `index.html` is public and served as-is — anything placed in it is exposed to the world.
+**No API keys, tokens, or secrets are ever hardcoded in the shipped frontend files (`index.html`, `speech.js`).** Everything secret (Anthropic, NSW/TAS fuel, weather, and any future keyed service) lives **only** behind the Cloudflare Worker. Both frontend files are public and served as-is — anything placed in them is exposed to the world.
 
 - The **only** non-keyless endpoint referenced in the frontend is the Worker URL itself, which is a public relay endpoint (not a secret).
 - Any new capability that needs a key must be added as a **Worker route**, not a browser-side call with an embedded key.
-- **Before any commit, scan for hardcoded secrets** (provider key formats like `sk-ant-…`, `AKIA…`, `AIza…`, bearer/auth headers, high-entropy blobs, `?key=`/`?token=` params). The frontend was verified clean as of the last review — keep it that way.
+- **Before any commit, scan both `index.html` and `speech.js` for hardcoded secrets** (provider key formats like `sk-ant-…`, `AKIA…`, `AIza…`, bearer/auth headers, high-entropy blobs, `?key=`/`?token=` params). The frontend was verified clean as of the last review — keep it that way.
 
 ## Workflow rules (how this project is maintained)
 
