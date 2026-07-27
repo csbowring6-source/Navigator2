@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 03:47 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:02 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0347AM"></script>
+<script src="speech.js?v=28Jul2026-0402AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3269,6 +3269,7 @@ function reaskPending(p) {
   if (p && p.type === 'dest-confirm') return `Which one did you mean — ${p.spoken}, or ${p.resolved}?`;
   if (p && p.type === 'destination') return `Which town are we heading to?`;
   if (p && p.type === 'trip-mode') return `Out for the day, or on a journey?`;
+  if (p && p.type === 'trip-overnight') return `Back tonight, or staying over and back tomorrow?`;
   if (p && p.type === 'trip-resume-confirm') return `Still on the trip to ${p.dest}, or starting fresh?`;
   if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
   if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
@@ -3299,6 +3300,12 @@ function tripModeVote(text) {
   };
   const d = scan("\\b(?:day ?out|for the day|day ?trip|just (?:the|a) day|back (?:home )?tonight|home tonight|returning tonight)\\b");
   const j = scan("\\b(?:journey|travell?ing(?: on)?|touring|moving on|onwards?|staying (?:away|out|over)|overnight)\\b");
+  // An overnight/tomorrow/staying indication (incl. "tomorrow", not in j above).
+  const o = scan("\\b(?:overnight|tomorrow|next day|stay(?:ing)? (?:over|out|the night)|another day|couple of days|few days|nights? away)\\b");
+  // GENUINELY MIXED: day-words affirmed AND an overnight/tomorrow/staying indication
+  // also affirmed (neither negated) — the two conflict (a day out returns tonight).
+  // Don't guess: ask the overnight question. Negated cases fall through to the tally.
+  if (d.aff && o.aff) return 'mixed';
   let day = 0, journey = 0;
   if (d.aff) day++;
   if (d.neg) journey++;   // "not a day trip" -> for journey
@@ -3382,8 +3389,21 @@ function matchPendingAnswer(text, pending) {
     // on. Negation-aware (see tripModeVote): "not a journey" votes DAY, not journey.
     // A stated camps ask in the SAME answer is carried so it isn't dropped.
     const mode = tripModeVote(t);
+    if (mode === 'mixed') return { action: 'trip-overnight-ask', wantsCamps: isCampsQuery(t) };   // day AND tomorrow — ask
     if (mode) return { action: 'trip-mode', mode, wantsCamps: isCampsQuery(t) };
     return null;   // no usable vote — the miss-survival re-asks; never a silent default
+  }
+  if (pending.type === 'trip-overnight') {
+    // "Back tonight, or staying over and back tomorrow?" — tonight -> day out;
+    // staying over / tomorrow -> journey. Carries the camps ask from the original
+    // answer through to the commit (reuses the trip-mode handler + its camps branch).
+    const over = /\b(?:tomorrow|overnight|stay(?:ing)?(?: over| out| the night)?|next day|another day|couple of days|few days|journey)\b/.test(t);
+    const tonight = /\b(?:tonight|same day|today|home tonight|just the day)\b/.test(t) || /^(?:day|day out|out)$/.test(t);
+    let m2 = null;
+    if (over && !tonight) m2 = 'journey';
+    else if (tonight && !over) m2 = 'day';
+    if (m2) return { action: 'trip-mode', mode: m2, wantsCamps: pending.wantsCamps };
+    return null;   // unclear — miss-survival re-asks the overnight question
   }
   if (pending.type === 'trip-resume-confirm') {
     // "Still on that trip to X, or starting fresh?" — an affirmation keeps it; a "no",
@@ -4543,6 +4563,12 @@ async function sendMessage(silent){
         } else {
           addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
         }
+      } else if (pa.action === 'trip-overnight-ask') {
+        // Contradictory answer (day-words AND tomorrow/staying). Don't pick either —
+        // ask, carrying any camps request from the original answer through the pending.
+        const m = 'Back tonight, or staying over and back tomorrow?';
+        setPending({ type: 'trip-overnight', wantsCamps: pa.wantsCamps });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'trip-keep') {
         // Keep the leftover trip. If a session older than the restore window left
         // currentRunDest empty, load it back from the saved record so it's live.
