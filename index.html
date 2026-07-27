@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 04:58 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 05:20 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0458AM"></script>
+<script src="speech.js?v=28Jul2026-0520AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1205,11 +1205,11 @@ async function finishTripMode(mode, wantsCamps, campsText) {
 // utterance doesn't settle: a clear day/journey vote commits straight to the brief;
 // mixed asks the overnight question; no vote asks day-or-journey. A camps request in
 // the utterance carries through either way (wantsCamps rides the ask, or fires now).
-async function resolveTripModeFromUtterance(dest, utterance) {
+async function resolveTripModeFromUtterance(dest, utterance, origin) {
   const u = utterance || '';
   const wantsCamps = isCampsQuery(u);
   const wantsPlan = /\b(plan|itinerary|day journey|journey plan|day plan|legs?\b|break (?:up|down))\b/i.test(u);
-  if (wantsPlan) { await proceedAfterTrip({ action: 'create', dest, origin: null }, true, wantsCamps, u); return; }
+  if (wantsPlan) { await proceedAfterTrip({ action: 'create', dest, origin: origin || null }, true, wantsCamps, u); return; }
   const mode = tripModeVote(u);
   if (mode === 'mixed') {
     const m = `Trip set to ${dest}. Back tonight, or staying over and back tomorrow?`;
@@ -4766,8 +4766,12 @@ async function sendMessage(silent){
       }
       adoptTripAt(trip.dest, v.lat, v.lon);          // bind name to its resolved coords
       if (trip.origin) tripContext = `Origin: ${trip.origin}. Destination: ${trip.dest}.`;
+      // ONE utterance-honouring commit path — brief + trip-mode vote + camps carry,
+      // exactly as the disambiguation commits (suggest-pick / dest-pick) already do.
+      await resolveTripModeFromUtterance(trip.dest, text, trip.origin);
+      return;
     }
-    await proceedAfterTrip(trip, wantsPlan, wantsCamps, text);
+    await proceedAfterTrip(trip, wantsPlan, wantsCamps, text);   // 'already on the run' (dest unchanged)
     return;
   }
 
