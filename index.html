@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 02:13 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 02:28 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0213AM"></script>
+<script src="speech.js?v=28Jul2026-0228AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3234,12 +3234,54 @@ function isCampsQuery(text) {
 // never re-run as a fresh query.
 let pendingQuestion = null;   // {type:'trip-mode'|'camps-offer'|'destination', …}
 let pendingQuestionAt = 0;    // when it was armed — a held question goes STALE
-const PENDING_TTL_MS = 60000; // after 60s, a reply is a new query, not an answer
+const PENDING_TTL_MS = 120000; // after 120s a reply is a new query — a driver mid-manoeuvre can't always answer inside a minute
 // Always set the pending question through here so it carries a timestamp; a bare
 // "Cardwell" minutes later must read as a destination, not an answer to an
 // offer the driver has long forgotten.
 function setPending(q) { pendingQuestion = q || null; pendingQuestionAt = q ? Date.now() : 0; }
 function pendingIsFresh() { return !!pendingQuestion && (Date.now() - pendingQuestionAt) <= PENDING_TTL_MS; }
+
+// A CLEAR change of subject while a question is held — a question, or a request for
+// something else (camps/fuel/weather/etc). Such a reply is released to general
+// routing at once; anything else that fails to match is treated as a fumbled answer
+// (kept for one more turn). Fuel words are word-boundary anchored so a mis-heard
+// place name ("innisfuel") is NOT read as a fuel request.
+function isTopicChange(text) {
+  const t = (text || '').toLowerCase();
+  return /\?\s*$/.test(t)
+    || /^(?:where|what|when|how|which|find|show|give me|is there|are there|can (?:you|i))\b/i.test(t)
+    || isCampsQuery(t)
+    || /\b(?:fuel|petrol|diesel|servo|unleaded|coffee|toilet|weather)\b/i.test(t);
+}
+// A brief re-ask for a held question that got a fumbled (unmatched) answer. For a
+// two-candidate offer it names BOTH, so "yes" to an either/or is answered with the
+// real choice, never a silent pick of the first.
+function reaskPending(p) {
+  const towns = (p && p.towns) || [];
+  if (p && p.type === 'dest-suggest') {
+    if (towns.length >= 2) {
+      const same = towns.every(x => x.name.toLowerCase() === towns[0].name.toLowerCase());
+      if (same) return `There's a ${towns[0].name} in more than one state — which one, ${towns.slice(0, 2).map(x => x.st).join(' or ')}?`;
+      return `Which one — ${towns[0].name} or ${towns[1].name}?`;
+    }
+    if (towns.length === 1) return `Did you mean ${towns[0].name}? Yes or no.`;
+  }
+  if (p && p.type === 'dest-confirm') return `Which one did you mean — ${p.spoken}, or ${p.resolved}?`;
+  if (p && p.type === 'destination') return `Which town are we heading to?`;
+  if (p && p.type === 'trip-mode') return `Out for the day, or on a journey?`;
+  if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
+  if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
+  if (p && p.type === 'number-which') return `Which one — or all of them?`;
+  return `Sorry, I didn't catch that — say it once more?`;
+}
+// What an UNMATCHED reply to a held question means: 'release' it to general routing
+// (a topic change, or a SECOND consecutive miss) or 'retry' (a first fumble — keep
+// the question one more turn and re-ask). This is the fix for a single slip
+// destroying the pending and mis-routing the reply.
+function pendingMissAction(pending, text) {
+  if (isTopicChange(text)) return 'release';
+  return (pending && (pending.misses || 0) < 1) ? 'retry' : 'release';
+}
 
 // PURE: interpret a short reply as an answer to the pending question.
 // Returns {action:'search', site} | {action:'declined'} | null (= a new query).
@@ -3253,24 +3295,34 @@ function matchPendingAnswer(text, pending) {
     // else is an attempt to answer, so EXTRACT the place(s) from it (no bare-place
     // gate) and let the async handler resolve + commit, or re-ask. Never fall
     // through silently on a place attempt (that left the trip uncommitted).
-    if (/\?$/.test(t) || /^(?:where|what|when|how|which|find|show|give me|is there|are there|can (?:you|i))\b/i.test(t)
-        || isCampsQuery(t) || /\b(?:fuel|petrol|diesel|servo|unleaded|coffee|toilet|weather)\b/i.test(t)) return null;
+    if (isTopicChange(t)) return null;
     const ext = extractDestCandidates(text);
     return { action: 'destination', candidates: ext.candidates, ambiguous: ext.ambiguous };
   }
   if (pending.type === 'dest-suggest') {
-    // We offered "Did you mean X?" (or X-or-Y, or which state). A yes commits the
-    // top; naming one of the offered towns/states picks it; a no re-asks. Anything
-    // else is a fresh attempt — let the normal flow re-extract it.
+    // We offered "Did you mean X?" (single), "X or Y?" (two), or a which-state.
+    // A "no" re-asks. Otherwise strip any leading yes-word and match the REMAINDER
+    // against the offered names/states. A bare yes commits ONLY a single-candidate
+    // offer — on a two-way (or which-state) offer "yes" selects nothing, so it is
+    // NOT an answer: the pending survives and re-asks naming both, never towns[0].
     const towns = pending.towns || [];
-    if (/^(yes|yeah|yep|yup|correct|that'?s right|sure|ok(ay)?|go|do it|please|right)\b/.test(t) && towns[0])
-      return { action: 'suggest-pick', pick: towns[0] };
     if (/^(no|nah|nope|not|wrong|neither)\b/.test(t)) return { action: 'suggest-no' };
-    const byState = towns.find(x => { const ab = AU_STATES[t.replace(/[.?!]/g,'').trim()]; return ab && x.st === ab; }) || towns.find(x => t.includes((x.st || '').toLowerCase()));
-    if (byState) return { action: 'suggest-pick', pick: byState };
-    const byName = towns.find(x => t.includes(x.name.toLowerCase()));
-    if (byName) return { action: 'suggest-pick', pick: byName };
-    return null;   // not an answer to the offer — a fresh place attempt; normal flow handles it
+    const ym = t.match(/^(?:yes|yeah|yep|yup|correct|that'?s right|sure|ok(?:ay)?|go|do it|please|right)\b[\s,.:;!-]*/);
+    const rest = ym ? t.slice(ym[0].length).trim() : t;
+    const pickFrom = (s) => {
+      if (!s) return null;
+      const ab = AU_STATES[s.replace(/[.?!]/g, '').trim()];
+      const byState = (ab && towns.find(x => x.st === ab)) || towns.find(x => s.includes((x.st || '').toLowerCase()));
+      if (byState) return byState;
+      // Longest matching name wins, so "Newcastle Waters" beats "Newcastle" — never
+      // pick a shorter name that is merely a prefix of the town the driver said.
+      const named = towns.filter(x => s.includes(x.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length);
+      return named[0] || null;
+    };
+    const picked = pickFrom(rest);
+    if (picked) return { action: 'suggest-pick', pick: picked };
+    if (ym && !rest && towns.length === 1) return { action: 'suggest-pick', pick: towns[0] };
+    return null;   // bare "yes" to a choice, or an unrecognised reply — not an answer
   }
   if (pending.type === 'trip-mode') {
     // "Out for the day, or on a journey?" — day = back tonight; journey = travelling on.
@@ -4314,9 +4366,10 @@ async function sendMessage(silent){
   // bare "Cardwell" is a new destination, not an answer. Drop it and fall through.
   if (pendingQuestion && !pendingIsFresh()) setPending(null);
   if (pendingIsFresh()) {
-    const pa = matchPendingAnswer(text, pendingQuestion);
-    setPending(null);                     // one shot — answered or superseded
+    const pending = pendingQuestion;      // capture BEFORE any clear — a single miss must not destroy it
+    const pa = matchPendingAnswer(text, pending);
     if (pa) {
+      setPending(null);                   // matched — consumed; each handler below sets the next pending
       inp.value=''; inp.style.height='auto';
       addMsg('user', text);
       if (pa.action === 'destination') {
@@ -4454,6 +4507,20 @@ async function sendMessage(silent){
       }
       return;
     }
+    // UNMATCHED. A clear topic change goes to general routing at once; anything else
+    // keeps the held question alive for ONE more turn and re-asks briefly — a second
+    // miss releases it. (Was: setPending(null) ran unconditionally, so a single slip
+    // destroyed the question and mis-routed the reply — e.g. a mis-heard town.)
+    if (pendingMissAction(pending, text) === 'retry') {
+      inp.value=''; inp.style.height='auto';
+      addMsg('user', text);
+      pending.misses = (pending.misses || 0) + 1;
+      setPending(pending);                // re-arm freshness, keep the question
+      const m = reaskPending(pending);
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return;
+    }
+    setPending(null);                     // topic change, or a second miss — release to general routing
   }
 
   // ── RING-AROUND by voice (part 4): "no room, try the next one" advances the
@@ -4567,7 +4634,7 @@ async function sendMessage(silent){
   // nearest first by road, all pinned on the map. No separate paths.
   let fuelCtx = '';
   let stationsCtx = '';
-  const fuelQuery = /fuel|petrol|diesel|servo|cheapest|unleaded|e10|\b9[158]\b/i.test(scanText);
+  const fuelQuery = /\b(?:fuel|petrol|diesel|servo|cheapest|unleaded|e10|9[158])\b/i.test(scanText);   // word-anchored: "innisfuel" must NOT match
   if (fuelQuery) {
     fuelCtx = await fetchFuelPrices();
   }

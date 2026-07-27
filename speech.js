@@ -957,7 +957,7 @@ function speak(text) {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '28 Jul 2026, 02:13 AM AEST',
+    BUILD: '28 Jul 2026, 02:28 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
