@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 06:38 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 07:31 PM AEST</div>
   </div>
 </div>
 
@@ -2017,6 +2017,33 @@ async function plotTripRoute(dest) {
     })}).addTo(window._navMap);
     window._navMap.fitBounds(routeLine.getBounds(), { padding: [20,20] });
   } catch(e) {}
+}
+
+// Build the AI's route-distance line. ONLY a freshly-computed route for the
+// CURRENT destination may be quoted: it must belong to currentRunDest, carry a
+// real km, and have been computed from roughly where we are NOW. A route for a
+// previous destination, one only seeded at commit time (no origin/no km), or one
+// whose origin is now far behind us is NEVER handed to the AI as a distance — we
+// recompute from the live fix first, and if that hasn't produced numbers yet the
+// context carries NO number and tells the AI the route is still being worked out.
+// (Fix A: a stale origin was feeding "55km" for an ~90km trip.)
+async function buildRouteCtx() {
+  if (!currentRunDest || !gps) return '';
+  let tr = window._tripRoute;
+  const originBad = t => !t || t.originLat == null || isNaN(t.originLat)
+    || distKm(gps.lat, gps.lon, t.originLat, t.originLon) > 20;
+  // Recompute when there's no route, it's for another destination, it has no
+  // computed distance, or its origin is missing/NaN or now >20km behind us.
+  if (!tr || tr.dest !== currentRunDest || tr.km == null || originBad(tr)) {
+    try { await plotTripRoute(currentRunDest); } catch(e) {}
+    tr = window._tripRoute;
+  }
+  // Quote ONLY a fresh route that belongs to this trip, has a real number, and
+  // was computed from near the current fix. Anything else → no distance.
+  if (tr && tr.dest === currentRunDest && tr.km != null && !originBad(tr)) {
+    return `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${tr.dest} is ${tr.km}km away, about ${hrsMinsSpoken(tr.hours * 60)} of driving at car pace (state durations as hours and minutes; there is no decimal to read out).`;
+  }
+  return `ROUTE DATA: the road route to ${currentRunDest} is still being worked out — do NOT state any distance or drive time yet; say you're sizing up the route.`;
 }
 
 // ── VEHICLE SELECTOR ──────────────────────────────────────────────────────────
@@ -5513,15 +5540,10 @@ async function sendMessage(silent){
     if(lastEcon) econCtx=`Driver's logged fuel economy: ${lastEcon.l100}L/100km.`;
   } catch(e) {}
 
-  // Route numbers from OSRM — the AI plans legs from these, never guesses.
-  // Deviated more than 20km from where the route was computed? Recompute first.
-  let routeCtx='';
-  if (window._tripRoute && currentRunDest && gps) {
-    if (distKm(gps.lat, gps.lon, window._tripRoute.originLat, window._tripRoute.originLon) > 20) {
-      await plotTripRoute(currentRunDest);
-    }
-    routeCtx = `ROUTE DATA (OSRM, real roads, computed from CURRENT position): ${window._tripRoute.dest} is ${window._tripRoute.km}km away, about ${hrsMinsSpoken(window._tripRoute.hours * 60)} of driving at car pace (state durations as hours and minutes; there is no decimal to read out).`;
-  }
+  // Route numbers from OSRM — the AI plans legs from these, never guesses. The
+  // helper quotes ONLY a fresh route for the current destination computed from
+  // near the current fix; anything stale/seed/previous-origin yields no number.
+  const routeCtx = await buildRouteCtx();
 
   // Are we somewhere the maps actually know? If not, every distance is suspect.
   const snap = await checkRoadSnap();
