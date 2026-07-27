@@ -572,8 +572,94 @@ async function handlePlacesProbe(request, env) {
   }
 }
 
+// ═══ Nominatim THROUGH the Worker — proper UA + bounded retry/backoff ════════
+// The frontend used to call Nominatim direct from the browser, so a driver retrying
+// got their PHONE rate-limited (~1 req/s per IP) and every lookup then failed. Here
+// it's one identified IP with a KV cache, so the phone is never the throttled party.
+async function nominatim(url) {
+  let lastErr = "";
+  for (let attempt = 0; attempt < 2; attempt++) {   // one retry on a transient blip
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": "NavigatorApp/1.0 (Australian road-trip assistant; csbowring6@gmail.com)",
+          "Accept-Language": "en",
+          "Referer": "https://csbowring6-source.github.io/Navigator2",
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (r.status === 429 || r.status === 502 || r.status === 503 || r.status === 504) {
+        lastErr = "HTTP " + r.status; if (attempt === 0) { await sleep(500); continue; } break;
+      }
+      if (!r.ok) { lastErr = "HTTP " + r.status; break; }
+      const ct = r.headers.get("content-type") || "";
+      if (!/json/.test(ct)) { lastErr = "non-json (" + ct + ")"; break; }   // a rate-limit/block HTML page — NOT a no-match
+      return { data: await r.json() };
+    } catch (e) {
+      lastErr = (e.name === "AbortError" ? "timeout" : "error") + ": " + ((e && e.message) || e);
+      if (attempt === 0) { await sleep(400); continue; } break;
+    }
+  }
+  return { error: lastErr || "geocoder failed" };
+}
+
+// ═══ /geocode — forward geocoding. q + optional limit / addr / lat,lon (+bounded)
+// viewbox bias, so all four frontend call sites keep their behaviour. Returns the
+// Nominatim ARRAY raw. KV keyed on the normalised query, 30-day TTL (towns don't
+// move). A non-200 / non-JSON / network error surfaces as 502 so the app can tell
+// "lookup failed" (transient) from "no match" (empty array) — never conflating them.
+async function handleGeocode(request, env) {
+  const u = new URL(request.url);
+  const q = (u.searchParams.get("q") || "").trim();
+  if (!q) return jsonResp({ error: "q required" }, 400);
+  const limit = Math.min(Math.max(parseInt(u.searchParams.get("limit") || "1"), 1), 5);
+  const addr = u.searchParams.get("addr") === "1";
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const bounded = u.searchParams.get("bounded") === "1";
+  const vbd = Math.min(Math.max(parseFloat(u.searchParams.get("vbd")) || 1.1, 0.2), 10);   // viewbox half-size (deg)
+  const hasBias = !isNaN(lat) && !isNaN(lon);
+  const norm = q.toLowerCase().replace(/\s+/g, " ").trim();
+  const ckey = `geo:${norm}|l${limit}|a${addr ? 1 : 0}` + (hasBias ? `|${lat.toFixed(2)},${lon.toFixed(2)}|b${bounded ? 1 : 0}|v${vbd}` : "");
+  const kv = env && env.PLACES_KV;
+  if (kv) { try { const c = await kv.get(ckey, { type: "json" }); if (c && c.data) return jsonResp({ cached: true, data: c.data }); } catch (e) {} }
+
+  let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=${limit}&countrycodes=au`;
+  if (addr) url += "&addressdetails=1";
+  if (hasBias) { const d = vbd; url += `&viewbox=${lon - d},${lat + d},${lon + d},${lat - d}`; if (bounded) url += "&bounded=1"; }
+
+  const g = await nominatim(url);
+  if (g.error) return jsonResp({ error: "geocoder unavailable", detail: g.error, unavailable: true }, 502);
+  // Cache only a NON-EMPTY hit — a genuine empty stays cheap to re-query and a
+  // transient empty can recover, never persisting a false "no match".
+  if (kv && Array.isArray(g.data) && g.data.length) { try { await kv.put(ckey, JSON.stringify({ data: g.data, ts: Date.now() }), { expirationTtl: 30 * 24 * 3600 }); } catch (e) {} }
+  return jsonResp({ cached: false, data: g.data });
+}
+
+// ═══ /reverse-geocode — position → place label. Same rate-limit exposure; shorter
+// KV TTL (7 days) since a driver moves. Keyed on rounded coords + zoom.
+async function handleReverseGeocode(request, env) {
+  const u = new URL(request.url);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
+  const zoom = u.searchParams.get("zoom") || "";
+  const kv = env && env.PLACES_KV;
+  const ckey = `rev:${lat.toFixed(3)},${lon.toFixed(3)}|z${zoom || "d"}`;
+  if (kv) { try { const c = await kv.get(ckey, { type: "json" }); if (c && c.data) return jsonResp({ cached: true, data: c.data }); } catch (e) {} }
+  let url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+  if (zoom) url += `&zoom=${encodeURIComponent(zoom)}`;
+  const g = await nominatim(url);
+  if (g.error) return jsonResp({ error: "geocoder unavailable", detail: g.error, unavailable: true }, 502);
+  if (kv && g.data && !g.data.error) { try { await kv.put(ckey, JSON.stringify({ data: g.data, ts: Date.now() }), { expirationTtl: 7 * 24 * 3600 }); } catch (e) {} }
+  return jsonResp({ cached: false, data: g.data });
+}
+
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 27 Jul 2026, 10:48 AM AEST (/camps: bounded Overpass retry+backoff, faster mirror timeout, KV stale-serve fallback)";
+const WORKER_BUILD = "Navigator Worker — 27 Jul 2026, 12:27 PM AEST (adds /geocode + /reverse-geocode: through-Worker Nominatim, KV cache, retry/backoff — stops phone rate-limiting)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -661,6 +747,8 @@ export default {
       "/weather": () => handleWeather(request, env),
       "/transcribe": () => handleTranscribe(request, env),
       "/place-phone": () => handlePlacePhone(request, env),
+      "/geocode": () => handleGeocode(request, env),
+      "/reverse-geocode": () => handleReverseGeocode(request, env),
       "/places-probe": () => handlePlacesProbe(request, env),   // TEMPORARY — remove at phase 4
       "/version": () => handleVersion(),
     };

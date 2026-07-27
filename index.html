@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 10:32 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 06:38 PM AEST</div>
   </div>
 </div>
 
@@ -876,6 +876,7 @@ let selectedMap = 'apple';
 let tripContext = '';
 let currentRunDest = '';
 let pendingTripDest = null;
+let destReaskCount = 0;   // consecutive destination re-asks — escalates the wording to ask for the state
 
 // 👍 on an answer about a place = adopt it as the trip, no form needed
 let tripMode = '';   // '' unknown · 'day' (back tonight) · 'journey' (travelling on)
@@ -920,6 +921,7 @@ async function ensureCommittedDest(name) {
 
 async function adoptTrip(dest) {
   currentRunDest = dest;
+  destReaskCount = 0;    // committed — clear the re-ask escalation
   tripMode = '';         // new trip — mode not known until the driver says
   updateSuggestions();   // chips announce route-aware mode
   tripContext = `Destination: ${dest}.`;
@@ -956,13 +958,47 @@ const AU_TRIP_SANITY_KM = 3000;   // beyond this straight-line for ONE spoken as
 // {verdict:'ok'|'notfound'|'confirm', name, lat, lon, km, reason, drift}. The
 // two confirm triggers: a similarly-spelled DIFFERENT place (name drift), or a
 // route wildly out of proportion for one request (scale). Australia-biased.
-async function resolveDestination(spoken) {
-  let r;
+// ALL geocoding now goes THROUGH the Worker (proper User-Agent + KV cache + retry),
+// so a driver's phone can never be the party Nominatim rate-limits. Returns a
+// discriminated result: 'ok' (records), 'empty' (a real no-match), or 'failed' (the
+// lookup ITSELF broke — non-200 / network / JSON). 'failed' is transient and must
+// NEVER be reported as "not found". q, limit, addr, and lat/lon(+bounded, vbd) keep
+// each call site's original behaviour.
+async function geoFetch({ q, limit = 1, addr = false, lat, lon, bounded = false, vbd }) {
+  let url = `${API_URL}geocode?q=${encodeURIComponent(q)}&limit=${limit}`;
+  if (addr) url += '&addr=1';
+  if (lat != null && lon != null) { url += `&lat=${lat}&lon=${lon}`; if (bounded) url += '&bounded=1'; if (vbd) url += `&vbd=${vbd}`; }
   try {
-    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(spoken + ', Australia')}&format=json&limit=1&addressdetails=1&countrycodes=au`, { headers: { 'Accept-Language': 'en' } });
-    r = await g.json();
-  } catch (e) { return { verdict: 'notfound' }; }
-  if (!r || !r.length) return { verdict: 'notfound' };
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
+    const res = await fetch(url, { signal: ctrl.signal }); clearTimeout(to);
+    if (!res.ok) return { status: 'failed' };
+    const j = await res.json();
+    const data = (j && j.data) || null;
+    if (!Array.isArray(data)) return { status: 'failed' };
+    return { status: data.length ? 'ok' : 'empty', data };
+  } catch (e) { return { status: 'failed' }; }
+}
+// Reverse geocode (position → place label) through the Worker too.
+async function revGeoFetch(lat, lon, zoom) {
+  let url = `${API_URL}reverse-geocode?lat=${lat}&lon=${lon}`;
+  if (zoom) url += `&zoom=${zoom}`;
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
+    const res = await fetch(url, { signal: ctrl.signal }); clearTimeout(to);
+    if (!res.ok) return { status: 'failed' };
+    const j = await res.json();
+    if (!j || j.error || !j.data) return { status: 'failed' };
+    return { status: 'ok', data: j.data };
+  } catch (e) { return { status: 'failed' }; }
+}
+
+async function resolveDestination(spoken) {
+  // Distinguish a broken lookup from a genuine no-match — a rate-limited/blocked
+  // geocoder must NEVER be reported as "this town doesn't exist" (SPEC §0).
+  const g = await geoFetch({ q: spoken + ', Australia', addr: true });
+  if (g.status === 'failed') return { verdict: 'lookup-failed' };
+  if (g.status === 'empty') return { verdict: 'notfound' };
+  const r = g.data;
   const hit = r[0];
   const lat = parseFloat(hit.lat), lon = parseFloat(hit.lon);
   const a = hit.address || {};
@@ -979,17 +1015,88 @@ async function resolveDestination(spoken) {
   return { verdict: 'ok', name, lat, lon, km };
 }
 
+// ── AUSTRALIAN TOWN GAZETTEER — phonetic mishear rescue (Parts 2 & 3) ──────────
+// Town names + coords from GeoNames (https://www.geonames.org/, CC-BY 4.0),
+// populated places pop>=1000, suburbs excluded (~1,013 towns). BUNDLED not fetched
+// — mishears happen where signal is worst, so the rescue must work offline. Each
+// row [name, lat, lon, state, phoneticKey]; keys precomputed with the SAME phonKey
+// shipped below, so a candidate's key and a town's key always agree.
+const AU_TOWNS = [["Sydney",-33.8678,151.2073,"NSW","sdn"],["Melbourne",-37.814,144.9633,"VIC","mlbrn"],["Brisbane",-27.4679,153.0281,"QLD","brsbn"],["Perth",-31.9522,115.8614,"WA","prt"],["Adelaide",-34.9287,138.5986,"SA","dld"],["Gold Coast",-28.0003,153.4309,"QLD","gldkst"],["Newcastle",-32.9295,151.7801,"NSW","nkstl"],["Sunshine Coast",-26.6568,153.0796,"QLD","snsnkst"],["Canberra",-35.2835,149.1281,"ACT","knbr"],["Central Coast",-33.4298,151.3714,"NSW","kntrlkst"],["Logan City",-27.6392,153.1094,"QLD","lgnkt"],["Geelong",-38.1471,144.3607,"VIC","glng"],["Wollongong",-34.424,150.8935,"NSW","lngng"],["Hobart",-42.8794,147.3294,"TAS","brt"],["Townsville",-19.2664,146.8057,"QLD","tnsvl"],["Cairns",-16.9237,145.7661,"QLD","krns"],["Toowoomba",-27.5606,151.9539,"QLD","tmb"],["Darwin",-12.4611,130.8418,"NT","drn"],["Ballarat",-37.5662,143.8496,"VIC","blrt"],["Mandurah",-32.5269,115.7217,"WA","mndr"],["Bendigo",-36.7582,144.2802,"VIC","bndg"],["Caloundra",-26.8035,153.1219,"QLD","klndr"],["Launceston",-41.4388,147.1347,"TAS","lnkstn"],["Maitland",-32.7331,151.5574,"NSW","mtlnd"],["Tuggeranong",-35.4165,149.0695,"ACT","tgrng"],["Mackay",-21.1534,149.1655,"QLD","mk"],["Rockhampton",-23.3803,150.506,"QLD","rkmptn"],["Coffs Harbour",-30.2963,153.1135,"NSW","kfsrbr"],["Bunbury",-33.3271,115.6414,"WA","bnbr"],["Bundaberg",-24.8662,152.3479,"QLD","bndbrg"],["Adelaide Hills",-34.9112,138.7073,"SA","dldls"],["Pittwater",-33.6662,151.3017,"NSW","ptr"],["Hervey Bay",-25.2876,152.7694,"QLD","rvb"],["Port Macquarie",-31.4308,152.9089,"NSW","prtmkr"],["Gladstone",-23.8485,151.2577,"QLD","gldstn"],["Tamworth",-31.0905,150.929,"NSW","tmrt"],["Dubbo",-32.243,148.6048,"NSW","db"],["Orange",-33.284,149.1002,"NSW","rng"],["Wodonga",-36.1218,146.8881,"VIC","dng"],["Geraldton",-28.779,114.6146,"WA","grldtn"],["St Albans",-37.745,144.8005,"VIC","stlbns"],["Bathurst",-33.4166,149.5806,"NSW","btrst"],["Albany",-35.0269,117.8837,"WA","lbn"],["Mildura",-34.1855,142.1625,"VIC","mldr"],["Frankston East",-38.1333,145.1333,"VIC","frnkstnst"],["Palmerston",-12.486,130.9833,"NT","plmrstn"],["Warrnambool",-38.3818,142.488,"VIC","rnmbl"],["Shepparton",-36.3805,145.3987,"VIC","sprtn"],["Liverpool",-33.9194,150.9259,"NSW","lvrpl"],["Kwinana",-32.2301,115.7813,"WA","kn"],["Parramatta",-33.8178,151.0035,"NSW","prmt"],["Wangaratta",-36.3585,146.3206,"VIC","ngrt"],["Kalgoorlie",-30.7461,121.4742,"WA","klgrl"],["Maryborough",-25.5407,152.7049,"QLD","mrbr"],["Busselton",-33.6525,115.3455,"WA","bsltn"],["Traralgon",-38.1953,146.5415,"VIC","trlgn"],["Devonport",-41.1769,146.3515,"TAS","dvnprt"],["Alice Springs",-23.6975,133.8836,"NT","lksprngs"],["Mount Gambier",-37.8318,140.7792,"SA","mntgmbr"],["Bacchus Marsh",-37.6727,144.4383,"VIC","bksmrs"],["Goulburn",-34.7516,149.7209,"NSW","glbrn"],["Cessnock",-32.8321,151.3562,"NSW","ksnk"],["Hornsby",-33.7024,151.0993,"NSW","rnsb"],["Gympie",-26.1898,152.665,"QLD","gmp"],["Mount Barker",-35.0667,138.8667,"SA","mntbrkr"],["Armidale",-30.5012,151.6655,"NSW","rmdl"],["Balwyn North",-37.7909,145.0939,"VIC","blnrt"],["Narangba",-27.2034,152.9592,"QLD","nrngb"],["Whyalla",-33.0327,137.5648,"SA","l"],["Griffith",-34.2885,146.0509,"NSW","grft"],["Burnie",-41.0558,145.9038,"TAS","brn"],["Gawler",-34.6025,138.749,"SA","glr"],["Warragul",-38.1591,145.9312,"VIC","rgl"],["Grafton",-29.681,152.9339,"NSW","grftn"],["Torquay",-38.3308,144.3264,"VIC","trk"],["Mount Isa",-20.7252,139.4973,"QLD","mnts"],["Capalaba",-27.5433,153.2029,"QLD","kplb"],["Bairnsdale",-37.8229,147.6104,"VIC","brnsdl"],["Batemans Bay",-35.7066,150.1754,"NSW","btmnsb"],["Broken Hill",-31.9652,141.4512,"NSW","brknl"],["Karratha",-20.7376,116.8463,"WA","krt"],["Horsham",-36.7113,142.1998,"VIC","rsm"],["Taree",-31.911,152.4539,"NSW","tr"],["Muswellbrook",-32.2612,150.8901,"NSW","mslbrk"],["Warwick",-28.219,152.0344,"QLD","rk"],["Rockingham",-32.2768,115.7298,"WA","rknm"],["Port Hedland",-20.3121,118.6106,"WA","prtdlnd"],["Burwood",-37.8498,145.119,"VIC","brd"],["Echuca",-36.1406,144.7518,"VIC","k"],["Wallan",-37.4162,144.9786,"VIC","ln"],["Emerald",-23.523,148.1578,"QLD","mrld"],["Broome",-17.9554,122.2392,"WA","brm"],["Prospect",-34.8824,138.5933,"SA","prspkt"],["Murray Bridge",-35.1199,139.2734,"SA","mrbrdg"],["Sale",-38.111,147.068,"VIC","sl"],["West Wodonga",-36.1235,146.8519,"VIC","stdng"],["Fawkner",-37.7167,144.9667,"VIC","fknr"],["Ocean Grove",-38.2577,144.5192,"VIC","kngrv"],["Clarkson",-31.6828,115.7247,"WA","klrksn"],["Port Pirie",-33.1918,138.0175,"SA","prtpr"],["Esperance",-33.8592,121.8916,"WA","sprnk"],["Port Lincoln",-34.7263,135.8744,"SA","prtlnkln"],["Forster",-32.1814,152.5171,"NSW","frstr"],["Morwell",-38.2348,146.395,"VIC","mrl"],["Goonellabah",-28.8167,153.3167,"NSW","gnlb"],["Maylands",-31.931,115.8949,"WA","mlnds"],["Campbelltown",-34.0667,150.8167,"NSW","kmpbltn"],["Coomera",-27.8433,153.339,"QLD","kmr"],["Redfern",-33.8928,151.2041,"NSW","rdfrn"],["Port Augusta",-32.496,137.7728,"SA","prtgst"],["Dalby",-27.1817,151.262,"QLD","dlb"],["Zetland",-33.9075,151.2086,"NSW","stlnd"],["Woodridge",-27.6333,153.1,"QLD","drdg"],["Figtree",-28.4564,152.892,"NSW","fgtr"],["Caulfield South",-37.8956,145.026,"VIC","klfldst"],["Newman",-23.3564,119.7355,"WA","nmn"],["Moranbah",-22.0016,148.0466,"QLD","mrnb"],["Inverell",-29.774,151.1117,"NSW","nvrl"],["Gracemere",-23.4379,150.4575,"QLD","grkmr"],["Drouin",-38.1366,145.8584,"VIC","drn"],["Pymble",-33.7439,151.1419,"NSW","pmbl"],["Turramurra",-33.7334,151.1285,"NSW","trmr"],["Toongabbie West",-33.7833,150.9333,"NSW","tngbst"],["Swan Hill",-35.3378,143.5544,"VIC","snl"],["Mudgee",-32.5943,149.5871,"NSW","mdg"],["Happy Valley",-35.0833,138.5333,"SA","pvl"],["Bowen",-20.0137,148.2475,"QLD","bn"],["Kempsey",-31.079,152.8309,"NSW","kmps"],["Elsternwick",-37.8864,145.0025,"VIC","lstrnk"],["Mona Vale",-33.6776,151.3031,"NSW","mnvl"],["Casino",-28.8582,153.0475,"NSW","ksn"],["Bowral",-34.4775,150.4204,"NSW","brl"],["Colac",-38.339,143.5849,"VIC","klk"],["Hamilton",-37.7443,142.022,"VIC","mltn"],["Kingaroy",-26.5399,151.8373,"QLD","kngr"],["Young",-34.3135,148.3011,"NSW","ng"],["New Lambton",-32.9284,151.7085,"NSW","nlmbtn"],["Cowra",-33.8355,148.6966,"NSW","kr"],["Parkes",-33.1372,148.1759,"NSW","prks"],["Moree",-29.4628,149.8416,"NSW","mr"],["Gunnedah",-30.9807,150.2584,"NSW","gnd"],["Redlynch",-16.9254,145.6956,"QLD","rdlnk"],["Nowra",-34.8842,150.6004,"NSW","nr"],["Portland",-38.3462,141.6026,"VIC","prtlnd"],["Moe",-38.1783,146.261,"VIC","m"],["Benalla",-36.5511,145.9843,"VIC","bnl"],["Joondalup",-31.7445,115.7683,"WA","jndlp"],["Newport",-33.6564,151.314,"NSW","nprt"],["Tweed Heads",-28.1767,153.5452,"NSW","tds"],["Athelstone",-34.8702,138.6999,"SA","tlstn"],["Ballina",-28.8641,153.5654,"NSW","bln"],["Ayr",-19.5739,147.4067,"QLD","r"],["Kelso",-33.4167,149.6,"NSW","kls"],["Gisborne",-37.4886,144.5942,"VIC","gsbrn"],["Leeton",-34.551,146.4048,"NSW","ltn"],["Mareeba",-16.991,145.4231,"QLD","mrb"],["Mosman Park",-32.0054,115.7638,"WA","msmnprk"],["Ararat",-37.2854,142.9273,"VIC","rt"],["Forbes",-33.3844,148.0076,"NSW","frbs"],["Quinns Rocks",-31.6738,115.7037,"WA","knsrks"],["Moss Vale",-34.5537,150.3712,"NSW","msvl"],["Bentley",-32.0022,115.9247,"WA","bntl"],["Mooroopna",-36.4,145.35,"VIC","mrpn"],["Darley",-37.6581,144.4434,"VIC","drl"],["Mango Hill",-27.2435,153.0238,"QLD","mngl"],["Katoomba",-33.7198,150.3074,"NSW","ktmb"],["Bargara",-24.8148,152.4626,"QLD","brgr"],["Salisbury",-34.7667,138.6333,"SA","slsbr"],["Campbelltown",-34.8833,138.6667,"SA","kmpbltn"],["West Busselton",-33.6579,115.3229,"WA","stbsltn"],["Charters Towers",-20.0767,146.2635,"QLD","krtrstrs"],["Claremont",-31.9796,115.7823,"WA","klrmnt"],["Aintree",-37.7225,144.6677,"VIC","ntr"],["Narrabri",-30.3249,149.7827,"NSW","nrbr"],["Kilmore",-37.2958,144.9525,"VIC","klmr"],["Maryborough",-37.0456,143.7392,"VIC","mrbr"],["Deniliquin",-35.5324,144.9536,"NSW","dnlkn"],["Kelvin Grove",-27.4482,153.0134,"QLD","klvngrv"],["Irymple",-34.2354,142.171,"VIC","rmpl"],["Tamborine Mountain",-27.9695,153.1994,"QLD","tmbrnmntn"],["Yarrawonga",-36.0192,145.9997,"VIC","rng"],["Atherton",-17.2686,145.4752,"QLD","trtn"],["Margaret River",-33.955,115.076,"WA","mrgrtrvr"],["Castlemaine",-37.0671,144.2168,"VIC","kstlmn"],["Collie",-33.3621,116.1562,"WA","kl"],["Healesville",-37.654,145.5172,"VIC","lsvl"],["Chinchilla",-26.7379,150.6297,"QLD","knkl"],["Mindarie",-31.6893,115.707,"WA","mndr"],["Blaxland",-33.75,150.6,"NSW","blkslnd"],["Clifton Springs",-38.1567,144.5551,"VIC","klftnsprngs"],["East Fremantle",-32.0382,115.7676,"WA","stfrmntl"],["Kalamunda",-31.9737,116.0584,"WA","klmnd"],["Cottesloe",-31.9943,115.7582,"WA","ktsl"],["Roma",-26.5674,148.7875,"QLD","rm"],["Kyabram",-36.3133,145.0504,"VIC","kbrm"],["Phillip Island",-38.4835,145.231,"VIC","flpslnd"],["Noosa Heads",-26.3943,153.0901,"QLD","nsds"],["Yeppoon",-23.1268,150.7441,"QLD","pn"],["Sanctuary Point",-35.1036,150.6267,"NSW","snktrpnt"],["Gatton",-27.5587,152.2762,"QLD","gtn"],["Urraween",-25.2952,152.8221,"QLD","rn"],["Yamba",-29.4375,153.3591,"NSW","mb"],["Kyneton",-37.2444,144.4515,"VIC","kntn"],["Kiama",-34.6683,150.8522,"NSW","km"],["Albion Park Rail",-34.5663,150.7918,"NSW","lbnprkrl"],["Belmont",-31.9435,115.9255,"WA","blmnt"],["Pottsville",-28.3874,153.5586,"NSW","ptsvl"],["Cootamundra",-34.6409,148.0284,"NSW","ktmndr"],["Goondiwindi",-28.5471,150.3055,"QLD","gndnd"],["Cooma",-36.2352,149.1241,"NSW","km"],["Jindabyne",-36.4175,148.6225,"NSW","jndbn"],["Heathridge",-31.7624,115.7589,"WA","trdg"],["Nambucca Heads",-30.6432,153.0088,"NSW","nmbkds"],["Northam",-31.6493,116.6742,"WA","nrtm"],["Bomaderry",-34.8497,150.6109,"NSW","bmdr"],["Ulladulla",-35.3591,150.4725,"NSW","ldl"],["Yass",-34.8404,148.9099,"NSW","s"],["Beaudesert",-27.9869,152.9966,"QLD","bdsrt"],["Strathalbyn",-35.2598,138.8925,"SA","strtlbn"],["Byron Bay",-28.6499,153.6125,"NSW","brnb"],["Lennox Head",-28.7913,153.592,"NSW","lnksd"],["Queanbeyan",-35.3549,149.232,"NSW","knbn"],["Tuncurry",-32.1744,152.4988,"NSW","tnkr"],["Wauchope",-31.4579,152.7262,"NSW","kp"],["Seymour",-37.0266,145.1392,"VIC","smr"],["Nuriootpa",-34.4682,138.9977,"SA","nrtp"],["Toormina",-30.3538,153.0884,"NSW","trmn"],["Ulverstone",-41.1603,146.1824,"TAS","lvrstn"],["Tumut",-35.3064,148.2182,"NSW","tmt"],["South Grafton",-29.7076,152.9263,"NSW","stgrftn"],["Moama",-36.1041,144.7608,"NSW","m"],["Cobram",-35.9207,145.6407,"VIC","kbrm"],["Nambucca",-30.6333,152.9833,"NSW","nmbk"],["Biloela",-24.3959,150.515,"QLD","bl"],["Cannonvale",-20.2768,148.6976,"QLD","knvl"],["Glen Innes",-29.7349,151.7385,"NSW","glns"],["Blackwater",-23.5835,148.8791,"QLD","blktr"],["Klemzig",-34.8793,138.6356,"SA","klmsg"],["Katherine",-14.4652,132.2635,"NT","ktrn"],["Stawell",-37.0563,142.7809,"VIC","stl"],["Naracoorte",-36.9579,140.7383,"SA","nrkrt"],["Barrack Heights",-34.5646,150.8569,"NSW","brkts"],["Wynyard",-40.9897,145.7262,"TAS","nrd"],["Mullaloo",-31.779,115.7368,"WA","ml"],["Grange",-34.9022,138.4902,"SA","grng"],["Caulfield",-37.8825,145.0229,"VIC","klfld"],["Mittagong",-34.45,150.4457,"NSW","mtgng"],["Woodend",-37.3547,144.529,"VIC","dnd"],["Point Vernon",-25.2573,152.8173,"QLD","pntvrn"],["Alstonville",-28.8419,153.4402,"NSW","lstnvl"],["Scone",-32.0501,150.8689,"NSW","skn"],["East Ballina",-28.8571,153.5874,"NSW","stbln"],["Sarina",-21.4191,149.2168,"QLD","srn"],["Shell Cove",-34.5899,150.862,"NSW","slkv"],["Woolgoolga",-30.1106,153.2007,"NSW","lglg"],["Richmond",-33.5996,150.7514,"NSW","rkmnd"],["Leongatha",-38.4761,145.9469,"VIC","lngt"],["Red Hill",-20.3167,148.5,"QLD","rdl"],["Stanthorpe",-28.6543,151.9339,"QLD","stntrp"],["New Norfolk",-42.7826,147.0587,"TAS","nrflk"],["Wingham",-31.8668,152.3699,"NSW","nm"],["Albury",-36.0748,146.924,"NSW","lbr"],["Corowa",-35.997,146.3855,"NSW","kr"],["Red Cliffs",-34.3094,142.1897,"VIC","rdklfs"],["Inverloch",-38.6266,145.7226,"VIC","nvrlk"],["Bennett Springs",-31.8594,115.9451,"WA","bntsprngs"],["Bannockburn",-38.0489,144.1688,"VIC","bnkbrn"],["Tannum Sands",-23.9475,151.3675,"QLD","tnmsnds"],["Iluka",-31.7355,115.7306,"WA","lk"],["Ocean Shores",-28.5093,153.5376,"NSW","knsrs"],["Lithgow",-33.4845,150.149,"NSW","ltg"],["Jordan Springs",-33.7214,150.7287,"NSW","jrdnsprngs"],["Singleton",-32.5674,151.166,"NSW","sngltn"],["Calliope",-24.007,151.2003,"QLD","klp"],["Maffra",-37.9713,146.9837,"VIC","mfr"],["East Lismore",-28.8259,153.2888,"NSW","stlsmr"],["Tahmoor",-34.2225,150.5947,"NSW","tmr"],["Laverton",-37.862,144.7698,"VIC","lvrtn"],["Dunsborough",-33.6148,115.1044,"WA","dnsbr"],["Merbein",-34.168,142.066,"VIC","mrbn"],["Worrigee",-34.9,150.6333,"NSW","rg"],["Nairne",-35.0345,138.9115,"SA","nrn"],["Millicent",-37.5939,140.3495,"SA","mlknt"],["Glenbrook",-33.7667,150.6167,"NSW","glnbrk"],["West Kempsey",-31.0576,152.8279,"NSW","stkmps"],["Hazelbrook",-33.7245,150.4584,"NSW","slbrk"],["Carnarvon",-24.8826,113.6571,"WA","krnrvn"],["Lakes Entrance",-37.8668,148.0016,"VIC","lksntrnk"],["South West Rocks",-30.8855,153.0413,"NSW","ststrks"],["Mansfield",-37.052,146.0885,"VIC","mnsfld"],["Junee",-34.8682,147.5827,"NSW","jn"],["Leura",-33.7167,150.3333,"NSW","lr"],["Wonthaggi",-38.6059,145.5935,"VIC","ntg"],["White Rock",-16.9744,145.7633,"QLD","trk"],["Cowes",-38.4523,145.2387,"VIC","ks"],["Pinjarra",-32.6298,115.8735,"WA","pnjr"],["Picton",-34.17,150.6117,"NSW","pktn"],["Churchill",-38.3078,146.4137,"VIC","krkl"],["Oakey",-27.4331,151.7206,"QLD","k"],["Parkside",-34.9451,138.613,"SA","prksd"],["Boyne Island",-23.9483,151.3534,"QLD","bnslnd"],["Bega",-36.6739,149.8418,"NSW","bg"],["Reynella",-35.0937,138.5308,"SA","rnl"],["Renmark",-34.177,140.747,"SA","rnmrk"],["Encounter Bay",-35.5742,138.6005,"SA","nkntrb"],["Nickol",-20.7456,116.7954,"WA","nkl"],["Romsey",-37.3507,144.743,"VIC","rms"],["Temora",-34.4483,147.5356,"NSW","tmr"],["Roxby Downs",-30.5631,136.8955,"SA","rksbdns"],["Narromine",-32.2312,148.2405,"NSW","nrmn"],["Alexandra Headland",-26.6715,153.1006,"QLD","lksndrdlnd"],["Singleton Heights",-32.5416,151.1609,"NSW","sngltnts"],["Chisholm",-32.7591,151.6346,"NSW","kslm"],["Blair Athol",-34.8589,138.5966,"SA","blrtl"],["Ingham",-18.6455,146.1625,"QLD","nm"],["Tanunda",-34.5234,138.9598,"SA","tnd"],["Victor Harbor",-35.5504,138.6215,"SA","vktrbr"],["Kununurra",-15.7782,128.7421,"WA","knr"],["Tatura",-36.4396,145.2299,"VIC","tr"],["Numurkah",-36.0885,145.4421,"VIC","nmrk"],["Narrandera",-34.7475,146.551,"NSW","nrndr"],["Weir Views",-37.7312,144.5758,"VIC","rvs"],["Port Augusta West",-32.4861,137.7583,"SA","prtgstst"],["Old Bar",-31.9694,152.5881,"NSW","ldbr"],["Bargo",-34.293,150.5781,"NSW","brg"],["Korumburra",-38.4319,145.8236,"VIC","krmbr"],["Manjimup",-34.2412,116.1456,"WA","mnjmp"],["Bellerive",-42.8755,147.3703,"TAS","blrv"],["Beechworth",-36.3583,146.6858,"VIC","bkrt"],["George Town",-41.1056,146.8261,"TAS","grgtn"],["Narrogin",-32.9328,117.1776,"WA","nrgn"],["Broadford",-37.2028,145.0484,"VIC","brdfrd"],["Ettalong",-33.513,151.3383,"NSW","tlng"],["Mount Coolum",-26.5658,153.0914,"QLD","mntklm"],["Cobar",-31.4967,145.8344,"NSW","kbr"],["Berri",-34.2811,140.5996,"SA","br"],["Drysdale",-38.1724,144.5699,"VIC","drsdl"],["Derby",-17.3029,123.6286,"WA","drb"],["Tenterfield",-29.0495,152.0195,"NSW","tntrfld"],["Lowood",-27.4656,152.5762,"QLD","ld"],["Wellington",-32.5559,148.9451,"NSW","lngtn"],["Bungendore",-35.2538,149.4401,"NSW","bngndr"],["Latrobe",-41.2464,146.4246,"TAS","ltrb"],["Dysart",-22.5882,148.3492,"QLD","dsrt"],["East Devonport",-41.1879,146.3866,"TAS","stdvnprt"],["Merimbula",-36.889,149.9096,"NSW","mrmbl"],["Thirlmere",-34.2045,150.5677,"NSW","trlmr"],["Loxton",-34.4502,140.5691,"SA","lkstn"],["Moruya",-35.9125,150.0814,"NSW","mr"],["Elimbah",-27.0167,152.95,"QLD","lmb"],["Faulconbridge",-33.7,150.5333,"NSW","flknbrdg"],["Legana",-41.3657,147.0458,"TAS","lgn"],["Lismore",-28.8135,153.2773,"NSW","lsmr"],["Scarness",-25.2841,152.856,"QLD","skrns"],["Edge Hill",-16.9,145.75,"QLD","dgl"],["Margate",-43.0281,147.2626,"TAS","mrgt"],["Kerang",-35.7349,143.9203,"VIC","krng"],["Smithton",-40.8459,145.125,"TAS","smtn"],["Suffolk Park",-28.6881,153.6098,"NSW","sflkprk"],["Bellingen",-30.4529,152.8991,"NSW","blngn"],["Sawtell",-30.3646,153.1014,"NSW","stl"],["Westbrook",-27.6167,151.8667,"QLD","stbrk"],["Marion",-35.0042,138.5531,"SA","mrn"],["Trafalgar",-38.2091,146.1535,"VIC","trflgr"],["Somerset",-41.0406,145.8305,"TAS","smrst"],["Longford",-41.6051,147.1189,"TAS","lngfrd"],["Penguin",-41.1226,146.0732,"TAS","pngn"],["North Gosford",-33.414,151.3516,"NSW","nrtgsfrd"],["Bridgewater",-35.014,138.7665,"SA","brdgtr"],["Laidley",-27.6328,152.3929,"QLD","ldl"],["Marian",-21.1439,148.9421,"QLD","mrn"],["Maleny",-26.76,152.8493,"QLD","mln"],["Exmouth",-21.9306,114.1209,"WA","ksmt"],["Longreach",-23.4421,144.2492,"QLD","lngrk"],["Barwon Heads",-38.2745,144.4885,"VIC","brnds"],["Katanning",-33.6879,117.5584,"WA","ktng"],["Port Douglas",-16.4838,145.4673,"QLD","prtdgls"],["Silverdale",-33.9152,150.6096,"NSW","slvrdl"],["Mullumbimby",-28.5524,153.4996,"NSW","mlmbmb"],["Proserpine",-20.4011,148.5802,"QLD","prsrpn"],["Cobblebank",-37.7064,144.602,"VIC","kblbnk"],["Nanango",-26.6716,152.0021,"QLD","ng"],["Buninyong",-37.6502,143.8839,"VIC","bng"],["Darlington",-31.9191,116.0812,"WA","drlngtn"],["Shellharbour",-34.5833,150.8667,"NSW","slrbr"],["Wallaroo",-33.9388,137.6336,"SA","lr"],["Charleville",-26.4054,146.2427,"QLD","krlvl"],["Sussex Inlet",-35.1567,150.5853,"NSW","sksnlt"],["Portarlington",-38.1154,144.6556,"VIC","prtrlngtn"],["Aldgate",-35.0167,138.7333,"SA","ldgt"],["Brighton",-35.0182,138.5235,"SA","brtn"],["Condobolin",-33.0888,147.1514,"NSW","kndbln"],["Maddingley",-37.6852,144.4324,"VIC","mdngl"],["Clermont",-22.8241,147.6363,"QLD","klrmnt"],["Hermit Park",-19.2874,146.8004,"QLD","rmtprk"],["Quirindi",-31.5076,150.679,"NSW","krnd"],["McKail",-34.9853,117.8301,"WA","mkl"],["Blayney",-33.5323,149.2537,"NSW","bln"],["Nhulunbuy",-12.1816,136.7784,"NT","nlnb"],["Coonabarabran",-31.2773,149.279,"NSW","knbrbrn"],["Lake Cathie",-31.5518,152.8546,"NSW","lkt"],["Evans Head",-29.1178,153.4307,"NSW","vnsd"],["Tom Price",-22.6939,117.7931,"WA","tmprk"],["Willaston",-34.5864,138.7412,"SA","lstn"],["Falls Creek",-36.8653,147.2778,"VIC","flskrk"],["Port Fairy",-38.3854,142.2371,"VIC","prtfr"],["Paynesville",-37.9189,147.7194,"VIC","pnsvl"],["Myrtleford",-36.561,146.7237,"VIC","mrtlfrd"],["Harvey",-33.0786,115.9151,"WA","rv"],["West Wyalong",-33.9237,147.2047,"NSW","stlng"],["Camperdown",-38.2339,143.1498,"VIC","kmprdn"],["Katherine East",-14.466,132.2856,"NT","ktrnst"],["Oberon",-33.704,149.8591,"NSW","brn"],["Clare",-33.8332,138.6106,"SA","klr"],["Fernvale",-27.4548,152.6532,"QLD","frnvl"],["Clifton Beach",-16.7631,145.6717,"QLD","klftnbk"],["Walkerston",-21.161,149.0581,"QLD","lkrstn"],["Pittsworth",-27.7164,151.634,"QLD","ptsrt"],["Svensson Heights",-24.8857,152.3318,"QLD","svnsnts"],["Tea Tree Gully",-34.8167,138.7333,"SA","trgl"],["Westcourt",-26.8,150.15,"QLD","stkrt"],["Euroa",-36.7555,145.5708,"VIC","r"],["Cooktown",-15.4657,145.2498,"QLD","ktn"],["Cloncurry",-20.7072,140.513,"QLD","klnkr"],["Creswick",-37.424,143.8947,"VIC","krsk"],["Murrumbateman",-34.972,149.0299,"NSW","mrmbtmn"],["Vincentia",-35.0682,150.6748,"NSW","vnknt"],["Wamuran",-27.0391,152.8654,"QLD","mrn"],["Galston",-33.653,151.0471,"NSW","glstn"],["Eden",-37.0667,149.9003,"NSW","dn"],["Kurrajong",-33.5553,150.67,"NSW","krjng"],["Robinvale",-34.5836,142.7723,"VIC","rbnvl"],["Beresfield",-32.8,151.65,"NSW","brsfld"],["Gilgandra",-31.7117,148.6625,"NSW","glgndr"],["Tennant Creek",-19.6497,134.1915,"NT","tntkrk"],["Wilton",-34.2405,150.6977,"NSW","ltn"],["Urunga",-30.497,153.0142,"NSW","rng"],["Trinity Park",-16.8068,145.7055,"QLD","trntprk"],["Miners Rest",-37.4808,143.8011,"VIC","mnrsrst"],["Currumbin",-28.1365,153.4816,"QLD","krmbn"],["Bonny Hills",-31.5906,152.8391,"NSW","bnls"],["Thabeban",-24.9,152.35,"QLD","tbn"],["Home Hill",-19.6592,147.4123,"QLD","ml"],["Kuranda",-16.8198,145.6382,"QLD","krnd"],["Lewiston",-34.6045,138.5913,"SA","lstn"],["Tura Beach",-36.8636,149.9303,"NSW","trbk"],["Shoalhaven Heads",-34.8509,150.7451,"NSW","slvnds"],["Wilberforce",-33.5626,150.8378,"NSW","lbrfrk"],["Rochester",-36.3635,144.7008,"VIC","rkstr"],["Ipswich",-27.6234,152.7607,"QLD","psk"],["Barmera",-34.2556,140.4615,"SA","brmr"],["Harrington",-31.8831,152.6592,"NSW","rngtn"],["Ballan",-37.5999,144.2289,"VIC","bln"],["Kapunda",-34.3387,138.9164,"SA","kpnd"],["Perth",-41.5723,147.171,"TAS","prt"],["Bordertown",-36.3077,140.7717,"SA","brdrtn"],["Gloucester",-32.0077,151.9633,"NSW","glkstr"],["Stirling",-35.0022,138.7196,"SA","strlng"],["Waroona",-32.8432,115.922,"WA","rn"],["Merredin",-31.4809,118.2745,"WA","mrdn"],["Twin Waters",-26.6342,153.0811,"QLD","tntrs"],["St Helena",-37.6899,145.1232,"VIC","stln"],["Weipa",-12.6235,141.8788,"QLD","p"],["Middlemount",-22.8123,148.6993,"QLD","mdlmnt"],["St. Georges Basin",-35.0899,150.598,"NSW","stgrgsbsn"],["Thursday Island",-10.5826,142.2195,"QLD","trsdslnd"],["Deloraine",-41.5248,146.657,"TAS","dlrn"],["Elliminyt",-38.3711,143.58,"VIC","lmnt"],["Tea Gardens",-32.6635,152.154,"NSW","tgrdns"],["Culburra Beach",-34.9279,150.7577,"NSW","klbrbk"],["Daylesford",-37.3411,144.1426,"VIC","dlsfrd"],["Burswood",-31.9587,115.904,"WA","brsd"],["Midway Point",-42.7948,147.5288,"TAS","mdpnt"],["Bedfordale",-32.1741,116.0504,"WA","bdfrdl"],["Wollongbar",-28.8182,153.3969,"NSW","lngbr"],["Yakamia",-35.0039,117.8783,"WA","km"],["Bridgetown",-33.9624,116.136,"WA","brdgtn"],["Coonamble",-30.9539,148.3888,"NSW","knmbl"],["Tolga",-17.1856,145.4771,"QLD","tlg"],["North Wonthaggi",-38.5777,145.593,"VIC","nrtntg"],["Kadina",-33.965,137.7163,"SA","kdn"],["Hahndorf",-35.0286,138.8078,"SA","ndrf"],["Heathcote",-36.9221,144.7084,"VIC","tkt"],["Bundanoon",-34.6566,150.2962,"NSW","bndn"],["Waikerie",-34.1818,139.9855,"SA","kr"],["Maclean",-29.4581,153.1975,"NSW","mkln"],["Uralla",-30.6411,151.5007,"NSW","rl"],["Howlong",-35.982,146.6325,"NSW","lng"],["Korora",-30.2462,153.1149,"NSW","kr"],["Williamstown",-34.6721,138.8911,"SA","lmstn"],["Bedford Park",-35.022,138.5682,"SA","bdfrdprk"],["Mount Barker",-34.6308,117.6661,"WA","mntbrkr"],["Mannum",-34.9153,139.3032,"SA","mnm"],["Ascot",-31.9382,115.9226,"WA","skt"],["Burnett Heads",-24.7647,152.4127,"QLD","brntds"],["Huonville",-43.0312,147.0481,"TAS","nvl"],["Trigg",-31.8694,115.7571,"WA","trg"],["Moore Park Beach",-24.7107,152.209,"QLD","mrprkbk"],["Zilzie",-23.2887,150.7982,"QLD","sls"],["Donnybrook",-33.5713,115.8245,"WA","dnbrk"],["Lawson",-33.7206,150.4298,"NSW","lsn"],["Berry",-34.7751,150.6944,"NSW","br"],["Greenmount",-31.9007,116.0495,"WA","grnmnt"],["Lightning Ridge",-29.4274,147.9786,"NSW","ltngrdg"],["Hill Top",-34.3479,150.4955,"NSW","ltp"],["Tocumwal",-35.8115,145.5692,"NSW","tkml"],["Narooma",-36.2178,150.1325,"NSW","nrm"],["Windang",-34.5333,150.8667,"NSW","ndng"],["Blair Athol",-30.65,150.2,"NSW","blrtl"],["Macksville",-30.7078,152.9203,"NSW","mksvl"],["Bright",-36.73,146.9598,"VIC","brt"],["Denmark",-34.9607,117.3532,"WA","dnmrk"],["Burradoo",-34.5032,150.409,"NSW","brd"],["Kalbarri",-27.7105,114.165,"WA","klbr"],["Darlington",-33.891,151.1955,"NSW","drlngtn"],["Wickham",-20.6747,117.1378,"WA","km"],["Nullagine",-21.8897,120.1114,"WA","nlgn"],["Appin",-34.2035,150.7864,"NSW","pn"],["Crookwell",-34.4592,149.4714,"NSW","krkl"],["Alexandra",-37.1913,145.7112,"VIC","lksndr"],["Parkhurst",-23.3,150.5167,"QLD","prkrst"],["Mount Buller",-37.1459,146.4369,"VIC","mntblr"],["Sunshine Beach",-26.4058,153.1078,"QLD","snsnbk"],["Molong",-33.0923,148.87,"NSW","mlng"],["Whitebridge",-32.9744,151.7161,"NSW","tbrdg"],["Cooloola Cove",-25.9864,152.9935,"QLD","klkv"],["Elizabeth Hills",-33.8986,150.8476,"NSW","lsbtls"],["Walcha",-30.9849,151.5933,"NSW","lk"],["Bonville",-30.3828,153.0596,"NSW","bnvl"],["Boonah",-27.9972,152.6811,"QLD","bn"],["Agnes Water",-24.2119,151.9035,"QLD","gnstr"],["The Oaks",-34.0799,150.57,"NSW","tks"],["Manilla",-30.7475,150.7197,"NSW","mnl"],["Two Wells",-34.5933,138.5137,"SA","tls"],["Gulgong",-32.3625,149.532,"NSW","glgng"],["Pearce",-31.6667,116.0167,"WA","prk"],["Stratford",-37.9634,147.0826,"VIC","strtfrd"],["Woodside",-34.9543,138.879,"SA","dsd"],["Beaumont",-34.949,138.6619,"SA","bmnt"],["Point Lonsdale",-38.2817,144.6105,"VIC","pntlnsdl"],["Grenfell",-33.8955,148.1644,"NSW","grnfl"],["Sutton",-35.1667,149.25,"NSW","stn"],["Finley",-35.655,145.5711,"NSW","fnl"],["Anglesea",-38.4073,144.1859,"VIC","ngls"],["York",-31.8881,116.7678,"WA","rk"],["Mollymook Beach",-35.3297,150.4717,"NSW","mlmkbk"],["Lancefield",-37.2773,144.736,"VIC","lnkfld"],["Tully",-17.9326,145.9228,"QLD","tl"],["Saint Leonards",-38.1705,144.718,"VIC","sntlnrds"],["Capel",-33.5581,115.5628,"WA","kpl"],["Murgon",-26.2417,151.9405,"QLD","mrgn"],["Tin Can Bay",-25.9191,153.0032,"QLD","tnknb"],["Warracknabeal",-36.2533,142.3928,"VIC","rknbl"],["Hay",-34.509,144.8431,"NSW",""],["Craigburn Farm",-35.0405,138.6049,"SA","krgbrnfrm"],["Cohuna",-35.807,144.2189,"VIC","kn"],["New Gisborne",-37.4607,144.5993,"VIC","ngsbrn"],["Rutherglen",-36.0543,146.4621,"VIC","rtrgln"],["Portland",-33.3571,149.9815,"NSW","prtlnd"],["Vasse",-33.6934,115.2678,"WA","vs"],["Maningrida",-12.0483,134.2294,"NT","mngrd"],["Huntly",-36.6645,144.3338,"VIC","ntl"],["North Coogee",-32.0951,115.7597,"WA","nrtkg"],["Baranduda",-36.1911,146.9538,"VIC","brnd"],["Scottsdale",-41.1578,147.5173,"TAS","sktsdl"],["Mulwala",-35.9854,146.0053,"NSW","ml"],["Moonta Bay",-34.05,137.5667,"SA","mntb"],["Emerald Beach",-30.1639,153.1819,"NSW","mrldbk"],["Tara",-27.2761,150.4568,"QLD","tr"],["Willunga",-35.2713,138.5542,"SA","lng"],["Canowindra",-33.5625,148.6643,"NSW","kndr"],["Emu Park",-23.2568,150.8268,"QLD","mprk"],["Yulara",-25.2406,130.9889,"NT","lr"],["Hadspen",-41.5006,147.0736,"TAS","dspn"],["Innes Park",-24.8683,152.4799,"QLD","nsprk"],["Rosenthal Heights",-28.2401,152.0133,"QLD","rsntlts"],["Eglinton",-33.3773,149.5465,"NSW","glntn"],["Sandy Beach",-30.1468,153.1924,"NSW","sndbk"],["Moura",-24.5722,149.9673,"QLD","mr"],["Goolwa",-35.5016,138.7819,"SA","gl"],["Burrum Heads",-25.1846,152.6126,"QLD","brmds"],["Gelorup",-33.4243,115.6409,"WA","glrp"],["Freeling",-34.4541,138.8087,"SA","frlng"],["Nyngan",-31.5637,147.1937,"NSW","ngn"],["Terang",-38.2408,142.9212,"VIC","trng"],["Austins Ferry",-42.7667,147.25,"TAS","stnsfr"],["Jindera",-35.9547,146.8885,"NSW","jndr"],["Tuross Head",-36.0533,150.1332,"NSW","trsd"],["Galiwinku",-12.0281,135.5649,"NT","glnk"],["Lobethal",-34.9046,138.8748,"SA","lbtl"],["Caravonica",-16.8706,145.681,"QLD","krvnk"],["Orbost",-37.6964,148.457,"VIC","rbst"],["Crows Nest",-27.2599,152.0516,"QLD","krsnst"],["Nhill",-36.3333,141.6501,"VIC","nl"],["Kyogle",-28.6228,152.9974,"NSW","kgl"],["Toogoom",-25.2564,152.6902,"QLD","tgm"],["Dayboro",-27.1963,152.8225,"QLD","dbr"],["Coolamon",-34.8164,147.1958,"NSW","klmn"],["Callala Bay",-34.9967,150.7228,"NSW","klb"],["Laverton",-28.6253,122.3994,"WA","lvrtn"],["Mirboo North",-38.401,146.1613,"VIC","mrbnrt"],["Walgett",-30.0246,148.1157,"NSW","lgt"],["Coober Pedy",-29.0142,134.755,"SA","kbrpd"],["Lismore Heights",-28.801,153.3005,"NSW","lsmrts"],["Kootingal",-31.0586,151.0535,"NSW","ktngl"],["Ceduna",-32.1266,133.6727,"SA","kdn"],["Nowra Hill",-34.9284,150.5724,"NSW","nrl"],["Camden Haven",-31.6448,152.7946,"NSW","kmdnvn"],["Mossman",-16.4629,145.3714,"QLD","msmn"],["Yarram",-38.5648,146.6756,"VIC","rm"],["Wee Waa",-30.2266,149.4404,"NSW",""],["Gowrie Junction",-27.4833,151.8833,"QLD","grjnktn"],["Port Elliot",-35.5302,138.6792,"SA","prtlt"],["Littlehampton",-35.0423,138.8642,"SA","ltlmptn"],["Angaston",-34.5013,139.0462,"SA","ngstn"],["The Rocks",-33.8592,151.2081,"NSW","trks"],["Cundletown",-31.8941,152.5214,"NSW","kndltn"],["Lower Chittering",-31.5833,116.1167,"WA","lrktrng"],["St Helens",-41.3203,148.2389,"TAS","stlns"],["Brunswick Heads",-28.54,153.5457,"NSW","brnskds"],["Balaklava",-34.1454,138.4115,"SA","blklv"],["Miles",-26.6584,150.1882,"QLD","mls"],["Gayndah",-25.6252,151.6114,"QLD","gnd"],["Bourke",-30.0901,145.9365,"NSW","brk"],["Heddon Greta",-32.802,151.5133,"NSW","dngrt"],["Koroit",-38.2918,142.3673,"VIC","krt"],["Aberdeen",-32.1659,150.89,"NSW","brdn"],["Dundowran Beach",-25.2693,152.7623,"QLD","dndrnbk"],["Malanda",-17.3523,145.5953,"QLD","mlnd"],["Guyra",-30.2168,151.6678,"NSW","gr"],["Buxton",-34.2602,150.5329,"NSW","bkstn"],["Moonee Beach",-30.2057,153.1529,"NSW","mnbk"],["Bangalow",-28.6863,153.5215,"NSW","bngl"],["Dungog",-32.4043,151.7519,"NSW","dng"],["Goolwa Beach",-35.5047,138.7732,"SA","glbk"],["Macedon",-37.4196,144.5624,"VIC","mkdn"],["South Bowenfels",-33.5167,150.1167,"NSW","stbnfls"],["Iluka",-29.4015,153.3511,"NSW","lk"],["Lyndoch",-34.6012,138.8909,"SA","lndk"],["Wondai",-26.3177,151.8724,"QLD","nd"],["Gol Gol",-34.1788,142.2215,"NSW","glgl"],["Desert Springs",-23.7155,133.8877,"NT","dsrtsprngs"],["Heyfield",-37.9813,146.7856,"VIC","fld"],["Wallerawang",-33.411,150.0646,"NSW","lrng"],["Clarence Town",-32.584,151.7776,"NSW","klrnktn"],["Westbury",-41.5291,146.8391,"TAS","stbr"],["Mount Morgan",-23.6453,150.389,"QLD","mntmrgn"],["Ascot",-36.7,144.3333,"VIC","skt"],["Wadeye",-14.2383,129.5218,"NT","d"],["Dalmeny",-36.1661,150.1291,"NSW","dlmn"],["Kingscote",-35.6559,137.6393,"SA","kngskt"],["Phillip",-31.1333,150.85,"NSW","flp"],["Crafers",-34.989,138.716,"SA","krfrs"],["Winchelsea",-38.2448,143.9832,"VIC","nkls"],["Port Sorell",-41.1665,146.5528,"TAS","prtsrl"],["Curra",-26.0667,152.5833,"QLD","kr"],["Kilcoy",-26.943,152.5654,"QLD","klk"],["Seacliff",-35.0347,138.5229,"SA","sklf"],["Tongala",-36.2547,144.9562,"VIC","tngl"],["Nagambie",-36.7852,145.1538,"VIC","ngmb"],["Gladstone Central",-23.8428,151.2489,"QLD","gldstnkntrl"],["Gleneagle",-27.9333,152.9833,"QLD","glngl"],["East Innisfail",-17.5332,146.0349,"QLD","stnsfl"],["Malua Bay",-35.7938,150.2283,"NSW","mlb"],["Dennington",-38.3552,142.4336,"VIC","dngtn"],["Healy",-20.746,139.5001,"QLD","l"],["Sandford",-42.9333,147.5,"TAS","sndfrd"],["Mitcham",-34.9789,138.6218,"SA","mkm"],["Nathalia",-36.0577,145.2041,"VIC","ntl"],["Kingsthorpe",-27.4756,151.8141,"QLD","kngstrp"],["Withcott",-27.5541,152.0243,"QLD","tkt"],["South Lismore",-28.8163,153.2562,"NSW","stlsmr"],["Moora",-30.64,116.0036,"WA","mr"],["Denman",-32.3879,150.6893,"NSW","dnmn"],["Oakdale",-34.0793,150.5132,"NSW","kdl"],["Barooga",-35.906,145.6959,"NSW","brg"],["Katherine South",-14.4678,132.2585,"NT","ktrnst"],["Robertson",-34.5874,150.5912,"NSW","rbrtsn"],["Queenstown",-42.0805,145.5565,"TAS","knstn"],["Cowaramup",-33.8504,115.1038,"WA","krmp"],["Tumbarumba",-35.7781,148.0117,"NSW","tmbrmb"],["Yea",-37.2107,145.4275,"VIC",""],["Fitzroy Crossing",-18.1971,125.5666,"WA","ftsrkrsng"],["Wyreema",-27.6558,151.8553,"QLD","rm"],["Craignish",-25.2826,152.7243,"QLD","krgns"],["Jurien Bay",-30.3059,115.0383,"WA","jrnb"],["Cobden",-38.3286,143.0748,"VIC","kbdn"],["Yackandandah",-36.3137,146.8396,"VIC","kndnd"],["Merriwa",-32.1392,150.3556,"NSW","mr"],["Kambalda West",-31.2017,121.6306,"WA","kmbldst"],["North Haven",-31.6368,152.8136,"NSW","nrtvn"],["Foster",-38.6527,146.2007,"VIC","fstr"],["Paraburdoo",-23.2042,117.6697,"WA","prbrd"],["Garfield",-38.0898,145.675,"VIC","grfld"],["Halls Creek",-18.2248,127.6665,"WA","lskrk"],["Clunes",-37.2947,143.7864,"VIC","klns"],["Campbells Creek",-37.0866,144.202,"VIC","kmpblskrk"],["Raworth",-32.7333,151.6167,"NSW","rt"],["Esk",-27.2389,152.4222,"QLD","sk"],["Gundagai",-35.0635,148.1036,"NSW","gndg"],["Kooralbyn",-28.0796,152.8397,"QLD","krlbn"],["Tumby Bay",-34.3773,136.1007,"SA","tmb"],["Teesdale",-38.0333,144.05,"VIC","tsdl"],["Wongaling Beach",-17.9133,146.0961,"QLD","nglngbk"],["Holbrook",-35.721,147.316,"NSW","lbrk"],["Tieri",-23.0383,148.3446,"QLD","tr"],["Dimboola",-36.4562,142.0329,"VIC","dmbl"],["Maldon",-36.9957,144.0683,"VIC","mldn"],["Heywood",-38.1329,141.6295,"VIC","d"],["Tathra",-36.7313,149.9833,"NSW","tr"],["Tailem Bend",-35.2523,139.4555,"SA","tlmbnd"],["Balhannah",-34.9909,138.8256,"SA","bln"],["Gulmarrad",-29.487,153.2334,"NSW","glmrd"],["Romaine",-41.0994,145.8938,"TAS","rmn"],["Crescent Head",-31.1887,152.973,"NSW","krskntd"],["Broulee",-35.8547,150.1739,"NSW","brl"],["Barcaldine",-23.5535,145.2854,"QLD","brkldn"],["Tarro",-32.8,151.6667,"NSW","tr"],["Fingal Bay",-32.7497,152.171,"NSW","fnglb"],["Boambee",-30.3398,153.0678,"NSW","bmb"],["Boorowa",-34.4366,148.7163,"NSW","br"],["Turners Beach",-41.1606,146.2319,"TAS","trnrsbk"],["Yarragon",-38.2052,146.0608,"VIC","rgn"],["Rosedale",-38.1545,146.7886,"VIC","rsdl"],["Milton",-35.3164,150.4361,"NSW","mltn"],["Spreyton",-41.2352,146.3511,"TAS","sprtn"],["Childers",-25.2371,152.2788,"QLD","kldrs"],["Jamestown",-33.2053,138.605,"SA","jmstn"],["Casterton",-37.5849,141.403,"VIC","kstrtn"],["Cardwell",-18.2669,146.028,"QLD","krdl"],["Braidwood",-35.4415,149.7998,"NSW","brd"],["Bardia",-33.9779,150.8631,"NSW","brd"],["Neerim South",-38.0168,145.9545,"VIC","nrmst"],["Warialda",-29.5435,150.5754,"NSW","rld"],["Normanville",-35.4462,138.3213,"SA","nrmnvl"],["Garden Island",-32.2426,115.695,"WA","grdnslnd"],["Colo Vale",-34.401,150.4857,"NSW","klvl"],["Teralba",-32.9667,151.6,"NSW","trlb"],["Wy Yung",-37.8,147.5833,"VIC","ng"],["Apollo Bay",-38.7594,143.6722,"VIC","plb"],["Plainland",-27.5667,152.4167,"QLD","plnlnd"],["Chiltern",-36.1504,146.6084,"VIC","kltrn"],["Rainbow Beach",-25.9043,153.0917,"QLD","rnbk"],["Normanton",-17.6718,141.0772,"QLD","nrmntn"],["Bowen Mountain",-33.5719,150.6256,"NSW","bnmntn"],["Kleinton",-27.4333,151.95,"QLD","klntn"],["Nimbin",-28.5954,153.2234,"NSW","nmbn"],["Millmerran",-27.8791,151.2706,"QLD","mlmrn"],["Cambooya",-27.7145,151.8603,"QLD","kmb"],["Jabiru",-12.6705,132.836,"NT","jbr"],["Cygnet",-43.1533,147.0725,"TAS","kgnt"],["Bermagui",-36.419,150.0635,"NSW","brmg"],["Beaufort",-37.43,143.3835,"VIC","bfrt"],["Barham",-35.6265,144.129,"NSW","brm"],["Peterborough",-32.9721,138.8407,"SA","ptrbr"],["Werris Creek",-31.3491,150.6487,"NSW","rskrk"],["Gooburrum",-24.8231,152.3315,"QLD","gbrm"],["Hatton Vale",-27.5667,152.4667,"QLD","tnvl"],["Crystal Brook",-33.3526,138.2096,"SA","krstlbrk"],["Mirani",-21.1573,148.8622,"QLD","mrn"],["Port Denison",-29.2737,114.9207,"WA","prtdnsn"],["Basin View",-35.0883,150.5553,"NSW","bsnv"],["Caddens",-33.7741,150.7413,"NSW","kdns"],["Cumbalum",-28.8225,153.5284,"NSW","kmblm"],["Booral",-25.3605,152.9081,"QLD","brl"],["Yallourn North",-38.1605,146.3645,"VIC","lrnrt"],["Yenda",-34.2452,146.2027,"NSW","nd"],["Sheffield",-41.3995,146.339,"TAS","sfld"],["River Heads",-25.4155,152.9132,"QLD","rvrds"],["Wentworth",-34.1073,141.9132,"NSW","ntrt"],["Kinglake",-37.5329,145.3396,"VIC","knglk"],["Bulahdelah",-32.407,152.2118,"NSW","bldl"],["Jolimont",-37.8168,144.9846,"VIC","jlmnt"],["Allansford",-38.3864,142.5943,"VIC","lnsfrd"],["Richmond",-42.7355,147.4383,"TAS","rkmnd"],["Donald",-36.3686,142.9811,"VIC","dnld"],["Doomadgee",-17.9435,138.8272,"QLD","dmdg"],["Solomontown",-33.1853,138.0236,"SA","slmntn"],["Woodgate",-25.1083,152.5625,"QLD","dgt"],["Ravenshoe",-17.609,145.4841,"QLD","rvns"],["Streaky Bay",-32.7955,134.2093,"SA","strkb"],["Hillston",-33.4827,145.5352,"NSW","lstn"],["Balranald",-34.6365,143.5614,"NSW","blrnld"],["Lake Cargelligo",-33.2988,146.373,"NSW","lkrglg"],["Longford",-38.1624,147.0859,"VIC","lngfrd"],["Kingston",-34.2333,140.35,"SA","kngstn"],["The Entrance North",-33.3357,151.5034,"NSW","tntrnknrt"],["Bridport",-41.0005,147.3918,"TAS","brdprt"],["Bingara",-29.8693,150.572,"NSW","bngr"],["Wagin",-33.3089,117.3433,"WA","gn"],["Burrill Lake",-35.3872,150.4495,"NSW","brlk"],["Smythes Creek",-37.6,143.7833,"VIC","smtskrk"],["Inverleigh",-38.1018,144.0513,"VIC","nvrl"],["Culcairn",-35.6667,147.0385,"NSW","klkrn"],["Clifton",-27.9337,151.9066,"QLD","klftn"],["Thebarton",-34.9167,138.5667,"SA","tbrtn"],["Hyde Park",-19.2769,146.7965,"QLD","dprk"],["Mount Compass",-35.3469,138.6203,"SA","mntkmps"],["Oakhurst",-25.5125,152.6358,"QLD","krst"],["Frederickton",-31.0375,152.8753,"NSW","frdrktn"],["Marong",-36.7333,144.1333,"VIC","mrng"],["West Lamington",-30.7471,121.4525,"WA","stlmngtn"],["Dongara",-29.238,114.927,"WA","dngr"],["Metung",-37.8915,147.853,"VIC","mtng"],["Morpeth",-32.7333,151.6333,"NSW","mrpt"],["Penola",-37.3752,140.8368,"SA","pnl"],["Eulomogo",-32.2667,148.6833,"NSW","lmg"],["Bombala",-36.9121,149.2367,"NSW","bmbl"],["Toodyay",-31.5498,116.4674,"WA","td"],["Blackall",-24.4233,145.463,"QLD","blkl"],["Roebuck",-18.1713,122.5012,"WA","rbk"],["Augusta",-34.3157,115.1592,"WA","gst"],["Barraba",-30.3855,150.609,"NSW","brb"],["Long Beach",-35.7083,150.2448,"NSW","lngbk"],["Wallington",-38.2264,144.512,"VIC","lngtn"],["Collinsville",-20.5522,147.844,"QLD","klnsvl"],["Yungaburra",-17.2706,145.5833,"QLD","ngbr"],["Buronga",-34.1707,142.1735,"NSW","brng"],["Warren",-31.7022,147.8339,"NSW","rn"],["Mundubbera",-25.5927,151.3022,"QLD","mndbr"],["Douglas Park",-34.185,150.7145,"NSW","dglsprk"],["Macclesfield",-35.1718,138.8359,"SA","mklsfld"],["Meadows",-35.1802,138.7625,"SA","mds"],["Berridale",-36.3667,148.8277,"NSW","brdl"],["Hindmarsh Island",-35.5101,138.8676,"SA","ndmrslnd"],["Innisfail Estate",-17.5183,146.0447,"QLD","nsflst"],["Bagdad",-42.6297,147.2234,"TAS","bgd"],["Valla Beach",-30.5926,153.0113,"NSW","vlbk"],["Mortlake",-38.081,142.8083,"VIC","mrtlk"],["Leinster",-27.9203,120.6967,"WA","lnstr"],["Howard",-25.3193,152.5599,"QLD","rd"],["Seven Mile Beach",-42.8586,147.5053,"TAS","svnmlbk"],["Wandong",-37.3719,145.0321,"VIC","ndng"],["Kurrajong Heights",-33.5277,150.6291,"NSW","krjnts"],["Waterview Heights",-29.6977,152.8392,"NSW","trvts"],["Holmesville",-32.9167,151.5833,"NSW","lmsvl"],["Keith",-36.0991,140.3531,"SA","kt"],["Moolap",-38.1833,144.4333,"VIC","mlp"],["Rushworth",-36.5867,145.0175,"VIC","rsrt"],["Airlie Beach",-20.2675,148.7147,"QLD","rlbk"],["Puckapunyal",-36.9949,145.0401,"VIC","pkpnl"],["Chewton",-37.0814,144.2568,"VIC","ktn"],["Benaraby",-24.0042,151.3341,"QLD","bnrb"],["Babinda",-17.3439,145.9227,"QLD","bnd"],["Wundowie",-31.7616,116.3799,"WA","nd"],["Kingston South East",-36.8307,139.8522,"SA","kngstnstst"],["Sharon",-24.8759,152.2699,"QLD","srn"],["Mount Macedon",-37.4005,144.5841,"VIC","mntmkdn"],["Evandale",-41.5686,147.2527,"TAS","vndl"],["Quindalup",-33.6356,115.149,"WA","kndlp"],["Toogoolawah",-27.0866,152.3764,"QLD","tgl"],["Kandos",-32.8577,149.9683,"NSW","knds"],["Hawks Nest",-32.6675,152.1783,"NSW","ksnst"],["Coraki",-28.9926,153.2837,"NSW","krk"],["Bywong",-35.1648,149.3289,"NSW","bng"],["San Remo",-38.5255,145.3762,"VIC","snrm"],["Aurukun",-13.3558,141.7271,"QLD","rkn"],["Milingimbi",-12.1019,134.919,"NT","mlngmb"],["Cherbourg",-26.2919,151.9521,"QLD","krbrg"],["Coleambally",-34.8039,145.8804,"NSW","klmbl"],["Karumba",-17.4869,140.8426,"QLD","krmb"],["Mission Beach",-17.8688,146.1039,"QLD","msnbk"],["Lockyer",-35.0057,117.8588,"WA","lkr"],["Corryong",-36.197,147.9026,"VIC","krng"],["Leonora",-28.8851,121.3307,"WA","lnr"],["Batlow",-35.5199,148.1473,"NSW","btl"],["Boggabri",-30.7095,150.0412,"NSW","bgbr"],["Hay Point",-21.2965,149.2737,"QLD","pnt"],["Geeveston",-43.1634,146.9255,"TAS","gvstn"],["Beaconsfield",-41.2023,146.8172,"TAS","bknsfld"],["Canungra",-28.0169,153.1652,"QLD","kngr"],["Hughenden",-20.844,144.2003,"QLD","ndn"],["Cowell",-33.6823,136.9212,"SA","kl"],["Dunedoo",-32.0163,149.3871,"NSW","dnd"],["Ranelagh",-43.0098,147.0376,"TAS","rnl"],["Innisfail",-17.5221,146.031,"QLD","nsfl"],["Queenscliff",-38.2679,144.6619,"VIC","knsklf"],["Winton",-22.3819,143.0424,"QLD","ntn"],["Renmark West",-34.1653,140.7097,"SA","rnmrkst"],["Bamaga",-10.892,142.3893,"QLD","bmg"],["Yoogali",-34.2994,146.0844,"NSW","gl"],["Kojonup",-33.8305,117.1595,"WA","kjnp"],["Cunnamulla",-28.0677,145.6844,"QLD","knml"],["Berrigan",-35.6588,145.8115,"NSW","brgn"],["Alton Downs",-23.3,150.35,"QLD","ltndns"],["Coolah",-31.8279,149.7156,"NSW","kl"],["Lucknow",-37.8167,147.65,"VIC","lkn"],["Hanwood",-34.331,146.0414,"NSW","nd"],["Monto",-24.8648,151.122,"QLD","mnt"],["Moorak",-37.8638,140.7426,"SA","mrk"],["Skennars Head",-28.8289,153.6021,"NSW","sknrsd"],["Warragamba",-33.8919,150.6046,"NSW","rgmb"],["Maitland",-34.3739,137.6733,"SA","mtlnd"],["Nabiac",-32.0984,152.3763,"NSW","nbk"],["Port Broughton",-33.6007,137.936,"SA","prtbrtn"],["Minden",-27.5597,152.5449,"QLD","mndn"],["Henty",-35.5209,147.0343,"NSW","nt"],["Elliott Heads",-24.9162,152.4899,"QLD","ltds"],["Aldavilla",-31.0818,152.7679,"NSW","ldvl"],["Millthorpe",-33.446,149.1854,"NSW","mltrp"],["The Rock",-35.273,147.1138,"NSW","trk"],["Coominya",-27.3901,152.5006,"QLD","kmn"],["Binningup",-33.1483,115.6952,"WA","bngp"],["Snug",-43.0667,147.2547,"TAS","sng"],["Kalimna",-37.8701,147.9666,"VIC","klmn"],["Smiths Lake",-32.3804,152.5034,"NSW","smtslk"],["Allora",-28.0348,151.9806,"QLD","lr"],["Lorne",-38.5404,143.9764,"VIC","lrn"],["Alyangula",-13.8541,136.4213,"NT","lngl"],["Quorn",-32.3468,138.0418,"SA","krn"],["Medindie",-34.896,138.605,"SA","mdnd"],["Ouyen",-35.0709,142.3203,"VIC","n"],["Beauty Point",-41.1622,146.8215,"TAS","btpnt"],["Mitchell",-26.4849,147.9742,"QLD","mkl"],["Raglan",-33.4167,149.6667,"NSW","rgln"],["Haddon",-37.6,143.7167,"VIC","dn"],["Greenwell Point",-34.9075,150.7311,"NSW","grnlpnt"],["Dampier",-20.6627,116.7126,"WA","dmpr"],["Avoca",-37.0904,143.4736,"VIC","vk"],["Boyanup",-33.483,115.7284,"WA","bnp"],["Trangie",-32.0315,147.9834,"NSW","trng"],["Marulan",-34.7084,150.0097,"NSW","mrln"],["Timboon",-38.4843,142.9803,"VIC","tmbn"],["Darlington Point",-34.5694,145.9987,"NSW","drlngtnpnt"],["Onslow",-21.6376,115.1122,"WA","nsl"],["Kambalda East",-31.2055,121.6701,"WA","kmbldst"],["Bindoon",-31.3866,116.0966,"WA","bndn"],["Cambewarra Village",-34.8233,150.5594,"NSW","kmbrvlg"],["Ngukurr",-14.7308,134.731,"NT","ngkr"],["Boddington",-32.8007,116.4752,"WA","bdngtn"],["Brewarrina",-29.9607,146.8599,"NSW","brn"],["Ardrossan",-34.4222,137.9191,"SA","rdrsn"],["Dorrigo",-30.3411,152.7139,"NSW","drg"],["Burra",-33.6717,138.9283,"SA","br"],["Aldershot",-25.4631,152.6635,"QLD","ldrst"],["Yerrinbool",-34.3688,150.5385,"NSW","rnbl"],["Menangle",-34.1268,150.7387,"NSW","mngl"],["Gin Gin",-24.9936,151.9581,"QLD","gngn"],["Cleve",-33.7,136.5,"SA","klv"],["East Carnarvon",-24.864,113.6777,"WA","stkrnrvn"],["Gundaroo",-35.0333,149.25,"NSW","gndr"],["Zuccoli",-12.5073,131.0069,"NT","skl"],["Gordon",-37.5823,144.1093,"VIC","grdn"],["Ross Creek",-37.65,143.75,"VIC","rskrk"],["Nanum",-12.6451,141.8622,"QLD","nm"],["Middleton",-35.5105,138.7038,"SA","mdltn"],["Bluewater",-19.1816,146.5582,"QLD","bltr"],["Kersbrook",-34.7831,138.8509,"SA","krsbrk"],["Springsure",-24.1148,148.0885,"QLD","sprngsr"],["Bakers Hill",-31.7469,116.4587,"WA","bkrsl"],["Trentham",-37.3888,144.3216,"VIC","trntm"],["Kendall",-31.633,152.7039,"NSW","kndl"],["Wandoan",-26.1228,149.9603,"QLD","ndn"],["Indented Head",-38.1431,144.7134,"VIC","ndntd"],["Carisbrook",-37.0481,143.8167,"VIC","krsbrk"],["Moonbi",-31.0177,151.0706,"NSW","mnb"],["Bowraville",-30.65,152.8515,"NSW","brvl"],["Craiglie",-16.5379,145.4696,"QLD","krgl"],["Monash",-34.2384,140.5613,"SA","mns"],["Robe",-37.1639,139.7603,"SA","rb"],["Julatten",-16.6072,145.3412,"QLD","jltn"],["Mylor",-35.043,138.759,"SA","mlr"],["Tomakin",-35.8233,150.1879,"NSW","tmkn"],["Wattle Ponds",-32.5203,151.1936,"NSW","tlpnds"],["Nebo",-21.6833,148.6833,"QLD","nb"],["Meningie",-35.6864,139.3401,"SA","mng"],["Mollymook",-35.3411,150.4695,"NSW","mlmk"],["Darlington",-35.0315,138.5553,"SA","drlngtn"],["Tinonee",-31.9363,152.4143,"NSW","tn"],["Cressy",-41.6856,147.0779,"TAS","krs"],["Echunga",-35.1035,138.7959,"SA","kng"],["Wurruk",-38.1167,147.0333,"VIC","rk"],["Brandon",-19.5539,147.353,"QLD","brndn"],["Mulambin",-23.1876,150.7893,"QLD","mlmbn"],["Kalbar",-27.9417,152.6237,"QLD","klbr"],["Mallacoota",-37.559,149.7541,"VIC","mlkt"],["Franklin",-43.0888,147.0091,"TAS","frnkln"],["Minlaton",-34.771,137.5958,"SA","mnltn"],["Greenock",-34.457,138.9272,"SA","grnk"],["Cabarlah",-27.4333,152,"QLD","kbrl"],["Briagolong",-37.8436,147.0727,"VIC","brglng"],["Helidon",-27.5532,152.124,"QLD","ldn"],["Wahgunyah",-36.0118,146.3971,"VIC","gn"],["Bouldercombe",-23.5705,150.4695,"QLD","bldrkmb"],["Glengarry",-38.1167,146.5667,"VIC","glngr"],["Hope Vale",-15.2956,145.1113,"QLD","pvl"],["Coutts Crossing",-29.8262,152.8916,"NSW","ktskrsng"],["Yarraman",-26.8417,151.9814,"QLD","rmn"],["Nicholson",-37.8167,147.7333,"VIC","nklsn"],["Strathmerton",-35.9253,145.4786,"VIC","strtmrtn"],["Tallangatta",-36.2179,147.177,"VIC","tlngt"],["Kew",-31.636,152.7266,"NSW","k"],["Trunding",-12.6342,141.8696,"QLD","trndng"],["Mount Melville",-35.0222,117.8714,"WA","mntmlvl"],["Nana Glen",-30.1333,153.0167,"NSW","ngln"],["Yallingup",-33.6459,115.0351,"WA","lngp"],["Eagle Point",-37.9,147.6833,"VIC","glpnt"],["Dimbulah",-17.1475,145.1097,"QLD","dmbl"],["Tomerong",-35.0523,150.5865,"NSW","tmrng"],["Murrurundi",-31.7642,150.8357,"NSW","mrnd"],["Old Erowal Bay",-35.0846,150.6457,"NSW","ldrlb"],["Lockhart",-35.2233,146.7182,"NSW","lkrt"],["Capella",-23.0859,148.0221,"QLD","kpl"],["Porepunkah",-36.6961,146.9104,"VIC","prpnk"],["Jerilderie",-35.3576,145.7296,"NSW","jrldr"],["Charlton",-36.2644,143.349,"VIC","krltn"],["Pemberton",-34.4431,116.0369,"WA","pmbrtn"],["Smythesdale",-37.6431,143.6862,"VIC","smtsdl"],["Lawrence",-29.4921,153.0969,"NSW","lrnk"],["Pie Creek",-26.2299,152.6077,"QLD","pkrk"],["Bucca",-24.8667,152.1,"QLD","bk"],["Avenel",-36.9009,145.2337,"VIC","vnl"],["Jandowae",-26.7841,151.1124,"QLD","jnd"]];
+const AU_STATES = { 'australian capital territory':'ACT', act:'ACT', 'new south wales':'NSW', nsw:'NSW', 'northern territory':'NT', nt:'NT', queensland:'QLD', qld:'QLD', 'south australia':'SA', sa:'SA', tasmania:'TAS', tas:'TAS', tassie:'TAS', victoria:'VIC', vic:'VIC', 'western australia':'WA', wa:'WA' };
+// Consonant skeleton — drop vowels + weak h/w, so a mis-hear that keeps the strong
+// consonants ("Innisfail" -> N S F L, "end this file" -> N D T S F L) still matches.
+function phonKey(s) {
+  let t = (s || '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, '');
+  if (!t) return '';
+  t = t.replace(/ph/g,'f').replace(/gh/g,'').replace(/ck/g,'k').replace(/sch/g,'sk')
+       .replace(/tch/g,'k').replace(/sh/g,'s').replace(/ch/g,'k').replace(/th/g,'t')
+       .replace(/wh/g,'w').replace(/x/g,'ks').replace(/qu?/g,'k').replace(/z/g,'s').replace(/c/g,'k');
+  t = t.replace(/[aeiouyhw]/g,'').replace(/(.)\1+/g,'$1');
+  return t;
+}
+function phonSubseq(a, b) { let i = 0; for (let j = 0; j < b.length && i < a.length; j++) if (a[i] === b[j]) i++; return i === a.length; }
+// Phonetic matches for a FAILED candidate, best-first; the driver's state favoured.
+function matchTowns(candidate, state) {
+  const ck = phonKey(candidate); if (ck.length < 2) return [];
+  const out = [];
+  for (const t of AU_TOWNS) {
+    const key = t[4]; if (!key || key.length < 2) continue;
+    const dist = editDistance(key, ck); if (dist > 2) continue;   // hard gate — no weak matches
+    const contained = key.length >= 3 && phonSubseq(key, ck);
+    const score = dist - (contained ? 0.5 : 0) - (t[3] === state ? 0.25 : 0);
+    out.push({ name: t[0], lat: t[1], lon: t[2], st: t[3], dist, score });
+  }
+  out.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
+  return out;
+}
+// The offer to make, or null: a single 'did you mean', a two-way choice, or a
+// which-state question when the same name sits in several states.
+function decideOffer(candidate, state) {
+  const m = matchTowns(candidate, state); if (!m.length) return null;
+  const best = m[0];
+  const close = m.filter(x => x.score - best.score < 0.75).slice(0, 4);
+  const sameName = close.filter(x => x.name.toLowerCase() === best.name.toLowerCase());
+  if (sameName.length >= 2) return { kind: 'state', name: best.name, options: sameName };
+  if (close.length === 1) return { kind: 'one', town: best };
+  return { kind: 'two', towns: close.slice(0, 2) };
+}
+// The driver's state abbrev from their position label (for the state-favour bias).
+function driverState() { const a = (typeof gpsAddress !== 'undefined' && gpsAddress || '').toLowerCase(); for (const k in AU_STATES) if (a.includes(k)) return AU_STATES[k]; return ''; }
+// Peel a trailing state off a spoken place ("Innisfail Queensland" -> place + state).
+function splitTownState(spoken) {
+  const m = (spoken || '').trim().match(/^(.*?)[,\s]+(australian capital territory|new south wales|northern territory|south australia|western australia|queensland|tasmania|victoria|qld|nsw|vic|tas|tassie|act|nt|sa|wa)\.?$/i);
+  if (m && m[1].trim()) return { place: m[1].trim(), state: AU_STATES[m[2].toLowerCase()] || '' };
+  return { place: (spoken || '').trim(), state: '' };
+}
+// A candidate FAILED to geocode. Before re-asking: try the phonetic gazetteer. One
+// strong match -> OFFER it (never a silent commit); several -> name two / ask which
+// state. Nothing -> the mishear is OURS, not the town's: echo what we heard, own it,
+// and say exactly what to do — escalating to town+state on a repeat. Sets the pending
+// and returns the message.
+function respondToUnresolved(candidate) {
+  const { place, state } = splitTownState(candidate);
+  const offer = decideOffer(place, state || driverState());
+  if (offer) {
+    if (offer.kind === 'one') { setPending({ type: 'dest-suggest', towns: [offer.town] }); return `Did you mean ${offer.town.name}?`; }
+    if (offer.kind === 'two') { setPending({ type: 'dest-suggest', towns: offer.towns }); return `Did you mean ${offer.towns[0].name} or ${offer.towns[1].name}?`; }
+    const sts = offer.options.map(o => o.st);
+    setPending({ type: 'dest-suggest', towns: offer.options });
+    return `There's a ${offer.name} in more than one state — which one, ${sts.slice(0, 2).join(' or ')}?`;
+  }
+  destReaskCount++;
+  setPending({ type: 'destination' });
+  return destReaskCount >= 2
+    ? `I heard "${candidate}" — still not catching it. Say just the town name and the state, like "Innisfail, Queensland".`
+    : `I heard "${candidate}" — I don't think I caught that right. Say just the town name, nice and clearly.`;
+}
+
 // Re-resolve a name PREFERRING somewhere near the driver — used when they insist
 // on the local candidate the global geocoder skipped over.
 async function geocodeLocal(name) {
   if (!gps) return geocodePlace(name);
-  const d = 5;   // ~550km viewbox around the driver
-  try {
-    const vb = `${gps.lon - d},${gps.lat + d},${gps.lon + d},${gps.lat - d}`;
-    const g = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Australia')}&format=json&limit=1&countrycodes=au&viewbox=${vb}&bounded=1`, { headers: { 'Accept-Language': 'en' } });
-    const r = await g.json();
-    if (r && r.length) return { lat: parseFloat(r[0].lat), lon: parseFloat(r[0].lon) };
-  } catch (e) {}
+  // ~550km viewbox around the driver (vbd=5), through the Worker.
+  const g = await geoFetch({ q: name + ', Australia', lat: gps.lat, lon: gps.lon, bounded: true, vbd: 5 });
+  if (g.status === 'ok') return { lat: parseFloat(g.data[0].lat), lon: parseFloat(g.data[0].lon) };
   return null;
 }
 
@@ -1967,19 +2074,17 @@ function initGPS() {
   navigator.geolocation.getCurrentPosition(async pos => {
     gpsRetries = 0;
     gps = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-    try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gps.lat}&lon=${gps.lon}&format=json`,{headers:{'Accept-Language':'en'}});
-      const d = await r.json();
-      const suburb = d.address?.suburb||d.address?.town||d.address?.village||d.address?.county||'';
-      const state  = d.address?.state||'';
+    {
+      const rg = await revGeoFetch(gps.lat, gps.lon);
+      const d = rg.status === 'ok' ? rg.data : null;
+      const suburb = d && (d.address?.suburb||d.address?.town||d.address?.village||d.address?.county)||'';
+      const state  = (d && d.address?.state)||'';
       if (suburb) {
         gpsAddress = `${suburb}, ${state}`;
       } else if (!gpsAddress || /^📍?\s*-?\d/.test(gpsAddress.replace('📍 ',''))) {
         // Only fall back to raw numbers if we don't already hold a real name
         gpsAddress = `${gps.lat.toFixed(3)}, ${gps.lon.toFixed(3)}`;
       }
-    } catch {
-      if (!gpsAddress) gpsAddress = `${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}`;
     }
     updateGps('📍 ' + gpsAddress);
     document.getElementById('mapPlaceholderText').textContent = gpsAddress;
@@ -2027,23 +2132,21 @@ function closeLocSheet(e) {
 async function setManualLocation() {
   const q = document.getElementById('locInput').value.trim();
   if (!q) return;
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Australia')}&format=json&limit=1`, {headers:{'Accept-Language':'en'}});
-    const d = await r.json();
-    if (d && d.length) {
-      gps = { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
-      gpsAddress = q + ' (manual)';
-      try { localStorage.setItem('navigator_manual_loc', JSON.stringify({ lat: gps.lat, lon: gps.lon, label: q })); } catch(e) {}
-      updateGps('📍 ' + gpsAddress);
-      document.getElementById('mapPlaceholderText').textContent = gpsAddress;
-      loadGoogleMaps();
-      fetchWeather();
-      document.getElementById('locSheet').classList.remove('open');
-    } else {
-      alert('Couldn\'t find that place — try town plus state, e.g. "Canungra QLD".');
-    }
-  } catch(e) {
-    alert('Location lookup failed — check your connection and try again.');
+  const g = await geoFetch({ q: q + ', Australia' });
+  if (g.status === 'ok') {
+    gps = { lat: parseFloat(g.data[0].lat), lon: parseFloat(g.data[0].lon) };
+    gpsAddress = q + ' (manual)';
+    try { localStorage.setItem('navigator_manual_loc', JSON.stringify({ lat: gps.lat, lon: gps.lon, label: q })); } catch(e) {}
+    updateGps('📍 ' + gpsAddress);
+    document.getElementById('mapPlaceholderText').textContent = gpsAddress;
+    loadGoogleMaps();
+    fetchWeather();
+    document.getElementById('locSheet').classList.remove('open');
+  } else if (g.status === 'empty') {
+    alert('Couldn\'t find that place — try town plus state, e.g. "Canungra QLD".');
+  } else {
+    // The lookup ITSELF failed (rate-limited / offline) — not "no such place".
+    alert('Location lookup\'s playing up — give it a moment and try again.');
   }
 }
 
@@ -3810,14 +3913,8 @@ async function getCorridorCamps() {
 
 // Geocode a named place browser-side (Nominatim, no key) → {lat,lon} or null.
 async function geocodePlace(name) {
-  try {
-    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10000);
-    const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=au&q=${encodeURIComponent(name)}`;
-    const r = await fetch(u, { signal: ctrl.signal, headers: { 'Accept': 'application/json' } });
-    clearTimeout(to);
-    const d = await r.json();
-    if (d && d[0] && d[0].lat) return { lat: +d[0].lat, lon: +d[0].lon };
-  } catch (e) {}
+  const g = await geoFetch({ q: name });
+  if (g.status === 'ok' && g.data[0] && g.data[0].lat) return { lat: +g.data[0].lat, lon: +g.data[0].lon };
   return null;
 }
 
@@ -4036,6 +4133,20 @@ function matchPendingAnswer(text, pending) {
         || isCampsQuery(t) || /\b(?:fuel|petrol|diesel|servo|unleaded|coffee|toilet|weather)\b/i.test(t)) return null;
     const ext = extractDestCandidates(text);
     return { action: 'destination', candidates: ext.candidates, ambiguous: ext.ambiguous };
+  }
+  if (pending.type === 'dest-suggest') {
+    // We offered "Did you mean X?" (or X-or-Y, or which state). A yes commits the
+    // top; naming one of the offered towns/states picks it; a no re-asks. Anything
+    // else is a fresh attempt — let the normal flow re-extract it.
+    const towns = pending.towns || [];
+    if (/^(yes|yeah|yep|yup|correct|that'?s right|sure|ok(ay)?|go|do it|please|right)\b/.test(t) && towns[0])
+      return { action: 'suggest-pick', pick: towns[0] };
+    if (/^(no|nah|nope|not|wrong|neither)\b/.test(t)) return { action: 'suggest-no' };
+    const byState = towns.find(x => { const ab = AU_STATES[t.replace(/[.?!]/g,'').trim()]; return ab && x.st === ab; }) || towns.find(x => t.includes((x.st || '').toLowerCase()));
+    if (byState) return { action: 'suggest-pick', pick: byState };
+    const byName = towns.find(x => t.includes(x.name.toLowerCase()));
+    if (byName) return { action: 'suggest-pick', pick: byName };
+    return null;   // not an answer to the offer — a fresh place attempt; normal flow handles it
   }
   if (pending.type === 'trip-mode') {
     // "Out for the day, or on a journey?" — day = back tonight; journey = travelling on.
@@ -4830,11 +4941,11 @@ async function openSOS() {
   }
 
   // Enrich address (best-effort; coords already shown)
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gps.lat}&lon=${gps.lon}&format=json&zoom=18`,{headers:{'Accept-Language':'en'}});
-    const d = await r.json();
-    if (d.display_name) { here.textContent = d.display_name; sosLocationText = `My location: ${d.display_name}. GPS coordinates: ${lat}, ${lon}.`; }
-  } catch(e) {}
+  {
+    const rg = await revGeoFetch(gps.lat, gps.lon, 18);
+    const d = rg.status === 'ok' ? rg.data : null;
+    if (d && d.display_name) { here.textContent = d.display_name; sosLocationText = `My location: ${d.display_name}. GPS coordinates: ${lat}, ${lon}.`; }
+  }
 
   // Nearest facilities — honest about TYPE, never claiming capability we can't verify
   helpEl.innerHTML = '<div class="sos-help-dist">Searching for nearest facilities...</div>';
@@ -5113,15 +5224,34 @@ async function sendMessage(silent){
           adoptTripAt(subject, v.lat, v.lon);
           msg = `Trip set to ${subject}. Out for the day, or on a journey?`;
           setPending({ type: 'trip-mode', dest: subject });
-        } else {
-          // Nothing resolved — say so and ask AGAIN (never a silent conversational
-          // fall-through, which left the trip uncommitted while sounding like it worked).
-          msg = subject
-            ? `I couldn't place ${subject} on the map — say the town again, or the nearest bigger one?`
-            : `I didn't catch a town there — which town are we heading to?`;
+        } else if (v.verdict === 'lookup-failed') {
+          // The map lookup ITSELF failed (rate-limited / offline) — NOT "no such
+          // town". Keep the destination pending; never imply the place doesn't exist.
+          msg = `The map lookup's playing up just now — give it a moment and say ${subject || 'the town'} again.`;
           setPending({ type: 'destination' });
+        } else {
+          // A genuine no-match — try the phonetic gazetteer BEFORE re-asking (a
+          // mis-hear, not a missing town). respondToUnresolved offers a match or
+          // gives the misheard wording, and sets the pending itself.
+          msg = subject ? respondToUnresolved(subject) : (setPending({ type: 'destination' }), `I didn't catch a town there — which town are we heading to?`);
         }
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+      } else if (pa.action === 'suggest-pick') {
+        // Driver accepted a phonetic "did you mean" (or picked one / a state). Commit
+        // the town from the gazetteer's OWN coords — no re-geocode (which just failed).
+        const p = pa.pick;
+        adoptTripAt(p.name, p.lat, p.lon);
+        const m = `Trip set to ${p.name}${p.st ? ', ' + p.st : ''}. Out for the day, or on a journey?`;
+        setPending({ type: 'trip-mode', dest: p.name });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      } else if (pa.action === 'suggest-no') {
+        // Not the town we guessed — own the mishear and ask again (escalates to state).
+        destReaskCount++;
+        const m = destReaskCount >= 2
+          ? `No worries — say just the town name and the state, like "Innisfail, Queensland".`
+          : `No worries — say just the town name, nice and clearly.`;
+        setPending({ type: 'destination' });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'trip-mode') {
         // Store the mode ON the trip, then give the road brief. Day out = brief
         // only, no overnight/camp prompts. Journey = brief, then ONE held offer.
@@ -5242,10 +5372,20 @@ async function sendMessage(silent){
       busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
       const v = await resolveDestination(trip.dest);
       hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-      if (v.verdict === 'notfound') {
-        const m = `I heard ${trip.dest} but can't find it on the map. Say it again, or give me the nearest town?`;
+      if (v.verdict === 'lookup-failed') {
+        // The lookup ITSELF failed (rate-limited / offline) — NOT "no such town".
+        // Keep the destination pending; never imply the place doesn't exist.
+        const m = `The map lookup's playing up just now — give it a moment and say ${trip.dest} again.`;
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
         setPending({ type: 'destination' });
+        return;
+      }
+      if (v.verdict === 'notfound') {
+        // Phonetic gazetteer rescue before re-asking — a mis-hear, not a missing
+        // town. respondToUnresolved offers a match or gives the misheard wording
+        // (owning it as us, not the town), and sets the pending itself.
+        const m = respondToUnresolved(trip.dest);
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
         return;
       }
       if (v.verdict === 'confirm') {
