@@ -987,7 +987,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '28 Jul 2026, 09:11 AM AEST',
+    BUILD: '28 Jul 2026, 09:49 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -1008,6 +1008,7 @@ function _afterSpeak() {
     setBusyGetter: function (fn) { _isBusy = (typeof fn === 'function') ? fn : function () { return false; }; },
     takeTurnEnd:   takeTurnEnd,
     // event log
+    log:      function (kind, detail) { logEvent(kind, detail); },   // app-side entries (e.g. AI classify spike)
     getLog:   function () { return vlog.slice(); },
     clearLog: function () { vlog = []; },
   };

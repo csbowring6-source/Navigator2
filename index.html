@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 09:11 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 09:49 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0911AM"></script>
+<script src="speech.js?v=28Jul2026-0949AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1200,6 +1200,72 @@ async function finishTripMode(mode, wantsCamps, campsText) {
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   }
 }
+// ── DAY/OVERNIGHT AI CLASSIFICATION SPIKE ────────────────────────────────────
+// A dedicated, cheap Haiku call that classifies a trip utterance's return timing.
+// Structured output (json_schema) guarantees {mode:'day'|'journey'|'mixed'|'none'}.
+// HARD 2s timeout. This never throws to its caller — it always resolves to a
+// result object; ANY failure is a signal to fall back to the tripModeVote gate.
+// Returns { mode, outcome, ms }. outcome: 'ok' | 'timeout' | 'network' | 'invalid'.
+async function classifyTripMode(utterance) {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2000);   // tight budget for the tiny classify call
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 40,
+        // Belt-and-braces: the prompt asks for JSON-only AND output_config enforces the
+        // schema when the Worker forwards it — either way a non-JSON reply -> 'invalid' -> gate.
+        system: 'Classify an Australian road-trip utterance by its return timing. Reply with ONLY a JSON object {"mode":"..."}. mode="day": there and back the same day (back tonight/today, day trip). mode="journey": staying overnight, back tomorrow, several days, or travelling onward. mode="mixed": TWO explicit timings that genuinely contradict (e.g. back tonight AND staying over tomorrow night). mode="none": no return timing stated. An explicit timing beats a vague one; use "mixed" only when two explicit timings truly conflict.',
+        messages: [{ role: 'user', content: utterance || '' }],
+        output_config: { format: { type: 'json_schema', schema: {
+          type: 'object',
+          properties: { mode: { type: 'string', enum: ['day', 'journey', 'mixed', 'none'] } },
+          required: ['mode'],
+          additionalProperties: false
+        } } }
+      }),
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    const ms = Date.now() - t0;
+    let data = null; try { data = await res.json(); } catch (_) {}
+    if (!res.ok || (data && data.error)) return { mode: null, outcome: 'network', ms };
+    const tb = Array.isArray(data && data.content) ? data.content.find(b => b && b.type === 'text' && b.text) : null;
+    let parsed = null; try { parsed = tb ? JSON.parse(tb.text.trim()) : null; } catch (_) {}
+    const m = parsed && parsed.mode;
+    if (m === 'day' || m === 'journey' || m === 'mixed' || m === 'none') return { mode: m, outcome: 'ok', ms };
+    return { mode: null, outcome: 'invalid', ms };
+  } catch (e) {
+    clearTimeout(timer);
+    return { mode: null, outcome: (e && e.name === 'AbortError') ? 'timeout' : 'network', ms: Date.now() - t0 };
+  }
+}
+
+// AI-first, gate-fallback. Returns EXACTLY what tripModeVote returns
+// ('day'|'journey'|'mixed'|null) so every downstream branch is unchanged — the
+// AI's 'none' maps to the gate's null. Always computes the gate too: it is both
+// the fallback and the agreement baseline for the instrumentation.
+async function classifyTripModeOrGate(utterance) {
+  const u = utterance || '';
+  const gate = tripModeVote(u);                                   // 'day'|'journey'|'mixed'|null
+  let r; try { r = await classifyTripMode(u); } catch (_) { r = { mode: null, outcome: 'network', ms: 0 }; }
+  const gateNorm = gate || 'none';
+  const ok = (r.outcome === 'ok');
+  const used = ok ? (r.mode === 'none' ? null : r.mode) : gate;   // fall back to the gate on any failure
+  const agree = ok ? (r.mode === gateNorm) : null;                // meaningful only when the AI answered
+  // Instrument into the voice log — one readable line, pasteable from the log view.
+  try {
+    if (window.Voice && Voice.log) Voice.log('classify',
+      r.outcome + ' ' + r.ms + 'ms ai=' + (r.mode == null ? '-' : r.mode) + ' gate=' + gateNorm +
+      (agree == null ? '' : (agree ? ' agree' : ' DISAGREE')));
+  } catch (_) {}
+  return used;
+}
+
 // After a DISAMBIGUATION commit, resolve the trip mode from the driver's ORIGINAL
 // utterance (stored on the pending) instead of re-asking blindly. Ask only what the
 // utterance doesn't settle: a clear day/journey vote commits straight to the brief;
@@ -1210,7 +1276,10 @@ async function resolveTripModeFromUtterance(dest, utterance, origin) {
   const wantsCamps = isCampsQuery(u);
   const wantsPlan = /\b(plan|itinerary|day journey|journey plan|day plan|legs?\b|break (?:up|down))\b/i.test(u);
   if (wantsPlan) { await proceedAfterTrip({ action: 'create', dest, origin: origin || null }, true, wantsCamps, u); return; }
-  const mode = tripModeVote(u);
+  // AI-first with a gate fallback. typeof-guarded so this file's benches — which
+  // exercise resolveTripModeFromUtterance without loading the classifier — fall
+  // straight to the deterministic gate, exactly as before.
+  const mode = (typeof classifyTripModeOrGate === 'function') ? await classifyTripModeOrGate(u) : tripModeVote(u);
   if (mode === 'mixed') {
     const m = `Trip set to ${dest}. Back tonight, or staying over and back tomorrow?`;
     setPending({ type: 'trip-overnight', wantsCamps });
@@ -3423,7 +3492,7 @@ function clearLeftoverTrip() {
 
 // PURE: interpret a short reply as an answer to the pending question.
 // Returns {action:'search', site} | {action:'declined'} | null (= a new query).
-function matchPendingAnswer(text, pending) {
+function matchPendingAnswer(text, pending, tripModeOverride) {
   if (!pending) return null;
   const t = (text || '').trim().toLowerCase();
   if (!t) return null;
@@ -3466,7 +3535,9 @@ function matchPendingAnswer(text, pending) {
     // "Out for the day, or on a journey?" — day = back tonight; journey = travelling
     // on. Negation-aware (see tripModeVote): "not a journey" votes DAY, not journey.
     // A stated camps ask in the SAME answer is carried so it isn't dropped.
-    const mode = tripModeVote(t);
+    // tripModeOverride, when supplied by the async caller, is the AI-first result
+    // (already gate-fallback'd); when absent (bench callers) we use the gate directly.
+    const mode = (tripModeOverride === undefined) ? tripModeVote(t) : tripModeOverride;
     const camps = isCampsQuery(t) || !!pending.wantsCamps;   // carry a camps ask stored from the original utterance
     if (mode === 'mixed') return { action: 'trip-overnight-ask', wantsCamps: camps };   // day AND tomorrow — ask
     if (mode) return { action: 'trip-mode', mode, wantsCamps: camps };
@@ -4542,7 +4613,12 @@ async function sendMessage(silent){
   if (pendingQuestion && !pendingIsFresh()) setPending(null);
   if (pendingIsFresh()) {
     const pending = pendingQuestion;      // capture BEFORE any clear — a single miss must not destroy it
-    const pa = matchPendingAnswer(text, pending);
+    // Day/overnight spike: for the day-or-journey question, consult the AI classifier
+    // first. classifyTripModeOrGate falls back to the gate on any failure and returns
+    // exactly what the gate would, so matchPendingAnswer's handling is unchanged.
+    let tmOverride;
+    if (pending && pending.type === 'trip-mode') tmOverride = await classifyTripModeOrGate(text);
+    const pa = matchPendingAnswer(text, pending, tmOverride);
     if (pa) {
       setPending(null);                   // matched — consumed; each handler below sets the next pending
       inp.value=''; inp.style.height='auto';
