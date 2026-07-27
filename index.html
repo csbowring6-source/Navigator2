@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 05:44 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 09:11 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0544AM"></script>
+<script src="speech.js?v=28Jul2026-0911AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4935,12 +4935,19 @@ async function sendMessage(silent){
   // on every turn grows the payload every round and can degrade replies over
   // a long back-and-forth session. Recent context is what matters at the wheel.
   if (messages.length > 16) messages.splice(0, messages.length - 16);
+  // Don't let a hung relay freeze the turn — abort after 8s. The full
+  // conversational reply streams a long prose answer, so it gets a generous
+  // budget; the future tiny classify call is what gets the tight 1.5-2.5s one.
+  const relayCtrl = new AbortController();
+  const relayTimeout = setTimeout(() => relayCtrl.abort(), 8000);
   try{
     const res=await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,system:SYSTEM,messages})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,system:SYSTEM,messages}),
+      signal:relayCtrl.signal
     });
+    clearTimeout(relayTimeout);
     let data=null;
     try { data = await res.json(); } catch(_) { /* non-JSON body */ }
     hideTyping();
@@ -4987,10 +4994,19 @@ async function sendMessage(silent){
       }
     }
   }catch(e){
+    clearTimeout(relayTimeout);
     hideTyping();
-    console.error('AI request threw:', e);
-    messages.pop();
-    addMsg('nav',`Connection issue — ${e.message || 'the request could not be sent'}. Check your internet and try again.`);
+    messages.pop();   // drop the unanswered turn so a retry stays clean
+    // Voice-first: an unspoken failure is invisible at the wheel. Be honest —
+    // the AI relay is unreachable (timed out or offline), but the local basics
+    // (fuel, camps, weather, the trip) still work — not a blank "connection issue".
+    const aborted = e && e.name === 'AbortError';
+    console.error(aborted ? 'AI request timed out (8s)' : 'AI request threw:', e);
+    const msg = aborted
+      ? "The assistant's not reachable just now — the basics still work: fuel, camps, weather and your trip are all here. Ask again in a moment."
+      : "Can't reach the assistant right now — the basics still work: fuel, camps, weather and your trip are all here. Check your signal and try again.";
+    addMsg('nav', msg);
+    speak(msg);
   }
   busy=false; document.getElementById('sendBtn').disabled=false;
 }
