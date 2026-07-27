@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 03:04 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 03:47 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0304AM"></script>
+<script src="speech.js?v=28Jul2026-0347AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2612,7 +2612,7 @@ RULES:
 - MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
 - NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
 - SERVOS: The context lists every servo around the driver, nearest first by road, each with its driving time and either a confirmed price or "price unconfirmed". EVERY ONE of these is already pinned on the driver's map — they can see them. Your job is to summarise, not to list. Lead with the cheapest CONFIRMED price and its driving time ("Metro Beaudesert, 25 minutes, $1.54 a litre"). If a different servo is meaningfully closer, offer it as the no-detour alternative by name with its time, saying "price unconfirmed" if that's the case. Never invent a price. Never lump servos together ("three servos at X") — name them. If the driver is AT a servo, say so first.
-- DISTANCE AND TIME: Context gives both road distance and driving time. Lead with whichever a driver would find more useful: for anything nearby (under about 20 minutes) TIME is what matters — "Liberty Beaudesert, 17 minutes, $1.54 a litre". For longer hauls give both — "Gympie, 180 km, about two hours". Never give both for a short hop; it's a mouthful spoken aloud. Round times naturally: "about 20 minutes", "just under an hour", "a bit over two hours".
+- DISTANCE AND TIME: Context gives both road distance and driving time. Lead with whichever a driver would find more useful: for anything nearby (under about 20 minutes) TIME is what matters — "Liberty Beaudesert, 17 minutes, $1.54 a litre". For longer hauls give both — "Gympie, 180 km, about two hours". Never give both for a short hop; it's a mouthful spoken aloud. Round times naturally: "about 20 minutes", "just under an hour", "a bit over two hours". NEVER a decimal hour ("0.1 hours", "2.5 hours") — always hours and minutes, and anything under an hour in minutes ("about six minutes").
 - SPOKEN ALOUD: Your reply is read aloud by a voice. Write distances as words the voice can say properly — "300 metres" not "300m", "20 kilometres" or "20 km" not "20km" jammed together. Same for prices: "$1.54 a litre".
 - CAMPS/PARKS: If NEARBY CAMPS/PARKS data appears in context, prefer naming real sites from it, blended with your own knowledge of well-known parks — the data is real but may be incomplete. Solo mode filters still apply.
 - ACCOMMODATION: If NEARBY ACCOMMODATION data appears in context, match the tier to the request — "treat ourselves"/luxury = highest stars or best-known quality property; "cheap"/backpackers = hostels and budget motels; otherwise the best-fit nearest. Never state a price or vacancy — you don't have them. Blend with your own knowledge of well-known properties. Solo mode filters still apply.
@@ -3269,6 +3269,7 @@ function reaskPending(p) {
   if (p && p.type === 'dest-confirm') return `Which one did you mean — ${p.spoken}, or ${p.resolved}?`;
   if (p && p.type === 'destination') return `Which town are we heading to?`;
   if (p && p.type === 'trip-mode') return `Out for the day, or on a journey?`;
+  if (p && p.type === 'trip-resume-confirm') return `Still on the trip to ${p.dest}, or starting fresh?`;
   if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
   if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
   if (p && p.type === 'number-which') return `Which one — or all of them?`;
@@ -3306,6 +3307,33 @@ function tripModeVote(text) {
   if (day > journey) return 'day';
   if (journey > day) return 'journey';
   return null;            // no clear vote — re-ask, don't default
+}
+// Stale-trip-on-open guard. A trip left from a previous session must be CONFIRMED,
+// not asserted as live (field: an old trip spoken as "you're basically there").
+let firstQueryAfterOpen = true;   // one-shot: cleared on the first query after a load
+function savedTripDest() {
+  try { const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); return raw.dest || ''; } catch (e) { return ''; }
+}
+// PURE: should the first post-open interaction CONFIRM a leftover trip? Yes when it's
+// the first query and a trip exists — UNLESS that first query already names a new
+// destination (a fresh trip replaces the stale one directly, no need to ask).
+function needsStaleTripConfirm(isFirst, hasTrip, text) {
+  if (!isFirst || !hasTrip) return false;
+  const trip = parseTripIntent(text, { currentDest: '' });
+  return !(trip && (trip.action === 'create' || trip.action === 'switch'));
+}
+// Drop a leftover trip WITHOUT the confirm dialog / chat wipe of clearThisTrip.
+function clearLeftoverTrip() {
+  tripContext = ''; currentRunDest = ''; committedDest = null; tripMode = ''; window._tripRoute = null;
+  try {
+    localStorage.removeItem('navigator_last_trip');
+    localStorage.removeItem('navigator_last_trip_raw');
+    localStorage.removeItem('navigator_trip_plan');
+    localStorage.removeItem(COMMITTED_KEY);
+  } catch (e) {}
+  if (routeLine && window._navMap) { try { window._navMap.removeLayer(routeLine); } catch (e) {} routeLine = null; }
+  if (routeDestMarker && window._navMap) { try { window._navMap.removeLayer(routeDestMarker); } catch (e) {} routeDestMarker = null; }
+  try { renderHomeTripCard(); } catch (e) {}
 }
 
 // PURE: interpret a short reply as an answer to the pending question.
@@ -3356,6 +3384,13 @@ function matchPendingAnswer(text, pending) {
     const mode = tripModeVote(t);
     if (mode) return { action: 'trip-mode', mode, wantsCamps: isCampsQuery(t) };
     return null;   // no usable vote — the miss-survival re-asks; never a silent default
+  }
+  if (pending.type === 'trip-resume-confirm') {
+    // "Still on that trip to X, or starting fresh?" — an affirmation keeps it; a "no",
+    // "fresh", or a newly-named destination drops the stale trip (trip-fresh re-routes).
+    if (/\b(?:yes|yeah|yep|yup|still|keep|same|carry on|resume|stay on|on it|leave it|that one|correct|still on it)\b/.test(t) && !isTopicChange(t))
+      return { action: 'trip-keep', dest: pending.dest };
+    return { action: 'trip-fresh' };
   }
   if (pending.type === 'camps-offer') {
     // "Want the caravan sites now?" — yes runs the held camps ask; a fresh
@@ -4361,6 +4396,22 @@ async function sendMessage(silent){
     return;
   }
 
+  // ── STALE TRIP ON OPEN — confirm, don't assert. On the FIRST query after a load,
+  // a trip left from a previous session is CONFIRMED before it's fed to the AI as
+  // live (field: an evening trip spoken next morning as "you're basically there").
+  if (firstQueryAfterOpen) {
+    firstQueryAfterOpen = false;
+    const staleDest = currentRunDest || savedTripDest();
+    if (needsStaleTripConfirm(true, !!staleDest, text)) {
+      inp.value = ''; inp.style.height = 'auto';
+      addMsg('user', text);
+      const m = `You've still got a trip to ${staleDest} set from earlier — still on that, or starting fresh?`;
+      setPending({ type: 'trip-resume-confirm', dest: staleDest });
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return;
+    }
+  }
+
   // ── TRIP CREATION / UPDATE (S2.1) ──────────────────────────────────────────
   // Confirming a proposed destination change?
   if (pendingTripSwitch) {
@@ -4491,6 +4542,44 @@ async function sendMessage(silent){
           addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
         } else {
           addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+        }
+      } else if (pa.action === 'trip-keep') {
+        // Keep the leftover trip. If a session older than the restore window left
+        // currentRunDest empty, load it back from the saved record so it's live.
+        if (!currentRunDest) {
+          try {
+            const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}');
+            tripContext = localStorage.getItem('navigator_last_trip') || '';
+            currentRunDest = raw.dest || pa.dest || '';
+            tripMode = raw.mode || '';
+            if (currentRunDest) { try { await ensureCommittedDest(currentRunDest); } catch(e) {} try { drawCommittedRoute(currentRunDest); } catch(e) {} }
+          } catch(e) {}
+        }
+        const dk = currentRunDest || pa.dest;
+        const m = `Righto — still on the trip to ${dk}. What do you need?`;
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      } else if (pa.action === 'trip-fresh') {
+        // Drop the leftover trip. If this same answer named a NEW destination, start
+        // it; otherwise ask where to. (Never carries the stale trip forward.)
+        clearLeftoverTrip();
+        const nt = parseTripIntent(text, { currentDest: '' });
+        if (nt && (nt.action === 'create' || nt.action === 'switch')) {
+          busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+          const v = await resolveDestination(nt.dest);
+          hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+          if (v.verdict === 'ok') {
+            adoptTripAt(v.name, v.lat, v.lon);
+            const m = `Trip set to ${v.name}. Out for the day, or on a journey?`;
+            setPending({ type: 'trip-mode', dest: v.name });
+            addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+          } else {
+            const m = respondToUnresolved(nt.dest);   // offers / re-asks, sets its own pending
+            addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+          }
+        } else {
+          const m = `Fresh start — where are we headed?`;
+          setPending({ type: 'destination' });
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
         }
       } else if (pa.action === 'camps') {
         // The accepted "want the caravan sites now?" — run the held camps ask.
@@ -4726,7 +4815,7 @@ async function sendMessage(silent){
     poiCtx = poiHits.map(t => getCtx('poi:' + t.kind)).filter(Boolean).join(' ');
   }
 
-  const driveHrs=((Date.now()-driveStart)/3600000).toFixed(1);
+  const driveMins=Math.round((Date.now()-driveStart)/60000);   // whole minutes → hrsMinsSpoken (never decimal hours)
   const isSolo=document.getElementById('soloChip').classList.contains('active');
   const rangeText=document.getElementById('rangeChip').textContent.replace('🛣 ','');
   const condText=document.getElementById('condChip').textContent.replace('🌤 ','');
@@ -4763,7 +4852,7 @@ async function sendMessage(silent){
     poiCtx,
     v.systemNote,
     `Fuel type: ${selectedFuel}.${rangeText!=='Range'?' Driver-set fuel range: '+rangeText.replace('Range: ','')+'.':''}`,
-    `Drive time: ${driveHrs} hours.`,
+    `Drive time so far: ${hrsMinsSpoken(driveMins)}.`,
     condText!=='Conditions'?`Driver reports: ${condText}.`:'',
     isSolo?'SOLO MODE ACTIVE.':'',
     tripContext?`Trip plan: ${tripContext}`:'',
