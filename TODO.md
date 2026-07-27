@@ -15,3 +15,9 @@ Numbered backlog. Each entry is a short name plus the full instruction text. Ite
 5. **Phone numbers via Places API** — Fetch on request for a named site, bind the number to that site record, cache results.
 
 6. **User-contributed amenity data** — Prompt after a stay to confirm amenities, store in D1, read own data before OSM.
+
+---
+
+### Temporary — remove at phase 4 of the camps-architecture change
+
+- **`GET /places-probe?q=...`** (`worker-camps.js`, `handlePlacesProbe`) — one raw Google Places Text Search with the exact production field mask, JSON returned unmodified, no caching. Exists only to verify Places coverage of regional towns before phase 1 is built. **Delete this endpoint (and its route registration) at phase 4, alongside retiring `/place-phone` and the dead join code.**

@@ -178,36 +178,57 @@ const OVERPASS_MIRRORS = [
 const osmCache = new Map();
 const OSM_TTL = 30 * 60 * 1000;
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Overpass is intermittently slow (2–12s) and sometimes 429/503s. The client aborts
+// at 15s, so we CANNOT grind 4 mirrors at 12s each (up to 48s). Instead: short
+// per-mirror timeout, retry a TRANSIENT failure once with backoff, fail over to the
+// next mirror — all under a hard TOTAL deadline that fits the client budget. On a
+// total miss, serve the stale in-memory copy; the caller adds a KV fallback on top.
+const OVERPASS_MIRROR_MS = 6000;   // was 12000 — two mirrors now fit the 15s client budget
+const OVERPASS_DEADLINE_MS = 13000;
 async function overpass(q) {
   const key = q;
   const hit = osmCache.get(key);
   if (hit && Date.now() - hit.ts < OSM_TTL) return { data: hit.data, cached: true };
 
+  const deadline = Date.now() + OVERPASS_DEADLINE_MS;
   let lastErr = "";
   for (const mirror of OVERPASS_MIRRORS) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12000);
-      const r = await fetch(mirror, {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "User-Agent": "NavigatorApp/1.0 (Australian road travel assistant)",
-        },
-        body: "data=" + encodeURIComponent(q),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!r.ok) { lastErr = "HTTP " + r.status + " from " + mirror; continue; }
-      const data = await r.json();
-      if (osmCache.size > 200) osmCache.clear();
-      osmCache.set(key, { data, ts: Date.now() });
-      return { data };
-    } catch (e) {
-      lastErr = (e.name === 'AbortError' ? 'timeout from ' : 'error from ') + mirror;
+    for (let attempt = 0; attempt < 2; attempt++) {   // one retry per mirror for a transient blip
+      const remaining = deadline - Date.now();
+      if (remaining < 1200) { lastErr = lastErr || "deadline"; break; }   // out of budget — stop, serve stale
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), Math.min(OVERPASS_MIRROR_MS, remaining));
+        const r = await fetch(mirror, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "User-Agent": "NavigatorApp/1.0 (Australian road travel assistant)",
+          },
+          body: "data=" + encodeURIComponent(q),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        // Transient (busy/rate-limit) — back off and retry the SAME mirror once.
+        if (r.status === 429 || r.status === 502 || r.status === 503 || r.status === 504) {
+          lastErr = "HTTP " + r.status + " from " + mirror;
+          if (attempt === 0 && deadline - Date.now() > 1500) { await sleep(400); continue; }
+          break;   // still busy — move to the next mirror
+        }
+        if (!r.ok) { lastErr = "HTTP " + r.status + " from " + mirror; break; }   // hard error — next mirror
+        const data = await r.json();
+        if (osmCache.size > 200) osmCache.clear();
+        osmCache.set(key, { data, ts: Date.now() });
+        return { data };
+      } catch (e) {
+        lastErr = (e.name === 'AbortError' ? 'timeout from ' : 'error from ') + mirror;
+        break;   // timeout/network — next mirror (don't burn the budget retrying a dead endpoint)
+      }
     }
+    if (Date.now() > deadline) break;
   }
-  if (hit) return { data: hit.data, cached: true, stale: true };
+  if (hit) return { data: hit.data, cached: true, stale: true };   // stale in-memory copy beats a hard failure
   return { error: lastErr || "all mirrors failed" };
 }
 
@@ -278,15 +299,25 @@ async function handlePoi(request) {
   return jsonResp({ source: "OpenStreetMap", kind, radiuskm: radiusKm, cached: !!res.cached, results });
 }
 
-async function handleCamps(request) {
+async function handleCamps(request, env) {
   const u = new URL(request.url);
   const lat = parseFloat(u.searchParams.get("lat"));
   const lon = parseFloat(u.searchParams.get("lon"));
   const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
   if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
   const q = `[out:json][timeout:20];(node["tourism"~"camp_site|caravan_site"](around:${radiusKm*1000},${lat},${lon});way["tourism"~"camp_site|caravan_site"](around:${radiusKm*1000},${lat},${lon}););out center tags 150;`;
+  // KV cache keyed by ROUNDED coords (~1km) + radius — camps don't move, so a
+  // recent result is a fine answer when Overpass is having a bad minute.
+  const kv = env && env.PLACES_KV;
+  const ckey = `camps:${lat.toFixed(2)},${lon.toFixed(2)}:${radiusKm}`;
   const res = await overpass(q);
-  if (res.error) return jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503);
+  if (res.error) {
+    // Overpass is down/slow — serve the last-known result rather than failing outright.
+    if (kv) {
+      try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return jsonResp({ source: "OpenStreetMap", radiuskm: radiusKm, cached: true, stale: true, results: c.results }); } catch (e) {}
+    }
+    return jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503);
+  }
   const results = osmPlacesNearest(res.data.elements, "", lat, lon, 12).map(p => ({
     id: p.osmid,   // stable OSM id — the /place-phone cache key (never the name)
     name: p.name,
@@ -303,6 +334,8 @@ async function handleCamps(request) {
     shower: p.tags.shower || "",
     swimming_pool: p.tags.swimming_pool || p.tags.pool || "",
   }));
+  // Persist for the stale-fallback above (7-day TTL — camps don't move).
+  if (kv && !res.cached) { try { await kv.put(ckey, JSON.stringify({ results, ts: Date.now() }), { expirationTtl: 7 * 24 * 3600 }); } catch (e) {} }
   return jsonResp({ source: "OpenStreetMap", radiuskm: radiusKm, cached: !!res.cached, results });
 }
 
@@ -540,7 +573,7 @@ async function handlePlacesProbe(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 26 Jul 2026, 12:07 PM AEST (temporary /places-probe for the Places coverage test — remove at phase 4)";
+const WORKER_BUILD = "Navigator Worker — 27 Jul 2026, 10:48 AM AEST (/camps: bounded Overpass retry+backoff, faster mirror timeout, KV stale-serve fallback)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -564,34 +597,6 @@ const PLACE_HINT = [
 
 function handleVersion() {
   return jsonResp({ version: WORKER_BUILD });
-}
-
-// ═══ GET /places-probe?q=... — TEMPORARY coverage probe ══════════════════════
-// ⚠ TEMPORARY — coverage verification only, REMOVE AT PHASE 4 (see TODO.md).
-// One Places (New) Text Search using EXACTLY the intended production field mask,
-// returning Google's raw JSON unmodified. No caching, no KV, no scoring — this
-// exists solely to answer "does Places cover regional towns?" before phase 1 is
-// built. It bills as one Enterprise-tier Text Search per call (phone + hours).
-async function handlePlacesProbe(request, env) {
-  const q = (new URL(request.url).searchParams.get("q") || "").trim();
-  if (!q) return jsonResp({ error: "q (search text) required" }, 400);
-  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "GOOGLE_PLACES_KEY not configured" }, 500);
-  const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
-      // EXACT production field mask — these six fields only (Enterprise SKU; no atmosphere fields).
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours",
-    },
-    body: JSON.stringify({ textQuery: q }),
-  });
-  const raw = await r.text(); // pass Google's response straight back, byte-for-byte
-  return new Response(raw, {
-    status: r.status,
-    headers: { ...corsHeaders, "content-type": "application/json" },
-  });
 }
 
 // ═══ POST /transcribe — audio blob in, { text } out ═══
@@ -650,7 +655,7 @@ export default {
     const routes = {
       "/fuel": () => handleFuel(request, env),
       "/poi": () => handlePoi(request),
-      "/camps": () => handleCamps(request),
+      "/camps": () => handleCamps(request, env),
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),

@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 26 Jul 2026, 10:57 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 27 Jul 2026, 10:32 AM AEST</div>
   </div>
 </div>
 
@@ -1047,6 +1047,38 @@ function looksLikeBarePlace(text) {
   const STOP = /^(i|we|you|he|she|it|they|me|us|my|our|your|and|or|but|a|an|of|for|with|about|to|from|at|in|on|is|am|are|was|were|be|been|being|do|does|did|don'?t|doesn'?t|didn'?t|isn'?t|aren'?t|can'?t|won'?t|not|no|yes|yeah|yep|nah|nope|ok|okay|sure|maybe|dunno|know|knows|think|want|wanna|need|get|got|go|going|goes|went|come|coming|take|give|tell|find|show|look|let|can|could|would|should|will|shall|may|might|must|have|has|had|what|where|when|why|how|who|which|help|stop|cancel|please|thanks|thank|sorry|hello|hi|hey|um|uh|er|home|here|there|back|again|repeat|next|more|less|far|long|much|many|time|today|tomorrow|tonight|now|soon|later|anywhere|somewhere|everywhere|nowhere|something|anything|nothing|everything|cheapest|cheap|nearest|closest|near|close|fuel|petrol|diesel|servo|gas|unleaded|coffee|food|eat|drink|camp|camps|campsite|campsites|caravan|weather|toilet|toilets|map|maps|sos)$/i;
   if (words.some(w => STOP.test(w))) return false;
   return true;
+}
+
+// PURE: pull place-name candidates from a NATURAL answer to "which town?" — with
+// NO word-count / length / stop-word gate (that gate discarded verbose answers and
+// left the trip uncommitted). Handles a bare name, a name with a reference landmark
+// ("Innisfail, 90km south of Cairns" → subject Innisfail, ref Cairns), and an
+// explicit "X or Y" choice. The SUBJECT is returned first, so the caller resolves
+// the place the answer is ABOUT before any reference landmark (never the origin).
+const PLACE_NUM_DIR = /^(?:\d[\d.]*|about|around|roughly|approx\w*|just|north\w*|south\w*|east\w*|west\w*|k|kms?|kilometres?|kilometers?|miles?|mi|clicks?|hours?|hrs?|minutes?|mins?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)$/i;
+function leadingPlace(s) {
+  const out = [];
+  for (const w of String(s || '').split(/[\s,]+/).filter(Boolean)) {
+    if (PLACE_NUM_DIR.test(w) || !/^[A-Za-z][A-Za-z'’\-]*$/.test(w)) break;   // stop at a number/direction/unit or non-letters
+    out.push(w);
+    if (out.length >= 4) break;   // a town name is at most a few words
+  }
+  return out.join(' ').trim();
+}
+function extractDestCandidates(text) {
+  let t = cleanTranscript(text || '').trim();
+  if (!t) return { candidates: [], ambiguous: false };
+  // drop a leading lead-in so the place sits at the front
+  t = t.replace(/^(?:it'?s|its|that'?s|the (?:town|place|destination)(?:'?s| is)?|we'?re\s+(?:going|heading|headed|off)(?:\s+(?:to|for))?|(?:going|heading|headed|driving|drive|bound|off)\s+(?:to|for)|take me to|head(?:ing)?\s+(?:to|for)|i think(?:\s+it'?s)?|probably|maybe|yeah|yep|yes|nah|ok(?:ay)?|so|well|actually|umm?|uhh?|err?)\s+/i, '').trim();
+  // explicit "X or Y" — genuinely ambiguous, no clear subject
+  let m = t.match(/^(.+?)\s+or\s+(.+?)[.?!]*$/i);
+  if (m) { const a = leadingPlace(m[1]), b = leadingPlace(m[2]); if (a && b) return { candidates: [a, b], ambiguous: true }; }
+  // "<subject> [dist/dir] (of|from|near|past|…) <landmark>" — the subject is the destination,
+  // the landmark is just a reference (usually the origin), so subject FIRST.
+  m = t.match(/^(.+?)\s+(?:of|from|near|past|beyond|outside|before|after)\s+(.+)$/i);
+  if (m) { const subj = leadingPlace(m[1]), ref = leadingPlace(m[2]); const list = [subj, ref].filter(Boolean); if (list.length) return { candidates: list, ambiguous: false }; }
+  const only = leadingPlace(t);
+  return { candidates: only ? [only] : [], ambiguous: false };
 }
 
 // PURE: honest one-glance day brief from real route data (km + OSRM hours),
@@ -3995,11 +4027,15 @@ function matchPendingAnswer(text, pending) {
   const t = (text || '').trim().toLowerCase();
   if (!t) return null;
   if (pending.type === 'destination') {
-    // We asked where they're headed — a bare place name IS the answer. Accept
-    // it (punctuation stripped); the caller geocodes before setting the trip.
-    const place = cleanTranscript(text);
-    if (looksLikeBarePlace(place)) return { action: 'destination', place };
-    return null;   // a real sentence — let the normal flow handle it
+    // We asked where they're headed. A CLEAR other-intent reply (a question, or a
+    // camps/fuel request) is a topic change — let the normal flow have it. Anything
+    // else is an attempt to answer, so EXTRACT the place(s) from it (no bare-place
+    // gate) and let the async handler resolve + commit, or re-ask. Never fall
+    // through silently on a place attempt (that left the trip uncommitted).
+    if (/\?$/.test(t) || /^(?:where|what|when|how|which|find|show|give me|is there|are there|can (?:you|i))\b/i.test(t)
+        || isCampsQuery(t) || /\b(?:fuel|petrol|diesel|servo|unleaded|coffee|toilet|weather)\b/i.test(t)) return null;
+    const ext = extractDestCandidates(text);
+    return { action: 'destination', candidates: ext.candidates, ambiguous: ext.ambiguous };
   }
   if (pending.type === 'trip-mode') {
     // "Out for the day, or on a journey?" — day = back tonight; journey = travelling on.
@@ -5051,32 +5087,39 @@ async function sendMessage(silent){
       inp.value=''; inp.style.height='auto';
       addMsg('user', text);
       if (pa.action === 'destination') {
-        // GARBAGE GUARD first — a cut-off / too-short answer is a mis-hear, not a town.
-        const sus = destSuspect(pa.place, turnEnd);
-        if (sus) {
-          const m = `I didn't catch that clearly — which town are we heading to?`;
+        const cands = pa.candidates || [];
+        // Genuinely ambiguous ("Innisfail or Cardwell") — ask which, naming both,
+        // and hold the question. Never guess between two named places.
+        if (pa.ambiguous && cands.length >= 2) {
+          const m = `Which one — ${cands[0]} or ${cands[1]}?`;
           addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
           setPending({ type: 'destination' });
           return;
         }
-        // Resolve + SANITY-CHECK the bare name before committing (same scale /
-        // name-drift guard as a spoken trip). NEVER re-ask blind (SPEC §0).
+        // Resolve the SUBJECT (the place the answer is about — first candidate),
+        // NOT the reference landmark (that's usually the origin). Resolution is the
+        // gate, not word count / length. Commit if it resolves; re-ask if not.
+        const subject = cands[0] || '';
         busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-        const v = await resolveDestination(pa.place);
+        const v = subject ? await resolveDestination(subject) : { verdict: 'notfound' };
         hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
         let msg;
         if (v.verdict === 'confirm') {
-          setPending({ type: 'dest-confirm', spoken: pa.place, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: null, wantsPlan: false, wantsCamps: false, ask: pa.place });
+          setPending({ type: 'dest-confirm', spoken: subject, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: null, wantsPlan: false, wantsCamps: false, ask: subject });
           msg = v.drift
-            ? `I heard ${pa.place}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${pa.place} near you, or ${v.name}?`
+            ? `I heard ${subject}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${subject} near you, or ${v.name}?`
             : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or somewhere closer?`;
         } else if (v.verdict === 'ok') {
-          adoptTripAt(pa.place, v.lat, v.lon);
-          msg = `Trip set to ${pa.place}. Out for the day, or on a journey?`;
-          setPending({ type: 'trip-mode', dest: pa.place });
+          adoptTripAt(subject, v.lat, v.lon);
+          msg = `Trip set to ${subject}. Out for the day, or on a journey?`;
+          setPending({ type: 'trip-mode', dest: subject });
         } else {
-          msg = `I heard ${pa.place} but can't find it on the map. Say it again, or give me the nearest town?`;
-          setPending({ type: 'destination' });   // still waiting — but they know why
+          // Nothing resolved — say so and ask AGAIN (never a silent conversational
+          // fall-through, which left the trip uncommitted while sounding like it worked).
+          msg = subject
+            ? `I couldn't place ${subject} on the map — say the town again, or the nearest bigger one?`
+            : `I didn't catch a town there — which town are we heading to?`;
+          setPending({ type: 'destination' });
         }
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       } else if (pa.action === 'trip-mode') {
