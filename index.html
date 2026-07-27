@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 05:20 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 05:44 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0520AM"></script>
+<script src="speech.js?v=28Jul2026-0544AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3349,10 +3349,16 @@ function pendingMissAction(pending, text) {
 // Day-vs-journey with NEGATION. "not a journey" is a vote AGAINST journey (i.e. for
 // day), not for it; when both terms appear the non-negated one wins. Returns 'day' |
 // 'journey' | null (no usable / conflicting vote -> the caller re-asks, never guesses).
+// EXPLICIT beats VAGUE. A return-time COMMITMENT ("back tonight" / "staying over" /
+// "back tomorrow" / "overnight") decides the mode outright and silently. A VAGUE
+// phrase ("out for the day" often just means "heading out today"; a plain "journey"
+// with no return indication) only decides when NO explicit signal is present. The
+// overnight question is asked ONLY when two EXPLICIT signals genuinely conflict.
+// Negation still flips a signal to the other side.
 function tripModeVote(text) {
   const t = (text || '').toLowerCase().trim();
   if (/^(?:day|the day|out|day ?out|day ?trip|for the day)$/.test(t)) return 'day';         // one-word answers
-  if (/^(?:journey|a journey|on a journey|touring|overnight)$/.test(t)) return 'journey';
+  if (/^(?:journey|a journey|on a journey|touring|overnight|stay(?:ing)? over|back tomorrow)$/.test(t)) return 'journey';
   const NEG = /\b(?:not|no|never|isn'?t|ain'?t|aren'?t|wasn'?t|won'?t|don'?t|nope|nah)\b/;
   const negatedBefore = (idx) => new RegExp(NEG.source + "\\s*(?:[a-z']+\\s+){0,3}$").test(t.slice(Math.max(0, idx - 28), idx));
   const scan = (srcRe) => {
@@ -3360,22 +3366,32 @@ function tripModeVote(text) {
     while ((m = g.exec(t))) { if (negatedBefore(m.index)) neg = true; else aff = true; }
     return { aff, neg };
   };
-  const d = scan("\\b(?:day ?out|for the day|day ?trip|just (?:the|a) day|back (?:home )?tonight|home tonight|returning tonight)\\b");
-  const j = scan("\\b(?:journey|travell?ing(?: on)?|touring|moving on|onwards?|staying (?:away|out|over)|overnight)\\b");
-  // An overnight/tomorrow/staying indication (incl. "tomorrow", not in j above).
-  const o = scan("\\b(?:overnight|tomorrow|next day|stay(?:ing)? (?:over|out|the night)|another day|couple of days|few days|nights? away)\\b");
-  // GENUINELY MIXED: day-words affirmed AND an overnight/tomorrow/staying indication
-  // also affirmed (neither negated) — the two conflict (a day out returns tonight).
-  // Don't guess: ask the overnight question. Negated cases fall through to the tally.
-  if (d.aff && o.aff) return 'mixed';
+  // EXPLICIT return-time commitments.
+  const eDay   = scan("\\b(?:back (?:home )?tonight|home tonight|returning tonight|back today|same day)\\b");
+  const eNight = scan("\\b(?:stay(?:ing)? (?:over|out|away|the night)|overnight|back tomorrow|home tomorrow|tomorrow night|next day|another day|couple of days|few days|nights? away)\\b");
+  // VAGUE signals — used ONLY when there's no explicit signal.
+  const vDay = scan("\\b(?:day ?out|out for the day|for the day|day ?trip|just (?:the|a) day)\\b");
+  const vJourney = scan("\\b(?:journey|travell?ing(?: on)?|touring|moving on|onwards?)\\b");
+
+  // Explicit wins. Negation flips a signal to the opposite side.
+  let eDayVote = 0, eNightVote = 0;
+  if (eDay.aff) eDayVote++;
+  if (eDay.neg) eNightVote++;     // "not back tonight" -> overnight
+  if (eNight.aff) eNightVote++;
+  if (eNight.neg) eDayVote++;     // "not staying over" -> day
+  if (eDayVote > 0 && eNightVote > 0) return 'mixed';   // TWO explicit, genuinely conflicting -> ask
+  if (eNightVote > 0) return 'journey';                 // explicit overnight beats any vague, silently
+  if (eDayVote > 0) return 'day';                       // explicit back-tonight beats any vague, silently
+
+  // No explicit signal — fall back to the vague vote (still negation-aware).
   let day = 0, journey = 0;
-  if (d.aff) day++;
-  if (d.neg) journey++;   // "not a day trip" -> for journey
-  if (j.aff) journey++;
-  if (j.neg) day++;       // "not a journey"  -> for day
+  if (vDay.aff) day++;
+  if (vDay.neg) journey++;   // "not a day trip" -> journey
+  if (vJourney.aff) journey++;
+  if (vJourney.neg) day++;   // "not a journey"  -> day
   if (day > journey) return 'day';
   if (journey > day) return 'journey';
-  return null;            // no clear vote — re-ask, don't default
+  return null;               // no clear vote — the caller asks the day/journey question
 }
 // Stale-trip-on-open guard. A trip left from a previous session must be CONFIRMED,
 // not asserted as live (field: an old trip spoken as "you're basically there").
