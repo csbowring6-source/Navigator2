@@ -182,5 +182,87 @@ check("replay reproduces the honest close", kinds().some(k => k.startsWith("clos
 check("replay reproduces exactly one cue", count("cue") === 1);
 check("replay delivered nothing (matches the field failure)", delivered === 0);
 
+// ── SCENARIO 7: TIMED replay of the 28 Jul 10:11AM convo beep-loop field log ───
+// The full pasted sequence — a first turn that delivers, the app's reply, then a
+// ~5s recogniser restart churn that NEVER delivers, with the driver's speech
+// beginning mid-churn. Before the fix this ran 13 cycles / 70s (the alive>=2s reset
+// leaked the no-delivery ceiling) and finally closed ON the driver's speechstart.
+// After the fix it must end CLOSED honestly, at most one cue, closed by the reopen
+// ceiling in ~3 reopens, with NO driver speechstart left ignored while "listening".
+let base; const to = (sec) => advance(base + sec * 1000 - clock.now);   // advance the fake clock to an absolute second
+console.log("\n--- 7. field replay (10:11AM beep loop): closes fast + honest, no undelivered speech ---");
+fresh();
+timers.length = 0;                       // drop any stale timers from earlier scenarios
+let openSpeechPending = 0;               // speechstarts fired while OPEN, still awaiting a delivery
+Voice.onTranscript(() => { delivered++; openSpeechPending = 0; });   // a delivery clears the pending speech
+const trackedSpeech = () => { if (Voice.isSessionOpen()) openSpeechPending++; rec.speech(); };
+base = clock.now;
+Voice.openSession();
+trackedSpeech();                          // 0s: driver starts speaking (turn 1)
+to(1.0); rec.final("cheapest fuel");
+to(2.0); rec.final("cheapest fuel to innisfail");
+to(4.9);                                  // pause > CONVO_TURN_MS -> turn 1 delivers (~4.8s)
+Voice.speak("The cheapest is 182.9 at the Ampol.");   // app replies -> pauses the session
+to(5.0); tts.start();
+to(6.0); tts.end();                       // reply ends -> convoHadExchange, resume after the tail
+to(6.7); if (Voice.isSessionOpen()) rec.onstart();    // engine reopened for the next turn
+// the churn: recogniser drops ~every 5s (each alive > 2s), delivering nothing
+to(12.1); rec.end(); to(12.6); if (Voice.isSessionOpen()) rec.onstart();
+to(17.5); rec.end(); to(18.0);            // this reopen hits the ceiling -> honest close
+// driver tries again AFTER the honest close — must be ignored, never re-cued
+to(25.5); trackedSpeech();
+to(43.0); trackedSpeech();
+check("turn 1 delivered (its results were NOT lost)", delivered === 1);
+check("the beep loop closed honestly", kinds().some(k => k.startsWith("close:honest")));
+check("exactly one close cue (not one per restart)", count("cue") === 1);
+check("closed by the reopen ceiling in ~3 reopens, not 13", count("reopen") <= 4, "reopens=" + count("reopen"));
+check("no undelivered speechstarts — driver speech is never left ignored while 'listening'", openSpeechPending === 0);
+check("session is CLOSED at the end", Voice.isSessionOpen() === false);
+
+// ── SCENARIO 8: speech during the anything-else offer window is CAPTURED ───────
+// A delivered turn (so the offer is armed), 20s of quiet, the offer fires, and the
+// driver answers it. The answer must be captured and delivered, and must NOT be the
+// trigger that closes the session (the field 92.66->92.67 close-on-speechstart bug).
+console.log("\n--- 8. speech during the anything-else offer is captured, never the closing trigger ---");
+fresh();
+timers.length = 0;
+Voice.onTranscript(() => { delivered++; });
+base = clock.now;
+Voice.openSession();
+rec.speech();
+to(1.0); rec.final("camps at innisfail");
+to(3.9);                                  // deliver turn 1 (~3.8s)
+Voice.speak("Here are three camps near Innisfail.");
+to(4.0); tts.start();
+to(5.0); tts.end();                       // convoHadExchange=true; resume ~5.6 arms the offer at ~25.6
+to(5.7); if (Voice.isSessionOpen()) rec.onstart();
+to(25.7);                                 // offer fires (~25.6): speaks "Anything else?", stops the recogniser
+check("anything-else offer fired", count("offer") === 1);
+to(26.1); tts.end();                      // the offer utterance ends -> resume after the tail
+to(26.8); if (Voice.isSessionOpen()) rec.onstart();   // listening for the ANSWER
+const openBefore = Voice.isSessionOpen();
+to(27.3); rec.speech();                   // the driver's answer BEGINS in the offer window
+to(27.8); rec.final("yeah what about fuel");
+to(31.5);                                 // the answer delivers (~30.6); its handoff is deferred 600ms
+check("session stayed OPEN through the driver's answer (speech not used to close)", openBefore === true && Voice.isSessionOpen() === true);
+check("the driver's answer during the offer window was CAPTURED (delivered)", delivered === 2);
+check("no honest close fired on the answer's speechstart", !kinds().some(k => k.startsWith("close:honest")));
+check("no close cue during the offer answer", count("cue") === 0);
+
+// ── SCENARIO 9: both engines' restart churn is bounded (source of the fix) ─────
+console.log("\n--- 9. both engines' restart churn is bounded (fix covers the basic engine too) ---");
+check("convo: alive-time no longer resets the no-delivery ceiling (the leak is closed)",
+  /if \(alive >= CONVO_HEALTHY_MS\) convoRestarts = 0;/.test(SRC) && !/alive >= CONVO_HEALTHY_MS\) \{ convoRestarts = 0; convoUndelivered = 0; \}/.test(SRC));
+check("convo: genuine speech onset resets the flip ceiling (never the closing trigger)",
+  /logEvent\('rec\.speechstart', 'convo'\); convoFlips = 0;/.test(SRC));
+check("convo: the offer resume clears the oscillation guards for the answer",
+  /convoSpeaking = false; if \(convoActive\) \{ convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState\('listening'\)/.test(SRC));
+check("basic: restart cap is heardSpeech-INDEPENDENT (time-since-progress window)",
+  /heardSpeech && Date\.now\(\) - basicProgressAt > BASIC_CHURN_MS/.test(SRC));
+check("basic: the progress timestamp resets on newly captured words",
+  /if \(committedFinal\.length > _prevLen\) basicProgressAt = Date\.now\(\)/.test(SRC));
+check("both ceilings are ~15s (convo cycles x ~5s cadence; basic churn window)",
+  /const CONVO_MAX_CYCLES = 3;/.test(SRC) && /const BASIC_CHURN_MS = 15000;/.test(SRC));
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

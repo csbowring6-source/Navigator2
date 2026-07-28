@@ -106,7 +106,7 @@ const CONVO_MAX_FLIPS = 8;      // oscillation ceiling — close honestly beyond
 // session keeps its full 45s grace, while a rapid sub-healthy loop (each cycle
 // under CONVO_HEALTHY_MS) climbs to the cap in ~N cycles regardless of exact
 // spacing and closes. Ambient noise no longer resets it (that was the leak).
-const CONVO_MAX_CYCLES = 5;     // empty (no-delivery) reopens before an honest close
+const CONVO_MAX_CYCLES = 3;     // empty (no-delivery) reopens before an honest close (~15s at the field's ~5s churn cadence)
 let convoUndelivered = 0;       // consecutive sub-healthy reopens with nothing delivered
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
@@ -142,6 +142,7 @@ function openConversation() {
   convoFlips = 0; convoLastState = ''; convoUndelivered = 0; clearTimeout(convoResumeTimer);    // fresh oscillation guards
   convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
+  convoUndelivered = 0;            // the opening start is not an "undelivered reopen" — only reopens AFTER open count toward the churn ceiling
   convoArmSilence();
   // Warm the mic ONLY where it demonstrably helps. On Android Chrome a held
   // getUserMedia stream blocks SpeechRecognition from acquiring the mic (the
@@ -200,7 +201,7 @@ function convoStartRecogniser() {
     convoRec.continuous = true;
     convoRec.interimResults = true;
     convoRec.onstart = () => { convoRecRunning = true; logEvent('rec.onstart', 'convo'); if (convoActive && !convoSpeaking) convoSetState('listening'); console.log('[convo] recogniser started'); };
-    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoArmSilence(); if (convoActive) convoSetState('recording'); };
+    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoFlips = 0; convoArmSilence(); if (convoActive) convoSetState('recording'); };  // genuine speech onset is real input, NOT echo churn — it must never be the flip that trips the oscillation ceiling (the field close-on-speechstart bug). The reopen ceiling still bounds an actual restart loop.
     convoRec.onresult = e => {
       if (convoSpeaking) return;             // ignore anything heard during playback/tail (our own voice)
       logEvent('rec.onresult', 'convo');
@@ -240,7 +241,14 @@ function convoStartRecogniser() {
       // let the 45s silence timer own the close. A rapid empty reopen (mic never
       // acquired) does NOT reset, so it climbs to the cap and then stops honestly.
       const alive = Date.now() - convoLastStart;
-      if (alive >= CONVO_HEALTHY_MS) { convoRestarts = 0; convoUndelivered = 0; }   // a genuine listen (just quiet) — not a loop
+      // A recogniser that stayed alive past CONVO_HEALTHY_MS wasn't RAPID-restarting, so
+      // clear the rapid-restart backoff counter. Do NOT clear convoUndelivered on alive
+      // time: a long-alive recogniser that delivered NOTHING is still an undelivered
+      // reopen. Clearing it here was the leak — at the field's ~5s churn cadence every
+      // cycle was "alive" (>2s) and reset the ceiling, so the beep loop ran unbounded
+      // (13 cycles / 70s). convoUndelivered now clears ONLY on a real delivered turn (and
+      // at open), so a no-delivery churn climbs to the cap and closes within ~15s.
+      if (alive >= CONVO_HEALTHY_MS) convoRestarts = 0;
       convoRestarts++;
       if (convoRestarts > CONVO_MAX_RESTARTS) {
         console.warn('[convo] giving up after ' + (convoRestarts - 1) + ' rapid restarts with no capture (last alive=' + alive + 'ms, last onerror: ' + (convoLastError || 'none') + ')');
@@ -297,7 +305,11 @@ function convoOffer() {
   logEvent('offer', 'anything-else');
   convoSpeaking = true; convoStopRecogniser(); setMicState('speaking');
   // Same echo discipline as speak(): stay shut through a tail, THEN reopen.
-  const resume = () => { clearTimeout(convoResumeTimer); convoResumeTimer = setTimeout(() => { convoSpeaking = false; if (convoActive) { convoSetState('listening'); convoStartRecogniser(); } }, CONVO_TTS_TAIL_MS); };
+  // The offer is a deliberate fresh listening window for the driver's ANSWER: clear the
+  // oscillation guards on resume so the answer's speech onset can never be the flip/reopen
+  // that trips a ceiling (the field close-fired-exactly-on-speechstart bug). The offer
+  // fires at most once per quiet spell, so this can't be gamed into masking a real churn.
+  const resume = () => { clearTimeout(convoResumeTimer); convoResumeTimer = setTimeout(() => { convoSpeaking = false; if (convoActive) { convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState('listening'); convoStartRecogniser(); } }, CONVO_TTS_TAIL_MS); };
   try {
     synth && synth.cancel();
     const u = new SpeechSynthesisUtterance('Anything else?');
@@ -445,7 +457,9 @@ let heardSpeech = false;       // has anything actually been said this capture
 let silenceTimer = null;       // fires after a long silence, once speech exists
 let noSpeechTimer = null;      // conversation-mode auto-sleep only
 let restartBurst = 0;          // guards a recogniser that dies instantly
+let basicProgressAt = 0;       // last time the basic recogniser CAPTURED new words (real progress)
 const SILENCE_MS = 2800;       // long enough to survive a mid-sentence breath
+const BASIC_CHURN_MS = 15000;  // restart churn with no NEW captured words this long -> stop honestly (matches the convo ceiling; bounds BOTH engines)
 
 function toggleVoice() {
   unlockAudio();
@@ -797,7 +811,7 @@ async function startListening() {
 function startWebSpeechCapture() {
   captureActive = true;
   committedFinal = ''; instanceFinal = ''; interimText = '';
-  heardSpeech = false; restartBurst = 0;
+  heardSpeech = false; restartBurst = 0; basicProgressAt = Date.now();
   showCaptured('');
   startRecogniser();
 }
@@ -858,12 +872,21 @@ function startRecogniser() {
     // rebuilds the word salad: "right so I'm in Cairns I'm gonna right so I'm
     // in Cairns". mergeFinal drops a re-heard chunk and stitches a partial
     // overlap instead of duplicating it.
+    const _prevLen = committedFinal.length;
     committedFinal = mergeFinal(committedFinal, instanceFinal);
+    if (committedFinal.length > _prevLen) basicProgressAt = Date.now();   // real NEW words captured = progress
     instanceFinal = ''; interimText = '';
     if (!captureActive) return;        // a deliberate stop — stopCapture sends
-    // Android ended us early but the driver isn't finished: start another.
+    // Android ended us early but the driver isn't finished: start another — UNLESS this
+    // is a restart churn. Two churn signals close it honestly: many rapid restarts before
+    // any speech (a startup failure), OR — once speech HAS been heard — restarts continuing
+    // for BASIC_CHURN_MS with no NEW captured words. The second is the field beep loop:
+    // heardSpeech latches true, so the old '!heardSpeech' cap could NEVER fire and the ~5s
+    // restart churn ran unbounded. Time-since-progress is heardSpeech-independent, so both
+    // engines now bound their restart churn within ~15s.
     restartBurst++;
-    if (restartBurst > 12 && !heardSpeech) {
+    if ((restartBurst > 12 && !heardSpeech) ||
+        (heardSpeech && Date.now() - basicProgressAt > BASIC_CHURN_MS)) {
       stopCapture(false);
       addMsg('nav', 'Mic keeps dropping out — tap to try again, or type it.');
       return;
@@ -1012,7 +1035,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '28 Jul 2026, 11:09 PM AEST',
+    BUILD: '28 Jul 2026, 11:39 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
