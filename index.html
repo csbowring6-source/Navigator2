@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 09:49 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 10:11 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-0949AM"></script>
+<script src="speech.js?v=28Jul2026-1011AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1219,7 +1219,7 @@ async function classifyTripMode(utterance) {
         max_tokens: 40,
         // Belt-and-braces: the prompt asks for JSON-only AND output_config enforces the
         // schema when the Worker forwards it — either way a non-JSON reply -> 'invalid' -> gate.
-        system: 'Classify an Australian road-trip utterance by its return timing. Reply with ONLY a JSON object {"mode":"..."}. mode="day": there and back the same day (back tonight/today, day trip). mode="journey": staying overnight, back tomorrow, several days, or travelling onward. mode="mixed": TWO explicit timings that genuinely contradict (e.g. back tonight AND staying over tomorrow night). mode="none": no return timing stated. An explicit timing beats a vague one; use "mixed" only when two explicit timings truly conflict.',
+        system: 'Classify an Australian road-trip utterance by its return timing. Reply with ONLY a JSON object {"mode":"..."}. mode="day": there and back the same day (back tonight/today, day trip). mode="journey": staying overnight, back tomorrow, several days, travelling onward, OR wanting campsites/caravan parks AT the destination (that implies staying the night). mode="mixed": TWO explicit timings that genuinely contradict (e.g. back tonight AND staying over tomorrow night). mode="none": no return timing stated and no campsite request. RANKING, highest first: (1) an explicit return statement ("back tonight", "home tonight") decides on its own; (2) else a campsite request at the destination -> journey; (3) else vague wording ("out for the day"). So "out for the day but campsites there" = journey; "campsites there but back tonight" = day. A campsite request is an inference, never a "mixed" trigger — use "mixed" only when two EXPLICIT timings truly conflict.',
         messages: [{ role: 'user', content: utterance || '' }],
         output_config: { format: { type: 'json_schema', schema: {
           type: 'object',
@@ -3452,7 +3452,14 @@ function tripModeVote(text) {
   if (eNightVote > 0) return 'journey';                 // explicit overnight beats any vague, silently
   if (eDayVote > 0) return 'day';                       // explicit back-tonight beats any vague, silently
 
-  // No explicit signal — fall back to the vague vote (still negation-aware).
+  // Camps-at-destination INFERENCE (middle rank: explicit > camps > vague). Wanting
+  // campsites/caravan parks where you're headed implies staying the night. It ranks
+  // BELOW an explicit return statement — handled above, so "back tonight + campsites"
+  // already committed 'day' — and ABOVE the vague day/journey wording below, so
+  // "out for the day + campsites" is a journey. Reuses isCampsQuery (no vocab drift).
+  if (isCampsQuery(t)) return 'journey';
+
+  // No explicit signal and no camps request — fall back to the vague vote (negation-aware).
   let day = 0, journey = 0;
   if (vDay.aff) day++;
   if (vDay.neg) journey++;   // "not a day trip" -> journey
