@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 10:11 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 10:55 PM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-1011AM"></script>
+<script src="speech.js?v=28Jul2026-1055PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5223,6 +5223,18 @@ function _vlEnd() { clearTimeout(_vlTimer); }
   if (!hm) return;
   ['touchstart', 'mousedown'].forEach(ev => hm.addEventListener(ev, _vlStart));
   ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => hm.addEventListener(ev, _vlEnd));
+})();
+// Same 600ms long-press on the conversation-view mic ("Tap to talk"), so the log
+// is reachable without going home. Reuses the shared _vlStart/_vlEnd/_vlLong timer.
+// The button's own onclick (Voice.micTap) must NOT fire when a long-press just
+// opened the log — a capture-phase guard swallows that click, so opening/closing
+// the log never toggles the session; only the modal is touched.
+(function () {
+  const cm = document.getElementById('wakeBtn');
+  if (!cm) return;
+  ['touchstart', 'mousedown'].forEach(ev => cm.addEventListener(ev, _vlStart));
+  ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => cm.addEventListener(ev, _vlEnd));
+  cm.addEventListener('click', (e) => { if (_vlLong) { e.stopImmediatePropagation(); e.preventDefault(); _vlLong = false; } }, true);
 })();
 // Stale-module guard: speech.js pins the same stamp as #buildStamp via ?v= and
 // Voice.BUILD. If a cached old speech.js loaded against a fresh index.html, the

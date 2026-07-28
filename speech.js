@@ -22,11 +22,36 @@ window.Voice = (function () {
   // Every state transition, recogniser event, TTS start/stop, cue and open/close
   // is stamped here. Voice.getLog() reads it; the voice-log view renders + copies
   // it; the Phase-3 bench replays it. Kept small and allocation-cheap.
+  // DURABLE: mirrored into localStorage so a reload — update-banner tap, refresh,
+  // or a backgrounded mobile tab getting reclaimed — doesn't wipe the run. We use
+  // localStorage, NOT sessionStorage: an evicted background tab (or an app relaunch)
+  // keeps localStorage but can drop sessionStorage, which is exactly the wipe we're
+  // fixing. typeof-guarded + try/catch so the module still loads where storage is
+  // absent (the bench rig) or throws (Safari private mode). The 200 cap is enforced
+  // over the whole persisted buffer, and each reload appends a "--- reload ---"
+  // divider so separate runs stay distinguishable in the log view.
   const VLOG_MAX = 200;
+  const VLOG_KEY = 'navigator_vlog';
   let vlog = [];
+  function persistVlog() {
+    try { if (typeof localStorage !== 'undefined' && localStorage) localStorage.setItem(VLOG_KEY, JSON.stringify(vlog)); } catch (e) {}
+  }
+  (function restoreVlog() {
+    try {
+      if (typeof localStorage === 'undefined' || !localStorage) return;
+      const arr = JSON.parse(localStorage.getItem(VLOG_KEY) || 'null');
+      if (Array.isArray(arr) && arr.length) {
+        vlog = arr.filter(e => e && typeof e.t === 'number' && typeof e.kind === 'string');
+        vlog.push({ t: Date.now(), kind: '--- reload ---', detail: '' });     // boundary between runs
+        if (vlog.length > VLOG_MAX) vlog.splice(0, vlog.length - VLOG_MAX);    // cap across the whole buffer
+        persistVlog();
+      }
+    } catch (e) { vlog = []; }
+  })();
   function logEvent(kind, detail) {
     vlog.push({ t: Date.now(), kind: kind, detail: (detail == null ? '' : detail) });
     if (vlog.length > VLOG_MAX) vlog.shift();
+    persistVlog();
   }
 
   // ── moved voice state (was index.html:1889-1892) ───────────────────────────
@@ -987,7 +1012,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '28 Jul 2026, 10:11 AM AEST',
+    BUILD: '28 Jul 2026, 10:55 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -1010,6 +1035,6 @@ function _afterSpeak() {
     // event log
     log:      function (kind, detail) { logEvent(kind, detail); },   // app-side entries (e.g. AI classify spike)
     getLog:   function () { return vlog.slice(); },
-    clearLog: function () { vlog = []; },
+    clearLog: function () { vlog = []; try { if (typeof localStorage !== 'undefined' && localStorage) localStorage.removeItem(VLOG_KEY); } catch (e) {} },
   };
 })();
