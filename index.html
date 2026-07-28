@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 10:55 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 11:09 PM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-1055PM"></script>
+<script src="speech.js?v=28Jul2026-1109PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5214,27 +5214,25 @@ function copyVoiceLog(ev) {
   if (navigator.clipboard) navigator.clipboard.writeText(txt).then(toast).catch(() => alert(txt));
   else alert(txt);
 }
-// Long-press opens the log; a normal tap still talks (homeMic checks _vlLong).
+// Long-press (600ms hold) opens the voice log; a normal tap still talks.
 let _vlTimer = null, _vlLong = false;
 function _vlStart() { _vlLong = false; clearTimeout(_vlTimer); _vlTimer = setTimeout(() => { _vlLong = true; openVoiceLog(); }, 600); }
 function _vlEnd() { clearTimeout(_vlTimer); }
+// Attach the hold-to-open gesture to a mic control. TOUCH events are wired (not
+// just mouse) so it fires on a real phone. When the control has its own tap action
+// (Voice.micTap / Voice.toggleCapture), pass guardClick so a capture-phase listener
+// swallows the click that follows a long-press — opening the log then never toggles
+// the session or capture; only the modal is touched.
+function _vlAttach(el, guardClick) {
+  if (!el) return;
+  ['touchstart', 'mousedown'].forEach(ev => el.addEventListener(ev, _vlStart));
+  ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => el.addEventListener(ev, _vlEnd));
+  if (guardClick) el.addEventListener('click', (e) => { if (_vlLong) { e.stopImmediatePropagation(); e.preventDefault(); _vlLong = false; } }, true);
+}
 (function () {
-  const hm = document.getElementById('homeMic');
-  if (!hm) return;
-  ['touchstart', 'mousedown'].forEach(ev => hm.addEventListener(ev, _vlStart));
-  ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => hm.addEventListener(ev, _vlEnd));
-})();
-// Same 600ms long-press on the conversation-view mic ("Tap to talk"), so the log
-// is reachable without going home. Reuses the shared _vlStart/_vlEnd/_vlLong timer.
-// The button's own onclick (Voice.micTap) must NOT fire when a long-press just
-// opened the log — a capture-phase guard swallows that click, so opening/closing
-// the log never toggles the session; only the modal is touched.
-(function () {
-  const cm = document.getElementById('wakeBtn');
-  if (!cm) return;
-  ['touchstart', 'mousedown'].forEach(ev => cm.addEventListener(ev, _vlStart));
-  ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => cm.addEventListener(ev, _vlEnd));
-  cm.addEventListener('click', (e) => { if (_vlLong) { e.stopImmediatePropagation(); e.preventDefault(); _vlLong = false; } }, true);
+  _vlAttach(document.getElementById('homeMic'), false);    // home mic — homeMic() already checks _vlLong
+  _vlAttach(document.getElementById('wakeBtn'), true);     // conversation "Tap to talk" bar
+  _vlAttach(document.getElementById('voiceBtn'), true);    // conversation ROUND mic — the control field users actually long-press
 })();
 // Stale-module guard: speech.js pins the same stamp as #buildStamp via ?v= and
 // Voice.BUILD. If a cached old speech.js loaded against a fresh index.html, the
