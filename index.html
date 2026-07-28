@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 28 Jul 2026, 11:39 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:10 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=28Jul2026-1139PM"></script>
+<script src="speech.js?v=29Jul2026-0310AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2723,7 +2723,7 @@ EXAMPLE of a perfect reply:
 
 RULES:
 - 30 words maximum across the whole reply. Hard limit — with TWO exceptions: TRIP LEG PLANNING below, and offering a genuine CHOICE of two options in different directions (up to 40 words, because the choice is worth the words).
-- TRIP LEG PLANNING (the only exception to the word cap): when the driver asks how long the trip will take, to plan their days or legs, or where to break and sleep along the way — use the ROUTE DATA in context and reply in this compact shape, 80 words maximum, plain sentences: First, total km and realistic driving hours for THIS vehicle (car = route hours plus 10% for stops; caravan or campervan = route hours plus 30%; truck = plus 20% with mandatory rest breaks). Then one line per driving day: "Day 1: [start] to [overnight town] — break at [real town about 4 hours in], overnight at [real town about 8 hours in]." Pick towns by driving time on the actual route, and prefer overnight towns with caravan parks and motels. Finish by offering to navigate the first leg. Solo mode rules apply to every stop named. If no ROUTE DATA is in context, say you need a trip planned first — never guess distances.
+- TRIP LEG PLANNING (the only exception to the word cap): when the driver asks how long the trip will take, to plan their days or legs, or where to break and sleep along the way — use the ROUTE DATA in context and reply in this compact shape, 80 words maximum, plain sentences: First, total km and realistic driving TIME for THIS vehicle (car = route time plus 10% for stops; caravan or campervan = plus 30%; truck = plus 20% with mandatory rest breaks) — always state that time as hours and minutes ("3 hr 30"), NEVER a decimal ("3.5 hours" / "three point five hours"). Then one line per driving day: "Day 1: [start] to [overnight town] — break at [real town about 4 hours in], overnight at [real town about 8 hours in]." Pick towns by driving time on the actual route, and prefer overnight towns with caravan parks and motels. Finish by offering to navigate the first leg. Solo mode rules apply to every stop named. If no ROUTE DATA is in context, say you need a trip planned first — never guess distances.
 - CLARITY CHECK: If the request is rambling, ambiguous, or could mean two different things, do NOT guess — reply with ONE short confirmation of what you understood, 12 words maximum, ending in a question (e.g. "Powered site tonight, van-accessible, near Gympie — right?"). When the driver confirms, answer in the standard format. If the request is clear, NEVER add a confirmation step — answer immediately. Most requests are clear.
 - Every word must carry information: a name, a number, a fact, or the navigation line. Nothing else.
 - BANNED: apologies, hedging, "I'd suggest", "you might want to", "it's worth noting", restating the question, describing what you can't do.
@@ -4005,8 +4005,19 @@ async function answerCamps(scanText) {
   // there is genuinely no trip.
   let anchorCoords = null;
   if (!named && !alongWay) {
+    // A committed trip IS the context for a bare / "there" / "at the destination" ask.
+    // Recover it from PERSISTENCE too — the coord record (COMMITTED_KEY) and the saved
+    // trip name — so an in-memory null still anchors on the destination instead of
+    // silently falling through to the GPS corridor. This was the field bug: a reload
+    // (or reset) after the commit restores currentRunDest but NOT committedDest, so a
+    // bare "campsites there?" saw both empty and returned the driver's CURRENT-location
+    // parks. Corridor stays reserved for explicit "near me"/"around here" (alongWay,
+    // above) or a genuinely tripless session.
+    if (!committedDest || committedDest.lat == null) loadCommittedDest();
+    let tripName = currentRunDest;
+    if (!tripName) { try { tripName = (JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}').dest) || ''; } catch (e) {} }
     if (committedDest && committedDest.lat != null) { named = committedDest.name; anchorCoords = { lat: committedDest.lat, lon: committedDest.lon }; }
-    else if (currentRunDest) named = currentRunDest;   // name-only trip, coords not resolved yet
+    else if (tripName) named = tripName;   // name-only trip — getCampsNear geocodes it
   }
   const ans = formatCampsAnswer(named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps());
   if (ans.sites.length) {
