@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:10 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:43 AM AEST</div>
   </div>
 </div>
 
@@ -806,7 +806,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=29Jul2026-0310AM"></script>
+<script src="speech.js?v=29Jul2026-0343AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -908,6 +908,7 @@ let tripMode = '';   // '' unknown · 'day' (back tonight) · 'journey' (travell
 let committedDest = null;
 const COMMITTED_KEY = 'navigator_committed_dest';
 function commitDestination(name, lat, lon, source) {
+  name = normaliseDest(name);   // choke point: the committed NAME is always the clean place, never a travel-verb phrase
   committedDest = { name, lat: +lat, lon: +lon, resolvedAt: Date.now(), source: source || 'resolved' };
   try { localStorage.setItem(COMMITTED_KEY, JSON.stringify(committedDest)); } catch(e) {}
   window._tripRoute = { dest: name, dlat: +lat, dlon: +lon };   // seed the route cache
@@ -938,6 +939,7 @@ async function ensureCommittedDest(name) {
 }
 
 async function adoptTrip(dest) {
+  dest = normaliseDest(dest);   // choke point: currentRunDest / tripContext / persisted name are the clean place only
   currentRunDest = dest;
   destReaskCount = 0;    // committed — clear the re-ask escalation
   tripMode = '';         // new trip — mode not known until the driver says
@@ -1343,11 +1345,30 @@ function leadingPlace(s) {
   }
   return out.join(' ').trim();
 }
+// PURE: strip a leading TRAVEL-VERB phrase ("I want to drive to", "we're going to
+// drive to", "take a drive to", "head over to", "trip to"…) and trailing filler from
+// a spoken destination, leaving the bare place name. The leading strip fires ONLY
+// when a verb/filler run hands off with "to/for/towards/into" FOLLOWED BY a letter,
+// so a real place with no such lead-in ("Cooktown", "The Entrance", "Cairns to
+// Cardwell") is never touched. Idempotent — safe to run again at the commit choke
+// point. Field bug: "we're going to drive to Cooktown" committed "drive to Cooktown"
+// because the old strip removed only the OUTER lead-in and the raw subject was
+// committed; this collapses the whole nested run.
+function normaliseDest(s) {
+  let t = (s || '').replace(/^[\s,]+|[\s,]+$/g, '').replace(/[.,!?;:]+$/, '').trim();
+  t = t.replace(/\s+(?:please|thanks|thank you|mate|cheers|now|eh|ok(?:ay)?|today|tomorrow|tonight|first|then|as well|too|i think|i reckon|i guess)\s*$/i, '').trim();
+  const LEAD = /^(?:(?:i|we|you|it|that|let|us|me|i'?m|i'?d|i'?ll|we'?re|we'?d|we'?ll|let'?s|please|so|well|actually|um+|uh+|er+|yeah|yep|yes|nah|nope|ok(?:ay)?|just|maybe|probably|reckon|think|gonna|wanna|wanting|want|needing|need|gotta|got|have|has|had|going|go|goes|head(?:ing|ed)?|driv(?:e|ing|en)|travel(?:ling|ing)?|make|makes|making|my|our|your|the|a|an|take|takes|taking|took|get|gets|getting|be|been|are|is|am|was|were|bound|trip|route|journey|way|road|proceed|continue|roll|cruise|run|nip|pop|off|on|over|out|up|down|round|across|and|then|like|love|plan(?:ning)?|hop(?:e|ing)|would|could|can|will|shall|to|for|towards?|toward|into)\b[\s,'’]*)*(?:to|for|towards?|toward|into)\s+(?=[A-Za-z])/i;
+  const stripped = t.replace(LEAD, '').replace(/\s+/g, ' ').trim();
+  return stripped || t;   // a lead-in with no place after it keeps the original so the caller re-asks, never commits empty
+}
 function extractDestCandidates(text) {
   let t = cleanTranscript(text || '').trim();
   if (!t) return { candidates: [], ambiguous: false };
   // drop a leading lead-in so the place sits at the front
   t = t.replace(/^(?:it'?s|its|that'?s|the (?:town|place|destination)(?:'?s| is)?|we'?re\s+(?:going|heading|headed|off)(?:\s+(?:to|for))?|(?:going|heading|headed|driving|drive|bound|off)\s+(?:to|for)|take me to|head(?:ing)?\s+(?:to|for)|i think(?:\s+it'?s)?|probably|maybe|yeah|yep|yes|nah|ok(?:ay)?|so|well|actually|umm?|uhh?|err?)\s+/i, '').trim();
+  // then collapse any REMAINING nested travel-verb run ("we're going to" left
+  // "drive to Cooktown") so the candidate is the clean place, not a verb phrase.
+  t = normaliseDest(t);
   // explicit "X or Y" — genuinely ambiguous, no clear subject
   let m = t.match(/^(.+?)\s+or\s+(.+?)[.?!]*$/i);
   if (m) { const a = leadingPlace(m[1]), b = leadingPlace(m[2]); if (a && b) return { candidates: [a, b], ambiguous: true }; }
