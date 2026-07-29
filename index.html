@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:16 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:48 PM AEST</div>
   </div>
 </div>
 
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=29Jul2026-0316PM"></script>
+<script src="speech.js?v=29Jul2026-0348PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3302,8 +3302,20 @@ function verifiedPhone(s) {
 }
 // A phone-lookup MISS is a fact about OUR lookup, not the park — every commercial
 // caravan park has a number. Word it as ours ("couldn't find"), never the site's
-// ("has no number"). One source for the phrasing, used spoken and on screen.
-function phoneMiss(name) { return `Couldn't find a number for ${name} — worth a search, or ask when you arrive.`; }
+// ("has no number"). One source for the phrasing, used spoken and on screen. The
+// tail is a plain instruction a driver can act on at the wheel — no "search"
+// jargon (field 29 Jul: the old line couldn't be parsed at speed). Offer "ring one
+// of the others" ONLY when another displayed site actually has a number; callers
+// that append their own next-number offer (denyNumber) pass { noRing:true } so the
+// two "others" prompts don't double up.
+function phoneMiss(name, opts) {
+  opts = opts || {};
+  const others = opts.sites || (campRound && campRound.sites) || [];
+  const canRing = !opts.noRing && others.some(s => s && s.name !== name && verifiedPhone(s));
+  const tail = canRing ? ' You could ring one of the others, or just drive in and ask at reception.'
+                       : ' You could just drive in and ask at reception.';
+  return `Couldn't find a number for ${name}.${tail}`;
+}
 // VISIBLE ONLY — Australian local grouping (07 4066 8550 / 0412 345 678). Never
 // spoken; the spoken answer says "tap Call" instead.
 function localPhone(p) {
@@ -3409,12 +3421,14 @@ function formatCampsAnswer(res) {
   // A miss is OURS, not the site's: every commercial park has a number, so we
   // attribute the gap to the lookup ("couldn't find"), never to the park ("has
   // no number"). We can't search the web ourselves (SPEC §0), so we point the
-  // driver at a search or asking on arrival — we never offer to do it for them.
+  // driver at ringing another listed site or asking at reception on arrival — we
+  // never claim to do it for them. Pass the displayed `sites` so the "ring one of
+  // the others" clause fires only when one of them actually has a number.
   const spokenFinish = bp ? `I've got the number — tap Call for ${best.name}.`
-                          : phoneMiss(best.name);
+                          : phoneMiss(best.name, { sites });
   // TEXT banner: the digits, in readable local format (visible, never spoken).
   const textFinish   = bp ? `Call ${best.name} on ${localPhone(bp)} to check tonight.`
-                          : phoneMiss(best.name);
+                          : phoneMiss(best.name, { sites });
   const spokenBits = [head, spokenLines.join(' ')];
   if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
   spokenBits.push(spokenFinish);   // Call handoff, or an honest "no number for <site>"
@@ -3986,7 +4000,7 @@ function readyDial(site) {
 function denyNumber(site) {
   const idx = campRound.sites.findIndex(s => s.name === site.name);
   const next = campRound.sites.slice(idx + 1).concat(campRound.sites.slice(0, idx)).find(s => s.name !== site.name);
-  let msg = phoneMiss(site.name);
+  let msg = phoneMiss(site.name, { noRing: true });   // an interactive offer follows — no passive "ring one of the others" clause
   if (next) { msg += ` Want the number for ${next.name}?`; setPending({ type: 'number-offer', site: next.name }); }
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
@@ -4018,7 +4032,7 @@ async function getNumbersForAll() {
   saveCampRound();                                    // persist any newly-found numbers
   hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
   const found = results.filter(r => r.phone);
-  const head = !found.length ? `Couldn't find a number for any of the ${sites.length} — worth a search, or ask when you arrive.`
+  const head = !found.length ? `Couldn't find a number for any of the ${sites.length}. You could just drive in and ask at reception.`
              : found.length === sites.length ? `Here are the numbers — tap any to call.`
              : `Got a number for ${found.length} of the ${sites.length} — tap any to call.`;
   addMsg('nav', head); lastNavReply = head; lastSpoken = head; speak(head);   // no digits spoken
