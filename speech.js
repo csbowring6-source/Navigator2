@@ -402,9 +402,11 @@ function setMicState(state) {
   const capturing = cloudActive || captureActive;   // one-shot capture: a tap SENDS
   const session   = convoActive;                     // hands-free session: a tap CLOSES
   let label;
-  if (state === 'off') label = '🎙 Tap to talk';
+  // Idle label names the FEATURE ("Hands-free") so a driver can discover the bar opens a
+  // session; while a session is open the WORD changes too, not colour alone (field 29 Jul).
+  if (state === 'off') label = '🎙 Hands-free';
   else if (state === 'recording') label = capturing ? '🎙 Recording · tap to send' : '🎙 Recording · tap to close';
-  else if (state === 'listening') label = '🎙 Listening · tap to close';
+  else if (state === 'listening') label = session ? '🎙 Hands-free — listening' : '🎙 Listening · tap to close';
   else if (state === 'thinking') label = '🎙 Thinking…';
   else /* speaking */ label = session ? '🎙 Speaking · tap to close' : '🎙 Speaking…';
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
@@ -1044,7 +1046,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '29 Jul 2026, 03:48 PM AEST',
+    BUILD: '29 Jul 2026, 03:59 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -1060,6 +1062,7 @@ function _afterSpeak() {
     state:         function () { return micState; },
     isSessionOpen: function () { return convoActive; },
     isCapturing:   function () { return cloudActive || captureActive; },
+    canHandsFree:  convoSupported,   // does this browser support a hands-free session? (gates the first-use tip)
     // couplings
     onTranscript:  function (cb) { _onTranscript = (typeof cb === 'function') ? cb : function () {}; },
     setBusyGetter: function (fn) { _isBusy = (typeof fn === 'function') ? fn : function () { return false; }; },

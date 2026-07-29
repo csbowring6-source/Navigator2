@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:48 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 03:59 PM AEST</div>
   </div>
 </div>
 
@@ -621,7 +621,7 @@
 
     <div class="input-area">
       <div class="wake-bar">
-        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="Voice.micTap()">🎙 Tap to talk</button>
+        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="Voice.micTap()">🎙 Hands-free</button>
       </div>
       <div class="input-row" id="inputRow">
         <textarea id="userInput" placeholder="Type here…" rows="1"
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=29Jul2026-0348PM"></script>
+<script src="speech.js?v=29Jul2026-0359PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1527,6 +1527,21 @@ let userVehicles = [];
 let userRego = '';
 let userVan = '';
 
+// ── HANDS-FREE DISCOVERABILITY (field 29 Jul: the wide bar's old "Tap to talk" label
+// hid that it opens a hands-free session — drivers never found it). everUsedHandsFree
+// persists in the profile: once the driver has EVER used a hands-free session the
+// first-use tip never fires again. handsFreeTipShownThisSession bounds it to once per
+// page load. The tip is spoken, never shown, and only on a one-shot mic turn.
+let everUsedHandsFree = false;
+let handsFreeTipShownThisSession = false;
+const HANDS_FREE_TIP = "Tip — tap Hands-free and you won't need to tap again.";
+// Pure predicate so the "at most once, never after first hands-free use" rule benches
+// directly: due only on a one-shot VOICE turn (no session open), where hands-free is
+// actually available, the driver has never used it, and we haven't tipped this session.
+function handsFreeTipDueNow(voiceTurn, sessionOpen, canHandsFree, everUsed, shownThisSession) {
+  return !!(voiceTurn && !sessionOpen && canHandsFree && !everUsed && !shownThisSession);
+}
+
 // ── LIVING GREETING — place, weather, time and name, composed fresh ───────────
 function updateGreeting() {
   const el = document.getElementById('homeGreeting');
@@ -1667,7 +1682,8 @@ function persistProfile() {
   try {
     localStorage.setItem('navigator_profile', JSON.stringify({
       name: userName, vehicles: userVehicles, rego: userRego, van: userVan, fuel: selectedFuel,
-      height: userHeight, length: userLength, ownedApps: ownedApps, soloContact: soloContact
+      height: userHeight, length: userLength, ownedApps: ownedApps, soloContact: soloContact,
+      everUsedHandsFree: everUsedHandsFree
     }));
   } catch(e) {}
 }
@@ -1738,6 +1754,7 @@ function loadProfile() {
       userLength = p.length || '';
       ownedApps = p.ownedApps || [];
       soloContact = p.soloContact || null;
+      everUsedHandsFree = !!p.everUsedHandsFree;   // old profiles default false — the tip may still show
       applyProfile();
       showHome();                       // returning user → straight to home, no overlay
     } else {
@@ -4650,6 +4667,12 @@ async function sendMessage(silent){
   // Consume how the voice turn ended (null = typed, always trusted). Used only to
   // guard destination resolution against a fragment left by a hard cutoff.
   const turnEnd = Voice.takeTurnEnd();
+  // Hands-free discoverability, derived from THIS turn's source only. A session turn
+  // means the driver has found hands-free → mark it used so the tip never shows again.
+  // A one-shot voice turn (no session) where hands-free is available is a chance to tip.
+  const voiceTurn = (turnEnd !== null);
+  if (voiceTurn && Voice.isSessionOpen() && !everUsedHandsFree) { everUsedHandsFree = true; persistProfile(); }
+  const handsFreeTipDue = handsFreeTipDueNow(voiceTurn, Voice.isSessionOpen(), Voice.canHandsFree(), everUsedHandsFree, handsFreeTipShownThisSession);
 
   // "Say again" / "repeat" — re-speak the last reply, no AI round-trip
   if (/^(say again|say that again|repeat( that)?|come again|what did you say|pardon|again please|can you repeat)\b/i.test(text)) {
@@ -5162,7 +5185,9 @@ async function sendMessage(silent){
       if (reply) {
         messages.push({role:'assistant',content:reply});
         addMsg('nav',reply);
-        speak(reply);
+        // First-use hands-free tip: spoken (not shown), appended to this one reply, once.
+        if (handsFreeTipDue) { handsFreeTipShownThisSession = true; speak(reply + ' ' + HANDS_FREE_TIP); }
+        else speak(reply);
         // If we just asked where they're headed, hold that question so the
         // natural one-word answer ("Cardwell") is accepted instead of looping.
         if (!currentRunDest && asksForDestination(reply)) setPending({ type: 'destination' });
@@ -5366,7 +5391,7 @@ function _vlAttach(el, guardClick) {
 }
 (function () {
   _vlAttach(document.getElementById('homeMic'), false);    // home mic — homeMic() already checks _vlLong
-  _vlAttach(document.getElementById('wakeBtn'), true);     // conversation "Tap to talk" bar
+  _vlAttach(document.getElementById('wakeBtn'), true);     // conversation "Hands-free" bar
   _vlAttach(document.getElementById('voiceBtn'), true);    // conversation ROUND mic — the control field users actually long-press
 })();
 // Stale-module guard: speech.js pins the same stamp as #buildStamp via ?v= and

@@ -49,7 +49,12 @@ function stubEl() {
 const MockAudioCtx = class { constructor(){ this.currentTime = 0; this.destination = {}; } createOscillator(){ return { type:"", frequency:{}, connect(){}, start(){}, stop(){} }; } createGain(){ return { gain:{ setValueAtTime(){}, exponentialRampToValueAtTime(){} }, connect(){} }; } };
 const mockWindow = { speechSynthesis: synth, SpeechRecognition: MockSR, webkitSpeechRecognition: MockSR, AudioContext: MockAudioCtx, webkitAudioContext: MockAudioCtx };
 const mockNavigator = { userAgent: "bench", mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) }, permissions: { query: async () => ({ state: "granted" }) } };
-const mockDocument = { getElementById: () => stubEl(), querySelectorAll: () => [], createElement: () => stubEl() };
+// Persistent per-id elements so a test can read back what setMicState wrote (e.g. the
+// #wakeBtn label). Existing scenarios never read element state, so persistence is inert
+// for them; writes still land as before.
+const _els = {};
+const el = (id) => (_els[id] || (_els[id] = stubEl()));
+const mockDocument = { getElementById: el, querySelectorAll: () => [], createElement: () => stubEl() };
 const silentConsole = { log(){}, warn(){}, info(){}, error(){} };
 
 // ── app-level globals the module calls by name (live in index.html) ───────────
@@ -305,6 +310,23 @@ check("exactly one close cue for the whole session", count("cue") === 1);
 // source-lock the fix: speak() clears BOTH session-lifetime timers as the reply begins
 check("speak() pauses the silence + offer clocks while the app speaks",
   /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
+
+// ── SCENARIO 11: the bar NAMES the feature — 'Hands-free' idle, 'Hands-free — listening'
+// while a session is open (field 29 Jul: the old "Tap to talk" label hid that the wide bar
+// opens a hands-free session). The WORD must change between idle and open, not colour alone.
+console.log("\n--- 11. bar label: 'Hands-free' idle, 'Hands-free — listening' when a session is open ---");
+Voice.closeSession("tap");   // force setMicState('off') -> writes the idle label
+const idleLabel = el("wakeBtn").textContent;
+check("idle bar reads the feature name '🎙 Hands-free'", idleLabel === "🎙 Hands-free", idleLabel);
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();   // session open, listening
+const openLabel = el("wakeBtn").textContent;
+check("open session reads '🎙 Hands-free — listening'", openLabel === "🎙 Hands-free — listening" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
+check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Hands-free/.test(idleLabel) && /listening/.test(openLabel));
+Voice.closeSession("tap");
+check("returns to '🎙 Hands-free' idle after close", el("wakeBtn").textContent === "🎙 Hands-free");
+check("Voice.canHandsFree() is exposed and true under a supporting engine", Voice.canHandsFree() === true);
+// session behaviour unchanged is covered by scenarios 1–10 above (all still pass).
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
