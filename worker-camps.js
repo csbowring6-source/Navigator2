@@ -339,6 +339,92 @@ async function handleCamps(request, env) {
   return jsonResp({ source: "OpenStreetMap", radiuskm: radiusKm, cached: !!res.cached, results });
 }
 
+// ═══ /camps2 — PLACES-BACKED CAMPS (camps architecture, phase 1 — ADDITIVE) ═══
+// Google Places (New) Text Search for caravan parks + camps near lat/lon. The app
+// does NOT call this yet (that's phase 3); /camps, the OSM path and /place-phone are
+// UNTOUCHED. Records are normalised to the OSM /camps site-record shape (id, name,
+// type, lat, lon, phone) PLUS hours, tagged source:"places", so later phases merge
+// without rework. NOT filtered to commercial parks — free camps appear in Places (the
+// Hughenden probe proved it) and are kept. KV cache on rounded coords + radius, 30-day
+// TTL (parks don't move). Its own field-mask const (NOT the temporary probe's, which
+// is scheduled for removal at phase 4).
+//
+// FIELD MASK — EXACTLY the approved set: id, displayName, formattedAddress, location,
+// nationalPhoneNumber, regularOpeningHours. Nothing more — ratings/reviews/photos are
+// a higher SKU and are forbidden.
+const CAMPS2_FIELD_MASK =
+  "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours";
+async function handleCamps2(request, env) {
+  const u = new URL(request.url);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
+  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
+  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "places camps not configured — no GOOGLE_PLACES_KEY", unavailable: true }, 503);
+
+  // KV cache keyed on ROUNDED coords (~1km) + radius, 30-day TTL — caravan parks don't
+  // move. Distinct "camps2:" prefix so it never collides with the OSM "camps:" cache.
+  const kv = env && env.PLACES_KV;
+  const ckey = `camps2:${lat.toFixed(2)},${lon.toFixed(2)}:${radiusKm}`;
+  if (kv) {
+    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return jsonResp({ source: "places", radiuskm: radiusKm, cached: true, results: c.results }); } catch (e) {}
+  }
+
+  // Places (New) Text Search, biased to a circle around the driver. maxResultCount 20
+  // (the API ceiling); circle radius capped at Places' 50 km limit. No commercial-only
+  // filter — keep free camps too.
+  let d = null;
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
+        "X-Goog-FieldMask": CAMPS2_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        textQuery: "caravan parks and camping grounds",
+        maxResultCount: 20,
+        locationBias: { circle: { center: { latitude: lat, longitude: lon }, radius: Math.min(radiusKm * 1000, 50000) } },
+      }),
+    });
+    if (!r.ok) {
+      let detail = ""; try { const e = await r.json(); detail = (e && e.error && e.error.message) || ""; } catch (_) {}
+      return jsonResp({ error: "places camps lookup failed", status: r.status, detail, unavailable: true }, 502);
+    }
+    try { d = await r.json(); } catch (e) { return jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502); }
+  } catch (e) {
+    return jsonResp({ error: "couldn't reach Places", detail: String((e && e.message) || e), unavailable: true }, 503);
+  }
+  if (!d || typeof d !== "object") return jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502);
+
+  // Zero results is a valid, honest answer (Places returns {} — no `places`), NOT an
+  // error. Normalise each place; drop any without a usable location or name.
+  const places = Array.isArray(d.places) ? d.places : [];
+  const results = places.map((p) => {
+    const loc = p.location || {};
+    const plat = (typeof loc.latitude === "number") ? loc.latitude : null;
+    const plon = (typeof loc.longitude === "number") ? loc.longitude : null;
+    if (plat == null || plon == null) return null;
+    const name = (p.displayName && p.displayName.text) || "";
+    if (!name) return null;
+    return {
+      id: p.id || "",                                  // stable Places id (phase-3 merge/dedup key)
+      name,
+      type: "caravan park",                            // Places doesn't split park/camp; app treats generically
+      lat: plat, lon: plon,
+      km: hav(lat, lon, plat, plon),                   // for the nearest-first sort below (dropped from output)
+      address: p.formattedAddress || "",
+      phone: p.nationalPhoneNumber || "",
+      hours: (p.regularOpeningHours && p.regularOpeningHours.weekdayDescriptions) || null,
+      source: "places",
+    };
+  }).filter(Boolean).sort((a, b) => a.km - b.km).map(({ km, ...rec }) => rec);   // nearest first, km not emitted (mirrors /camps)
+
+  if (kv) { try { await kv.put(ckey, JSON.stringify({ results, ts: Date.now() }), { expirationTtl: 30 * 24 * 3600 }); } catch (e) {} }
+  return jsonResp({ source: "places", radiuskm: radiusKm, cached: false, results });
+}
+
 async function handleStations(request) {
   const u = new URL(request.url);
   const lat = parseFloat(u.searchParams.get("lat"));
@@ -659,7 +745,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Jul 2026, 10:10 AM AEST (adds POST /log + GET /log/<id>: share a diagnostic voice log via KV, 7-day TTL, random id, no auth/listing)";
+const WORKER_BUILD = "Navigator Worker — 29 Jul 2026, 12:44 PM AEST (phase 1: adds /camps2 — Places-backed camps, exact field mask, KV 30-day TTL, source:places, additive)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -783,6 +869,7 @@ export default {
       "/fuel": () => handleFuel(request, env),
       "/poi": () => handlePoi(request),
       "/camps": () => handleCamps(request, env),
+      "/camps2": () => handleCamps2(request, env),   // phase 1: Places-backed camps (app doesn't call it yet — phase 3)
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
