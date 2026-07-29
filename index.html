@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 07:16 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 30 Jul 2026, 07:28 AM AEST</div>
   </div>
 </div>
 
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=29Jul2026-0716PM"></script>
+<script src="speech.js?v=30Jul2026-0728AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -909,6 +909,13 @@ let tripMode = '';   // '' unknown · 'day' (back tonight) · 'journey' (travell
 // still the display truth; committedDest is the coordinate truth bound to it.
 let committedDest = null;
 const COMMITTED_KEY = 'navigator_committed_dest';
+// A deferred camps ask lives HERE, on the trip — not on the pending question that
+// asked the day/journey follow-up. A pending can be released by a topic change ("can
+// you give me the numbers…"), but the camps intent must survive that release: any
+// later turn that plausibly references it (anaphora, a numbers ask) fulfils it. Set
+// when a camps ask is deferred (setPending with wantsCamps); cleared when a camps
+// answer is delivered (answerCamps) or the trip is cleared.
+let campsOwed = false;
 function commitDestination(name, lat, lon, source) {
   name = normaliseDest(name);   // choke point: the committed NAME is always the clean place, never a travel-verb phrase
   committedDest = { name, lat: +lat, lon: +lon, resolvedAt: Date.now(), source: source || 'resolved' };
@@ -945,6 +952,7 @@ async function adoptTrip(dest) {
   currentRunDest = dest;
   destReaskCount = 0;    // committed — clear the re-ask escalation
   tripMode = '';         // new trip — mode not known until the driver says
+  campsOwed = false;     // new trip — no camps owed until THIS trip's utterance asks (set moments later by setPending)
   updateSuggestions();   // chips announce route-aware mode
   tripContext = `Destination: ${dest}.`;
   pendingTripDest = null;
@@ -1208,7 +1216,7 @@ async function proceedAfterTrip(trip, wantsPlan, wantsCamps, text) {
       let msg;
       if (wantsPlan) { try { await plotTripRoute(trip.dest); } catch (e) {} msg = formatDayBrief(trip.dest, trip.origin, window._tripRoute, currentVehicle); }
       else msg = `Trip set${trip.origin ? ' — ' + trip.origin + ' to ' + trip.dest : ' to ' + trip.dest}.`;
-      if (wantsCamps && wantsPlan) { msg += ' Want the caravan sites now?'; setPending({ type: 'camps-offer', ask: text }); addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
+      if (wantsCamps && wantsPlan) { msg += ' Want the caravan sites now?'; setPending({ type: 'camps-offer', ask: text, wantsCamps: true }); addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
       else if (wantsCamps) { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); Voice.queueReplies(true); try { await answerCamps(text); } finally { Voice.queueReplies(false); } }
       else { addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg); }
     } finally { hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false; }
@@ -1922,6 +1930,7 @@ function clearThisTrip() {
   tripContext = '';
   currentRunDest = '';
   committedDest = null;
+  campsOwed = false;   // trip cleared — nothing owed
   window._tripRoute = null;
   if (routeLine && window._navMap) { try { window._navMap.removeLayer(routeLine); } catch(e) {} routeLine = null; }
   if (routeDestMarker && window._navMap) { try { window._navMap.removeLayer(routeDestMarker); } catch(e) {} routeDestMarker = null; }
@@ -3464,6 +3473,23 @@ function formatCampsAnswer(res) {
 function isCampsQuery(text) {
   return /\b(?:campgrounds?|campsites?|camp ?sites?|camping|camps?|caravan ?parks?|van ?parks?|holiday ?parks?|tourist ?parks?|caravan ?sites?|powered ?sites?|free ?camps?|dump ?points?|showgrounds?|somewhere to (?:stay|camp)|(?:stay|camp) tonight|overnight (?:stops?|stays?|spots?|parks?))\b/i.test(text);
 }
+// ANAPHORA — references to an ALREADY-in-play camps set: "those parks", "the sites",
+// "which one", "their numbers". Deliberately NOT part of isCampsQuery: bare "parks" /
+// "car park" must not trigger camps globally. This only means "camps" behind the
+// isTripCampsAnaphora gate (a committed trip AND camps owed or a round exists), so a
+// tripless "the parks" still routes nowhere special (field ZNZ58HM false-positive guard).
+function isCampsAnaphora(text) {
+  const t = (text || '').toLowerCase();
+  return /\b(?:those|these|the|them|their)\s+(?:caravan\s+)?(?:parks?|sites?|camps?|ones?)\b/.test(t)
+      || /\bwhich\s+(?:one|park|site|camp|of (?:them|those|these))\b/.test(t)
+      || /\b(?:their|the)\s+(?:phone\s+)?numbers?\b/.test(t)
+      || /\bnumbers?\s+for\s+(?:those|these|them|the)\b/.test(t);
+}
+// A camps anaphora that we can actually resolve: there's a committed trip AND either a
+// camps ask is owed (deferred earlier) or a round already exists to refer back to.
+function isTripCampsAnaphora(text) {
+  return !!currentRunDest && (campsOwed || !!(campRound && campRound.sites && campRound.sites.length)) && isCampsAnaphora(text);
+}
 
 // ── PENDING QUESTION (context) ────────────────────────────────────────────────
 // When Navigator asks a question (trip mode, overnight-stops offer, destination),
@@ -3475,7 +3501,7 @@ const PENDING_TTL_MS = 120000; // after 120s a reply is a new query — a driver
 // Always set the pending question through here so it carries a timestamp; a bare
 // "Cardwell" minutes later must read as a destination, not an answer to an
 // offer the driver has long forgotten.
-function setPending(q) { pendingQuestion = q || null; pendingQuestionAt = q ? Date.now() : 0; }
+function setPending(q) { pendingQuestion = q || null; pendingQuestionAt = q ? Date.now() : 0; if (q && q.wantsCamps) campsOwed = true; }   // a deferred camps ask becomes trip-scoped "owed" — it outlives this pending's release
 function pendingIsFresh() { return !!pendingQuestion && (Date.now() - pendingQuestionAt) <= PENDING_TTL_MS; }
 
 // A CLEAR change of subject while a question is held — a question, or a request for
@@ -3591,7 +3617,7 @@ function needsStaleTripConfirm(isFirst, hasTrip, text) {
 }
 // Drop a leftover trip WITHOUT the confirm dialog / chat wipe of clearThisTrip.
 function clearLeftoverTrip() {
-  tripContext = ''; currentRunDest = ''; committedDest = null; tripMode = ''; window._tripRoute = null;
+  tripContext = ''; currentRunDest = ''; committedDest = null; tripMode = ''; campsOwed = false; window._tripRoute = null;
   try {
     localStorage.removeItem('navigator_last_trip');
     localStorage.removeItem('navigator_last_trip_raw');
@@ -4072,9 +4098,28 @@ async function getNumbersForAll() {
 }
 // Voice entry point — returns true if it handled the utterance.
 async function handleNumberRequest(text) {
-  if (!campRound || !campRound.sites.length) return false;
   const req = extractNumberRequest(text);
   if (!req) return false;
+  // No round yet. If a trip is committed AND camps are owed (deferred earlier) or the
+  // ask anaphorically means "those parks", fetch the DESTINATION's camps first, then
+  // serve the numbers from that set. NEVER bail silently to the relay here — that's how
+  // "numbers for those parks" ended up GPS-anchored on the origin (field ZNZ58HM).
+  if (!campRound || !campRound.sites.length) {
+    if (currentRunDest && (campsOwed || isCampsAnaphora(text))) {
+      addMsg('user', text);
+      busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+      let ans; try { ans = await loadTripCampRound(text); } catch (e) { ans = { sites: [] }; }
+      hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+      campsOwed = false;   // the owed camps ask is now serviced (numbers or an honest miss)
+      if (campRound && campRound.sites.length) { await getNumbersForAll(); }
+      else {
+        const m = `Couldn't find any caravan parks near ${currentRunDest} to get numbers for — try again in a minute.`;
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      }
+      return true;
+    }
+    return false;   // no trip context to anchor on — let general routing handle it
+  }
   addMsg('user', text);
   if (req.scope === 'all') { await getNumbersForAll(); return true; }
   if (req.scope === 'ask') { askWhichSite(); return true; }
@@ -4094,42 +4139,45 @@ function checkCampReturn() {
   }
 }
 
-async function answerCamps(scanText) {
-  // ROUTING: when the driver NAMES a place ("caravan parks in Cardwell"), search
-  // AROUND that place — not the corridor. The corridor (ahead / within the hour)
-  // is only for "along the way / next hour" phrasing that names no place; using it
-  // for a named town returned parks near the ORIGIN, which is the bug this fixes.
+// The camps ANCHOR for the current context. When the driver NAMES a place ("caravan
+// parks in Cardwell") search AROUND that place; the corridor (ahead / within the hour)
+// is only for explicit "along the way / next hour / near me" phrasing that names no
+// place — using it for a named town returned parks near the ORIGIN, the original bug.
+// With a live trip, the trip IS the context: "when I get there", "at the destination",
+// a lowercase "in cardwell", "those parks", or a bare ask all mean the DESTINATION —
+// not wherever the car (or a manually-set ORIGIN) is. Anchor on the COMMITTED record's
+// coords, recovered from PERSISTENCE if the in-memory record was lost, so a bare /
+// anaphoric ask can never silently fall through to the GPS corridor. Extracted from
+// answerCamps so the NUMBER path anchors identically (field ZNZ58HM).
+function campsAnchor(scanText) {
   const alongWay = /\b(along|on (?:the|my) (?:route|way)|next hour|within (?:the|an) hour|on the way|up ahead|ahead of me|near me|around here|nearby)\b/i.test(scanText);
   const namedMatch = scanText.match(/\b(?:in|at|near|around|to)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
   let named = (namedMatch && !alongWay) ? namedMatch[1] : null;
-  // With a live trip, the trip IS the context: "when I get there", "at the
-  // destination", a lowercase "in cardwell", or a bare camps ask all mean the
-  // DESTINATION — not wherever the car (or a manually-set ORIGIN) happens to be.
-  // Anchor on the COMMITTED record's coords directly, so a bare ask can never
-  // silently fall through to GPS/origin via the corridor. The corridor is only
-  // for explicit "along the way / next hour / near me" phrasing (above), or when
-  // there is genuinely no trip.
   let anchorCoords = null;
   if (!named && !alongWay) {
-    // A committed trip IS the context for a bare / "there" / "at the destination" ask.
-    // Recover it from PERSISTENCE too — the coord record (COMMITTED_KEY) and the saved
-    // trip name — so an in-memory null still anchors on the destination instead of
-    // silently falling through to the GPS corridor. This was the field bug: a reload
-    // (or reset) after the commit restores currentRunDest but NOT committedDest, so a
-    // bare "campsites there?" saw both empty and returned the driver's CURRENT-location
-    // parks. Corridor stays reserved for explicit "near me"/"around here" (alongWay,
-    // above) or a genuinely tripless session.
     if (!committedDest || committedDest.lat == null) loadCommittedDest();
     let tripName = currentRunDest;
     if (!tripName) { try { tripName = (JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}').dest) || ''; } catch (e) {} }
     if (committedDest && committedDest.lat != null) { named = committedDest.name; anchorCoords = { lat: committedDest.lat, lon: committedDest.lon }; }
     else if (tripName) named = tripName;   // name-only trip — getCampsNear geocodes it
   }
+  return { named, anchorCoords };
+}
+// Fetch + format + persist the camps round for the current context WITHOUT speaking.
+// Shared by answerCamps (which then speaks) and the number path (which then serves the
+// numbers from the populated round instead of bailing to the GPS-anchored relay).
+async function loadTripCampRound(scanText) {
+  const { named, anchorCoords } = campsAnchor(scanText);
   const ans = formatCampsAnswer(named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps());
   if (ans.sites.length) {
     addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
     startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
   }
+  return ans;
+}
+async function answerCamps(scanText) {
+  const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
+  campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
   // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
@@ -4539,7 +4587,7 @@ function resetConversation() {
   knownPlaces = [];
   fuelShortlist = []; fuelDialIdx = 0;
   Object.keys(ctxKeep).forEach(k => delete ctxKeep[k]);   // drop remembered lists
-  clearCampRound(); lastBookedSite = null;   // a fresh conversation ends any ring-around
+  clearCampRound(); lastBookedSite = null; campsOwed = false;   // a fresh conversation ends any ring-around and clears any owed camps
   clearOptionPins();
   window._pendingPins = null;
   const ui = document.getElementById('userInput'); if (ui) ui.value = '';
@@ -5024,7 +5072,7 @@ async function sendMessage(silent){
   // ── CAMPS answered deterministically (S2.3): verified data only, so a phone
   // number is never AI-composed (TRUST RULE). Mixed camps+other queries fall
   // through to the AI path below.
-  if (isCampsQuery(scanText)) {
+  if (isCampsQuery(scanText) || isTripCampsAnaphora(scanText)) {
     try { await answerCamps(scanText); } catch(e) {
       const msg = "Couldn't check camps just now — try again in a minute.";
       addMsg('nav', msg); speak(msg);
@@ -5118,7 +5166,18 @@ async function sendMessage(silent){
   const snap = await checkRoadSnap();
   const offRoadCtx = offRoadNote(snap);
 
+  // AI-FALLBACK GUARD (field ZNZ58HM): if a stay/camps/parks/numbers ask reaches the
+  // relay on a committed trip (didn't match a deterministic camps/number path above),
+  // it must be anchored on the DESTINATION, not the current GPS. Lead the context with
+  // the committed destination so the model never answers such a question from the
+  // origin. Fuel/weather/etc. asks don't match stayParksAsk, so their GPS anchoring is
+  // untouched. This is the backstop; points above route most such asks to answerCamps.
+  const stayParksAsk = /\b(?:parks?|sites?|camps?|campsites?|caravan|numbers?|stay|staying|overnight|accommodation|motel|hotel|cabin)\b/i.test(scanText);
+  const destAnchorCtx = (currentRunDest && committedDest && committedDest.lat != null && stayParksAsk)
+    ? `TRIP DESTINATION: ${committedDest.name} (${(+committedDest.lat).toFixed(5)}, ${(+committedDest.lon).toFixed(5)}). This stay/camps/parks/numbers question is about the DESTINATION — answer for ${committedDest.name}, NOT the current GPS location, unless the driver explicitly says "near me" or "around here".`
+    : '';
   const ctx=[
+    destAnchorCtx,
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'NO LOCATION FIX — do not name or guess specific nearby places; ask the driver to tap the 📍 pin to set their location first.',
     offRoadCtx,
     userRego?`Vehicle rego: ${userRego}.`:'',
