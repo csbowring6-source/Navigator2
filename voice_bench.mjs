@@ -258,8 +258,8 @@ check("no close cue during the offer answer", count("cue") === 0);
 console.log("\n--- 9. both engines' restart churn is bounded (fix covers the basic engine too) ---");
 check("convo: alive-time no longer resets the no-delivery ceiling (the leak is closed)",
   /if \(alive >= CONVO_HEALTHY_MS\) convoRestarts = 0;/.test(SRC) && !/alive >= CONVO_HEALTHY_MS\) \{ convoRestarts = 0; convoUndelivered = 0; \}/.test(SRC));
-check("convo: genuine speech onset resets the flip ceiling (never the closing trigger)",
-  /logEvent\('rec\.speechstart', 'convo'\); convoFlips = 0;/.test(SRC));
+check("convo: genuine speech onset marks the cycle as progress AND resets the flip ceiling",
+  /logEvent\('rec\.speechstart', 'convo'\); convoCycleHadSpeech = true; convoFlips = 0;/.test(SRC));
 check("convo: the offer resume clears the oscillation guards for the answer",
   /convoSpeaking = false; if \(convoActive\) \{ convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState\('listening'\)/.test(SRC));
 check("basic: restart cap is heardSpeech-INDEPENDENT (time-since-progress window)",
@@ -327,6 +327,60 @@ Voice.closeSession("tap");
 check("returns to '🎙 Hands-free' idle after close", el("wakeBtn").textContent === "🎙 Hands-free");
 check("Voice.canHandsFree() is exposed and true under a supporting engine", Voice.canHandsFree() === true);
 // session behaviour unchanged is covered by scenarios 1–10 above (all still pass).
+
+// ── SCENARIO 12: 9XJ9UWR 145-151s — a driver speaking continuously across THREE engine
+// restarts is NEVER closed on; the accumulated turn survives the restarts and delivers on
+// the real pause. Progress = a genuine speechstart, so each result-bearing cycle clears the
+// no-progress reopen ceiling. (Fixed: before, three restarts inside one utterance closed
+// the session honestly + cued mid-speech in ~8s.)
+console.log("\n--- 12. 9XJ9UWR: driver speaking across 3 engine restarts stays open + delivers ---");
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+// cycle 1: driver speaks, engine drops mid-utterance BEFORE the 2800ms end-of-turn pause
+rec.speech(); rec.final("are there any"); advance(1500); rec.end();
+advance(300); rec.onstart();          // restart 1 — cycle 1 saw speech -> must NOT count
+// cycle 2: driver still going (the log's speechstart ~1.2s after the first onend)
+rec.speech(); rec.final("are there any campsites"); advance(1500); rec.end();
+advance(300); rec.onstart();          // restart 2 — still progress
+// cycle 3: driver finishes the phrase
+rec.speech(); rec.final("are there any campsites near innisfail"); advance(1500); rec.end();
+advance(300); rec.onstart();          // restart 3 — still progress
+check("NEVER closed while the driver spoke across the 3 restarts", !kinds().some(k => k.startsWith("close")));
+check("no cue fired mid-speech", count("cue") === 0);
+check("speechstart cycles logged as progress, not an accumulating count", count("reopen") >= 1 && kinds().includes("reopen:progress"));
+// the driver finally PAUSES -> the accumulated turn delivers, session stays open
+advance(2800); advance(600);
+check("the whole accumulated turn delivered after the real pause", delivered === 1);
+check("no honest close ever fired on the live utterance", !kinds().some(k => k.startsWith("close:honest")));
+check("session still OPEN after delivery", Voice.isSessionOpen() === true);
+Voice.closeSession("tap");
+
+// A speechstart cycle clears the ceiling; a truly-empty cycle still climbs it. Contrast
+// directly: ambient/empty reopens (no speechstart) STILL close (scenarios 3/4/6/7 assert
+// this at length) — here we just confirm the ceiling is intact when speech is absent.
+console.log("\n--- 12b. empty (no-speechstart) reopens still close at the ceiling ---");
+fresh(); timers.length = 0;
+Voice.openSession();
+let closed12 = false;
+for (let i = 0; i < 12 && !closed12; i++) { rec.onstart(); rec.end(); advance(300); closed12 = kinds().some(k => k.startsWith("close:")); }
+check("a no-speechstart restart loop still closes honestly", closed12 && delivered === 0);
+
+// ── SCENARIO 13 (addendum 9XJ9UWR): a ceiling (honest) close ABORTS the recogniser and
+// fully releases — nothing left holding the mic — and a fresh session opens cleanly after.
+// (Confirms the post-close one-shot deadness in the field is not a frontend cleanup leak.)
+console.log("\n--- 13. ceiling close aborts the recogniser + fully releases (addendum) ---");
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+const stopsBefore = H.stopped;
+let closed13 = false;
+for (let i = 0; i < 12 && !closed13; i++) { rec.onstart(); rec.end(); advance(300); closed13 = kinds().some(k => k.startsWith("close:honest")); }
+check("closed honestly at the ceiling", closed13);
+check("the recogniser was aborted/stopped on close (mic released)", H.stopped > stopsBefore);
+check("session fully released: state off, not open", Voice.state() === "off" && Voice.isSessionOpen() === false);
+const recBefore = H.rec;
+Voice.openSession();
+check("a fresh session opens afterward on a NEW recogniser instance", H.rec !== recBefore && Voice.isSessionOpen() === true);
+Voice.closeSession("tap");
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

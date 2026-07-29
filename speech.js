@@ -108,6 +108,7 @@ const CONVO_MAX_FLIPS = 8;      // oscillation ceiling — close honestly beyond
 // spacing and closes. Ambient noise no longer resets it (that was the leak).
 const CONVO_MAX_CYCLES = 3;     // empty (no-delivery) reopens before an honest close (~15s at the field's ~5s churn cadence)
 let convoUndelivered = 0;       // consecutive sub-healthy reopens with nothing delivered
+let convoCycleHadSpeech = false;// did the CURRENT recogniser cycle see a genuine speechstart? progress = captured SPEECH, not a delivered turn
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
 let convoCued = false;          // close cue already played this session? (at most once)
@@ -139,7 +140,7 @@ function openConversation() {
   convoActive = true; convoOffered = false; convoHadExchange = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
-  convoFlips = 0; convoLastState = ''; convoUndelivered = 0; clearTimeout(convoResumeTimer);    // fresh oscillation guards
+  convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoCycleHadSpeech = false; clearTimeout(convoResumeTimer);    // fresh oscillation guards
   convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoUndelivered = 0;            // the opening start is not an "undelivered reopen" — only reopens AFTER open count toward the churn ceiling
@@ -182,6 +183,18 @@ function convoSetState(state) {
 // CONVO_MAX_CYCLES we're in a stuck restart loop (the source of the once-a-second
 // native earcon) → close honestly, reason on screen. Returns true if it closed.
 function convoNoteReopen() {
+  // Progress = genuine CAPTURED SPEECH this cycle, not a delivered turn. A cycle in which
+  // the driver actually spoke (rec.speechstart fired) is real progress even if the engine
+  // restarted mid-utterance before the pause — it must NOT count toward the no-progress
+  // ceiling, or a long answer spanning engine restarts gets closed on mid-speech (field
+  // 9XJ9UWR, 145-151s). Cycles with only ambient onresult text — or none at all (the
+  // earcon beep loop) — never fire speechstart, so they still accumulate and close honestly.
+  if (convoCycleHadSpeech) {
+    convoCycleHadSpeech = false;   // consume; the next cycle must re-earn it with real speech
+    convoUndelivered = 0;
+    logEvent('reopen', 'progress');
+    return false;
+  }
   convoUndelivered++;
   logEvent('reopen', convoUndelivered);
   if (convoUndelivered >= CONVO_MAX_CYCLES) {
@@ -201,7 +214,7 @@ function convoStartRecogniser() {
     convoRec.continuous = true;
     convoRec.interimResults = true;
     convoRec.onstart = () => { convoRecRunning = true; logEvent('rec.onstart', 'convo'); if (convoActive && !convoSpeaking) convoSetState('listening'); console.log('[convo] recogniser started'); };
-    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoFlips = 0; convoArmSilence(); if (convoActive) convoSetState('recording'); };  // genuine speech onset is real input, NOT echo churn — it must never be the flip that trips the oscillation ceiling (the field close-on-speechstart bug). The reopen ceiling still bounds an actual restart loop.
+    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoCycleHadSpeech = true; convoFlips = 0; convoArmSilence(); if (convoActive) convoSetState('recording'); };  // genuine speech onset is real input, NOT echo churn — it marks THIS reopen cycle as progress (so a driver speaking across engine restarts is never closed on) and must never be the flip that trips the oscillation ceiling (the field close-on-speechstart bug). Ambient-only cycles (no speechstart) still bound a real restart loop.
     convoRec.onresult = e => {
       if (convoSpeaking) return;             // ignore anything heard during playback/tail (our own voice)
       logEvent('rec.onresult', 'convo');
@@ -214,10 +227,11 @@ function convoStartRecogniser() {
       // Grow the turn's final text overlap-aware (mergeFinal drops Android's
       // re-heard chunks, so this survives mid-phrase restarts without dupes).
       if (fin) convoTurn = mergeFinal(convoTurn, fin);
-      // NOTE: growth alone does NOT reset the oscillation guards — ambient noise
-      // the engine finalises grows convoTurn too, and resetting on it let the echo
-      // loop run forever. convoFlips / convoUndelivered reset ONLY on a delivered
-      // turn (convoDeliverTurn), which is real progress.
+      // NOTE: onresult GROWTH alone does NOT reset any ceiling — ambient noise the
+      // engine finalises grows convoTurn too, and resetting on it let the echo loop
+      // run forever. The reopen ceiling clears on a genuine speechstart cycle (real
+      // captured speech — see convoNoteReopen) or a delivered turn; the flip ceiling
+      // clears only on speechstart / a delivered turn. Never on growth alone.
       if (convoTurn.length > convoDelivered.length || interim.trim()) {
         if (convoActive) convoSetState('recording');
         armConvoDeliver();                    // deliver only after the driver pauses
@@ -278,7 +292,7 @@ function convoDeliverTurn() {
   const pending = convoTurn.length > convoDelivered.length ? convoTurn.slice(convoDelivered.length).trim() : '';
   if (!pending) return;
   convoDelivered = convoTurn;                          // consume — never re-delivered
-  convoFlips = 0; convoUndelivered = 0;                // a delivered turn is real progress — clear BOTH oscillation guards
+  convoFlips = 0; convoUndelivered = 0; convoCycleHadSpeech = false;   // a delivered turn is real progress — clear the oscillation guards AND the cycle-speech credit (a fresh reopen must re-earn it)
   convoHandleUtterance(pending, 'silence');            // a session turn always ends on a pause
 }
 function convoHandleUtterance(text, endReason) {
@@ -1046,7 +1060,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '29 Jul 2026, 03:59 PM AEST',
+    BUILD: '29 Jul 2026, 07:16 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
