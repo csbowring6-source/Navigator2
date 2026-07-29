@@ -425,6 +425,92 @@ async function handleCamps2(request, env) {
   return jsonResp({ source: "places", radiuskm: radiusKm, cached: false, results });
 }
 
+// ═══ /camps2-osm — FILTERED OSM CAMPS (camps architecture, phase 2 — ADDITIVE) ═══
+// Overpass camp/caravan sites + rest areas near lat/lon, returning ONLY the
+// NON-COMMERCIAL category Places lacks — free camps, bush camps, rest areas. The app
+// does NOT call this yet (phase 3 merges it with /camps2 and dedupes); /camps, /camps2
+// and /place-phone are UNTOUCHED. Reuses the shared overpass() (mirrors/retry/backoff,
+// in-memory cache) and osmPlacesNearest() — no duplication, /camps unaffected. Records
+// mirror the /camps2 shape (id,name,type,lat,lon,address,phone,hours) tagged
+// source:"osm". KV on rounded coords + radius, 7-day TTL (OSM moves more than Google's).
+//
+// CLASSIFICATION (commercial vs non-commercial), tag-driven, biased to INCLUDE when
+// ambiguous — a free camp wrongly dropped is worse than a commercial park wrongly kept
+// (phase 3 dedupes the overlap against Places):
+//   INCLUDE if  fee explicitly free (no/none/free/0)      — a free site
+//           OR  highway=rest_area                          — a roadside rest area
+//           OR  backcountry=yes                            — a bush/backcountry camp
+//   EXCLUDE if  fee=yes / a charge tag                     — a paid site
+//           OR  tourism=caravan_site (not marked free)     — the commercial van-park category
+//   otherwise INCLUDE (an untagged tourism=camp_site is ambiguous → keep it).
+// Edge cases: a rest area is non-commercial even if it carries a nominal fee (the
+// rest_area/free/backcountry signals are checked BEFORE the paid signal); a caravan_site
+// marked fee=no is kept (explicitly free); access=private is NOT currently filtered
+// (rare, and the include-bias favours surfacing it).
+function campFee(tags) { return String((tags && tags.fee) || "").toLowerCase(); }
+function isNonCommercialCamp(tags) {
+  const t = tags || {};
+  const fee = campFee(t);
+  if (fee === "no" || fee === "none" || fee === "free" || fee === "0") return true;   // explicitly free
+  if (t.highway === "rest_area") return true;                                          // rest area
+  if (String(t.backcountry || "").toLowerCase() === "yes") return true;                // bush/backcountry camp
+  if (fee === "yes" || fee === "true" || (t.charge != null && t.charge !== "")) return false;   // paid
+  if (t.tourism === "caravan_site") return false;   // commercial van-park category (deduped vs Places in phase 3)
+  return true;                                       // ambiguous camp_site → INCLUDE (bias)
+}
+function osmCampType(tags) {
+  const t = tags || {};
+  if (t.highway === "rest_area") return "rest area";
+  if (t.tourism === "caravan_site") return "caravan park";
+  return "camp site";
+}
+function osmAddress(t) {
+  if (!t) return "";
+  return [((t["addr:housenumber"] ? t["addr:housenumber"] + " " : "") + (t["addr:street"] || "")).trim(), (t["addr:city"] || t["addr:suburb"] || "").trim()]
+    .filter(Boolean).join(", ");
+}
+async function handleCamps2Osm(request, env) {
+  const u = new URL(request.url);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
+  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
+
+  // KV cache FIRST — a hit serves WITHOUT hitting Overpass. Distinct "camps2-osm:"
+  // prefix so it never collides with the "camps:" or "camps2:" caches. 7-day TTL.
+  const kv = env && env.PLACES_KV;
+  const ckey = `camps2-osm:${lat.toFixed(2)},${lon.toFixed(2)}:${radiusKm}`;
+  if (kv) {
+    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return jsonResp({ source: "osm", radiuskm: radiusKm, cached: true, results: c.results }); } catch (e) {}
+  }
+
+  // Same camp/caravan selectors as /camps, PLUS rest areas — the free-stop category.
+  // Distinct query string from /camps, so overpass()'s in-memory cache never collides.
+  const r = radiusKm * 1000;
+  const q = `[out:json][timeout:20];(node["tourism"~"camp_site|caravan_site"](around:${r},${lat},${lon});way["tourism"~"camp_site|caravan_site"](around:${r},${lat},${lon});node["highway"="rest_area"](around:${r},${lat},${lon});way["highway"="rest_area"](around:${r},${lat},${lon}););out center tags 150;`;
+  const res = await overpass(q);
+  if (res.error) {
+    // A fresh KV hit would have returned above — honest error, never a crash.
+    return jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503);
+  }
+  const elements = (res.data && res.data.elements) || [];   // malformed/empty upstream -> [] (honest zero), not a crash
+  const results = osmPlacesNearest(elements, "", lat, lon, 200)   // parse + nearest-first (big cap; we filter next)
+    .filter((p) => isNonCommercialCamp(p.tags))                   // NON-COMMERCIAL only — the category Places lacks
+    .slice(0, 12)                                                 // same presentation cap as /camps
+    .map((p) => ({
+      id: p.osmid,                                                // stable OSM id (phase-3 merge/dedup key)
+      name: p.name,
+      type: osmCampType(p.tags),
+      lat: p.lat, lon: p.lon,
+      address: osmAddress(p.tags),
+      phone: p.tags.phone || p.tags["contact:phone"] || "",       // where a tag exists, else ""
+      hours: p.tags.opening_hours ? [p.tags.opening_hours] : null, // OSM single string -> array; mirrors /camps2 hours shape
+      source: "osm",
+    }));
+  if (kv && !res.cached) { try { await kv.put(ckey, JSON.stringify({ results, ts: Date.now() }), { expirationTtl: 7 * 24 * 3600 }); } catch (e) {} }
+  return jsonResp({ source: "osm", radiuskm: radiusKm, cached: !!res.cached, results });
+}
+
 async function handleStations(request) {
   const u = new URL(request.url);
   const lat = parseFloat(u.searchParams.get("lat"));
@@ -745,7 +831,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Jul 2026, 12:44 PM AEST (phase 1: adds /camps2 — Places-backed camps, exact field mask, KV 30-day TTL, source:places, additive)";
+const WORKER_BUILD = "Navigator Worker — 30 Jul 2026, 08:36 AM AEST (phase 2: adds /camps2-osm — filtered OSM non-commercial camps/rest-areas, shared overpass, KV 7-day TTL, source:osm, additive)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -870,6 +956,7 @@ export default {
       "/poi": () => handlePoi(request),
       "/camps": () => handleCamps(request, env),
       "/camps2": () => handleCamps2(request, env),   // phase 1: Places-backed camps (app doesn't call it yet — phase 3)
+      "/camps2-osm": () => handleCamps2Osm(request, env),   // phase 2: filtered OSM non-commercial camps (app doesn't call it yet — phase 3)
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
