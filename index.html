@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 04:04 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 29 Jul 2026, 10:10 AM AEST</div>
   </div>
 </div>
 
@@ -796,9 +796,11 @@
 <div id="voiceLogModal" style="display:none;position:fixed;inset:0;z-index:4000;background:#0A1628;color:#E8EEF5;flex-direction:column;padding:14px;font-family:Inter,sans-serif;">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
     <b style="font-size:15px;flex:1;">🎙 Voice log</b>
+    <button onclick="shareVoiceLog(event)" style="padding:8px 12px;border-radius:8px;border:1px solid #F5A623;background:rgba(245,166,35,0.15);color:#F5A623;font-weight:600;cursor:pointer;">🔗 Share</button>
     <button onclick="copyVoiceLog(event)" style="padding:8px 12px;border-radius:8px;border:1px solid #2ECC71;background:rgba(46,204,113,0.15);color:#2ECC71;font-weight:600;cursor:pointer;">📋 Copy</button>
     <button onclick="closeVoiceLog()" style="padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#E8EEF5;cursor:pointer;">Close</button>
   </div>
+  <div id="voiceLogShare" style="display:none;margin-bottom:8px;padding:9px 11px;border-radius:8px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.4);font-size:12px;line-height:1.5;word-break:break-all;"></div>
   <div id="voiceLogStamps" style="font-size:11px;opacity:0.75;margin-bottom:6px;"></div>
   <pre id="voiceLogText" style="flex:1;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.45;background:#0d1b30;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;margin:0;-webkit-overflow-scrolling:touch;"></pre>
 </div>
@@ -806,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=29Jul2026-0404AM"></script>
+<script src="speech.js?v=29Jul2026-1010AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5286,20 +5288,52 @@ function voiceLogAsText() {
   const t0 = rows[0].t;
   return rows.map(e => (((e.t - t0) / 1000).toFixed(2) + 's').padStart(8, ' ') + '  ' + e.kind + (e.detail ? '  ' + e.detail : '')).join('\n');
 }
+// The full pasteable/shareable text: the two build stamps + the event log. One
+// source for both Copy and Share so a remote helper sees exactly what Copy shows.
+function voiceLogFullText() {
+  return 'Navigator voice log\nindex.html: ' + ((document.getElementById('buildStamp') || {}).textContent || '') +
+         '\nspeech.js: ' + ((window.Voice && Voice.BUILD) || '') + '\n\n' + voiceLogAsText();
+}
 function openVoiceLog() {
   const shown = ((document.getElementById('buildStamp') || {}).textContent || '?').replace(/^✓\s*/, '');
   const mod = (window.Voice && Voice.BUILD) || '?';
   document.getElementById('voiceLogStamps').textContent = 'index.html:  ' + shown + '     speech.js:  ' + mod;
   document.getElementById('voiceLogText').textContent = voiceLogAsText();
+  const share = document.getElementById('voiceLogShare');   // clear any stale share link from a prior open
+  if (share) { share.style.display = 'none'; share.innerHTML = ''; }
   document.getElementById('voiceLogModal').style.display = 'flex';
 }
 function closeVoiceLog() { document.getElementById('voiceLogModal').style.display = 'none'; }
 function copyVoiceLog(ev) {
-  const txt = 'Navigator voice log\nindex.html: ' + ((document.getElementById('buildStamp') || {}).textContent || '') +
-              '\nspeech.js: ' + ((window.Voice && Voice.BUILD) || '') + '\n\n' + voiceLogAsText();
+  const txt = voiceLogFullText();
   const toast = () => { const b = ev && ev.target; if (b) { const o = b.textContent; b.textContent = '✓ Copied'; setTimeout(() => b.textContent = o, 1500); } };
   if (navigator.clipboard) navigator.clipboard.writeText(txt).then(toast).catch(() => alert(txt));
   else alert(txt);
+}
+// Upload the log so a remote helper can open a link — no copy-paste. Shows the full
+// URL plus the id spoken large ("log id: 7 K 4 M") so it can be read aloud. NEVER
+// blocks the view: on any failure it says so and points at Copy as the fallback.
+async function shareVoiceLog(ev) {
+  const btn = ev && ev.target, orig = btn ? btn.textContent : '';
+  const setLbl = s => { if (btn) btn.textContent = s; };
+  const share = document.getElementById('voiceLogShare');
+  setLbl('Sharing…');
+  try {
+    const res = await fetch(API_URL + 'log', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: voiceLogFullText() });
+    let data = null; try { data = await res.json(); } catch (_) {}
+    if (!res.ok || !data || !data.id) throw new Error((data && data.error) || ('HTTP ' + (res.status || '?')));
+    const url = API_URL + 'log/' + data.id;
+    const spoken = data.id.toUpperCase().split('').join(' ');   // "7 K 4 M …" — readable aloud
+    if (share) {
+      share.style.display = 'block';
+      share.innerHTML = `<div style="margin-bottom:4px;">log id: <b style="font-size:22px;letter-spacing:4px;color:#F5A623;">${spoken}</b></div>` +
+                        `<a href="${url}" target="_blank" rel="noopener" style="color:#7FB3FF;">${url}</a>`;
+    }
+    setLbl('✓ Shared'); setTimeout(() => setLbl(orig), 2500);
+  } catch (e) {
+    if (share) { share.style.display = 'block'; share.textContent = "Couldn't upload the log just now — tap 📋 Copy and paste it to your helper instead."; }
+    setLbl('✗ Failed'); setTimeout(() => setLbl(orig), 2500);
+  }
 }
 // Long-press (600ms hold) opens the voice log; a normal tap still talks.
 let _vlTimer = null, _vlLong = false;

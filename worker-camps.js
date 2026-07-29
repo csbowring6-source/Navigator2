@@ -659,7 +659,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 27 Jul 2026, 12:27 PM AEST (adds /geocode + /reverse-geocode: through-Worker Nominatim, KV cache, retry/backoff — stops phone rate-limiting)";
+const WORKER_BUILD = "Navigator Worker — 29 Jul 2026, 10:10 AM AEST (adds POST /log + GET /log/<id>: share a diagnostic voice log via KV, 7-day TTL, random id, no auth/listing)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -734,10 +734,51 @@ async function handleTranscribe(request, env) {
   return jsonResp({ text });
 }
 
+// ═══ POST /log  — stash a voice log for a remote helper; GET /log/<id> reads it ═══
+// Short-lived DIAGNOSTIC text only. No auth, no listing endpoint: the id is a random
+// 7-char token (unguessable enough for a throwaway log) and the content carries no
+// credentials (the frontend holds none) and no transcript text — the voice log is
+// event kinds + status tokens only (open/state/deliver:basic:silence/close reasons/
+// classify results), never a spoken phrase or place name. 7-day TTL, then it's gone.
+const LOG_MAX = 64 * 1024;                 // ~64 KB cap
+const LOG_TTL = 7 * 24 * 3600;             // 7 days
+const LOG_ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";   // no 0/O/1/I — reads cleanly aloud
+function makeLogId(n) {
+  const buf = new Uint8Array(n); crypto.getRandomValues(buf);
+  let s = ""; for (let i = 0; i < n; i++) s += LOG_ID_ALPHABET[buf[i] % LOG_ID_ALPHABET.length];
+  return s;
+}
+async function handleLogPost(request, env) {
+  if (request.method !== "POST") return jsonResp({ error: "POST the log text to /log" }, 405);
+  const kv = env && env.PLACES_KV;
+  if (!kv) return jsonResp({ error: "Log sharing isn't set up — the Worker has no KV." }, 503);
+  const text = await request.text();
+  if (!text || !text.trim()) return jsonResp({ error: "No log text came through." }, 400);
+  if (text.length > LOG_MAX) return jsonResp({ error: "Log too large to share (max 64 KB)." }, 413);
+  const id = makeLogId(7);
+  try { await kv.put("log:" + id, text, { expirationTtl: LOG_TTL }); }
+  catch (e) { return jsonResp({ error: "Couldn't store the log — try again." }, 503); }
+  return jsonResp({ id });
+}
+function logTextResp(body, status) {
+  return new Response(body, { status: status || 200, headers: { ...corsHeaders, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+}
+async function handleLogGet(id, env) {
+  if (!/^[A-Za-z0-9]{4,16}$/.test(id || "")) return logTextResp("Log not found.", 404);   // guard the KV key
+  const kv = env && env.PLACES_KV;
+  if (!kv) return logTextResp("Log sharing isn't set up.", 503);
+  let text = null;
+  try { text = await kv.get("log:" + id); } catch (e) {}
+  if (text == null) return logTextResp("Log not found or expired.", 404);
+  return logTextResp(text, 200);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
     const url = new URL(request.url);
+    // GET /log/<id> — dynamic path, so it can't sit in the exact-match table below.
+    if (url.pathname.startsWith("/log/")) return handleLogGet(url.pathname.slice(5), env);
     const routes = {
       "/fuel": () => handleFuel(request, env),
       "/poi": () => handlePoi(request),
@@ -750,6 +791,7 @@ export default {
       "/geocode": () => handleGeocode(request, env),
       "/reverse-geocode": () => handleReverseGeocode(request, env),
       "/places-probe": () => handlePlacesProbe(request, env),   // TEMPORARY — remove at phase 4
+      "/log": () => handleLogPost(request, env),                // share a voice log; GET /log/<id> handled above
       "/version": () => handleVersion(),
     };
     if (routes[url.pathname]) {
