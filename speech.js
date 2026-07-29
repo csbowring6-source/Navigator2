@@ -966,7 +966,16 @@ function speak(text) {
   if (!synth) return;
   // App-sequential reply while something is already playing → wait our turn.
   if (_queueReplies && _ttsActive) { _ttsQueue.push(text); return; }
-  if (convoActive) { convoSpeaking = true; convoStopRecogniser(); }   // don't hear our own reply
+  if (convoActive) {
+    convoSpeaking = true; convoStopRecogniser();   // don't hear our own reply
+    // Pause the SESSION silence clock (hard-close AND the offer nudge) while WE speak.
+    // Both were armed on the driver's last speech; left running they keep counting
+    // through our own TTS, so a reply longer than the window fires 'close silence'
+    // mid-speech (field id V9ZUTAZ: close fired 27s into a reply, tts.end 0.04s later).
+    // Re-armed FRESH after tts.end + the reopen tail (see _afterSpeak) — the driver's
+    // silence clock starts when it's actually their turn to speak.
+    clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer);
+  }
   synth.cancel();
   _ttsQueue = [];            // a normal/interrupting speak supersedes anything pending
   _speakNow(text);
@@ -1035,7 +1044,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '29 Jul 2026, 10:10 AM AEST',
+    BUILD: '29 Jul 2026, 03:16 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

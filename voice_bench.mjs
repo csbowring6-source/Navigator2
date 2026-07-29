@@ -264,5 +264,47 @@ check("basic: the progress timestamp resets on newly captured words",
 check("both ceilings are ~15s (convo cycles x ~5s cadence; basic churn window)",
   /const CONVO_MAX_CYCLES = 3;/.test(SRC) && /const BASIC_CHURN_MS = 15000;/.test(SRC));
 
+// ── SCENARIO 10: the session silence clock must PAUSE during a long reply ──────
+// Field id V9ZUTAZ (~38007s on): a session opened, the driver's turn delivered and
+// classified, the app began a LONG reply — and 27s into its own TTS the session fired
+// 'close silence' with the cue, mid-speech (tts.end 0.04s after). The silence clock,
+// armed on the driver's last speech, kept counting through the reply. The 45s window
+// was already ~18s down (AI latency before TTS) so a 30s reply blew past it.
+// After the fix: no close can fire between tts.start and tts.end+tail; the session is
+// still open at tts.end; it closes only on GENUINE driver silence AFTERWARDS.
+console.log("\n--- 10. long reply inside a session: silence clock pauses, no mid-speech close (field V9ZUTAZ) ---");
+Voice.closeSession("tap");   // scenario 8 left a session open; close it so openSession rebuilds a fresh recogniser (nulls convoRec)
+fresh();
+timers.length = 0;
+Voice.onTranscript(() => { delivered++; });
+base = clock.now;
+Voice.openSession();
+rec.speech();                             // 0s: driver starts — silence clock armed
+to(1.0); rec.final("plan me a route to cooktown");
+to(2.0); rec.final("plan me a route to cooktown for tonight");   // last speech ~2s -> hard close would fire ~47s
+to(5.5);                                  // pause > CONVO_TURN_MS -> turn delivers (~4.8s), +600ms handoff -> ~5.4s
+check("the driver's turn delivered and was classified (as in the field)", delivered === 1);
+to(20.0);                                 // ~15s of AI latency composing a long brief — the window keeps ticking (would fire ~47s)
+Voice.speak("Right, here's the run to Cooktown. It's a big day — roughly four and a half hours of driving broken into three legs, with the Palmer River Roadhouse the natural halfway pull-in, then Lakeland for fuel, and a final push up the range into Cooktown before dark.");
+to(20.1); tts.start();
+const closesAtSpeechStart = count("close");
+to(35.0);                                 // ~15s into the 30s reply — WITHOUT the fix, 'close silence' fires here (~47s abs)
+check("no close DURING the reply (silence clock is paused)", count("close") === closesAtSpeechStart, "closes=" + count("close"));
+check("still speaking mid-reply — the reply was not truncated", Voice.state() === "speaking");
+check("no anything-else offer interrupted the reply", count("offer") === 0);
+to(50.1); tts.end();                      // 30-second reply ends
+check("no close fired across the whole reply (tts.start..tts.end)", count("close") === closesAtSpeechStart);
+check("session is STILL OPEN at tts.end (not killed mid-reply)", Voice.isSessionOpen() === true);
+to(50.8); if (Voice.isSessionOpen()) rec.onstart();   // reopen after the tail; silence clock now armed FRESH
+check("session open through the reopen tail, still no close", Voice.isSessionOpen() === true && count("close") === closesAtSpeechStart);
+// genuine driver silence AFTER the reply -> the fresh 45s window finally closes it
+to(97.0);                                 // > tts.end(50.1)+tail(0.6)+45s -> honest silence close
+check("closes only after GENUINE driver silence afterwards", kinds().some(k => k === "close:silence"));
+check("session is closed at the end", Voice.isSessionOpen() === false);
+check("exactly one close cue for the whole session", count("cue") === 1);
+// source-lock the fix: speak() clears BOTH session-lifetime timers as the reply begins
+check("speak() pauses the silence + offer clocks while the app speaks",
+  /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
