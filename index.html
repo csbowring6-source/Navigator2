@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 05:18 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 05:43 AM AEST</div>
   </div>
 </div>
 
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0518AM"></script>
+<script src="speech.js?v=31Jul2026-0543AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3284,12 +3284,20 @@ async function fetchMergedCamps(lat, lon, radius) {
     if (osm.ok) return { results: osm.results, osmDown: false, fellBack: true };
     return { error: navigator.onLine ? 'service' : 'offline' };
   }
-  // DISPLAY DEDUPE: drop an OSM copy within ~100 m of a Places result that shares a
-  // distinctive name token — Places wins, fields are NEVER merged. Otherwise keep both.
+  // DISPLAY DEDUPE: an OSM record within ~100 m of a Places result that shares a distinctive
+  // name token is the SAME site. Fields are never merged — one wins. NON-COMMERCIAL-AWARE
+  // (field 31 Jul: "Fred Drew Rest Area" is in BOTH feeds; the old "Places always wins" made
+  // it a commercial card that then fell out of the top-3 AND was locked out of the free
+  // group): if the Places twin carries a NUMBER, Places wins (a numbered card beats group
+  // placement). If it carries NO number, Places adds nothing — keep the OSM record so it
+  // stays a free-camp card, and drop the empty Places twin (one card, not two).
   const merged = places.results.slice();
   for (const o of (osm.ok ? osm.results : [])) {
-    const dup = places.results.some(p => distKm(p.lat, p.lon, o.lat, o.lon) <= 0.1 && sharesNameToken(p.name, o.name));
-    if (!dup) merged.push(o);
+    const twin = places.results.find(p => distKm(p.lat, p.lon, o.lat, o.lon) <= 0.1 && sharesNameToken(p.name, o.name));
+    if (!twin) { merged.push(o); continue; }                 // no twin — keep the OSM record
+    if (verifiedPhone(twin)) continue;                        // Places twin has a number — Places wins, drop the OSM copy
+    const mi = merged.indexOf(twin); if (mi !== -1) merged.splice(mi, 1);   // empty twin — keep OSM instead
+    merged.push(o);
   }
   return { results: merged, osmDown: !osm.ok, fellBack: false };
 }
@@ -3301,10 +3309,21 @@ async function fetchMergedCamps(lat, lon, radius) {
 // as a DISTINCT appended group — never widening the flat top set. The pool is already
 // nearest-first, so slice takes the nearest.
 const FREE_CAMP_GROUP_MAX = 2;
+// A record belongs on a FREE-CAMP card (field 31 Jul). source:'osm' is the OSM
+// non-commercial feed. But a free camp can ALSO come only from Places (e.g. "Hughenden RV
+// Free Camp", phase-1 probe), so a Places record ALSO qualifies when its name/type clearly
+// marks it non-commercial AND it carries no number. Tight name list — never a generic
+// "camp" match — so a real caravan park is never mistaken for a free stop.
+const FREE_CAMP_NAME = /\b(rest area|free camp|rv free camp)\b/i;
+function isFreeGroupEligible(s) {
+  if (!s) return false;
+  if (s.source === 'osm') return true;
+  return !verifiedPhone(s) && (FREE_CAMP_NAME.test(s.name || '') || FREE_CAMP_NAME.test(s.type || ''));
+}
 function pickFreeCampGroup(top, pool) {
-  if ((top || []).some(s => s.source === 'osm')) return [];   // a free camp already made the top set — no separate group
+  if ((top || []).some(s => isFreeGroupEligible(s))) return [];   // a free camp already made the top set — no separate group
   const inTop = new Set((top || []).map(s => s.name));
-  return (pool || []).filter(s => s.source === 'osm' && !inTop.has(s.name)).slice(0, FREE_CAMP_GROUP_MAX);
+  return (pool || []).filter(s => isFreeGroupEligible(s) && !inTop.has(s.name)).slice(0, FREE_CAMP_GROUP_MAX);
 }
 
 async function getCorridorCamps() {
@@ -3535,8 +3554,10 @@ function formatCampsAnswer(res) {
 function campCardNote(s) {
   const phone = verifiedPhone(s);
   if (phone) return { kind: 'call', phone };
-  const commercial = s.source === 'places' || /caravan|holiday|tourist|big4|top ?tourist|discovery|showground/i.test(s.type || '');
-  if (commercial) return { kind: 'miss', text: phoneMiss(s.name, { noRing: true }) };
+  // A COMMERCIAL park with no number keeps the honest miss wording; a FREE camp / rest area
+  // with no number is normal (never the apology). Same eligibility as the free group, so a
+  // Places-only free camp (e.g. "RV Free Camp") is treated as free, not commercial.
+  if (!isFreeGroupEligible(s)) return { kind: 'miss', text: phoneMiss(s.name, { noRing: true }) };
   // A pub/showground-style free stop is booked/checked in person — say so honestly, rather
   // than the bare "no bookings" note (field 30 Jul: Garradunga Hotel is a legitimate free
   // camp, but at the bar, not a drive-in). Rest areas and plain free camps keep their note.
@@ -4318,7 +4339,7 @@ function renderCampCards(bub, sites) {
     // own Navigate button — its card must be as complete (pin/directions control) as a park's.
     if (!anchor && s.lat != null && s.lon != null) {
       const nav = document.createElement('button'); nav.className = 'nav-btn';
-      nav.textContent = '📍 Navigate to ' + s.name + (s.mins != null ? ` (${hrsMins(s.mins)})` : '') + ' — ' + mapNames[selectedMap];
+      nav.textContent = '📍 ' + s.name + (s.mins != null ? ` — ${hrsMins(s.mins)}` : '');   // bare site name, like the numbered cards (no verb prefix)
       nav.onclick = () => navigateTo(s.name, s.lat, s.lon);
       bub.appendChild(nav);
       anchor = nav;
