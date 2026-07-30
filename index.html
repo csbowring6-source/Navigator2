@@ -141,6 +141,20 @@
   .msg.user .msg-bubble{background:var(--navy3);border:1px solid rgba(255,255,255,0.08);border-top-right-radius:3px;color:var(--gray1);}
   .msg.nav .msg-bubble{background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);border-top-left-radius:3px;}
   .nav-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;margin-top:8px;background:var(--amber);color:var(--navy);border:none;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;width:100%;}
+  /* Compact camp cards (field 31 Jul): one card per site — a header line + two half-width
+     controls + small notes — so a full result set fits one phone screen. Free-group cards
+     use a GREEN accent + a FREE tag, distinct from commercial amber, by colour AND word. */
+  .camp-card{margin-top:8px;padding:7px 9px;border-radius:9px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}
+  .camp-card.free{background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.45);}
+  .camp-card-head{font-size:12.5px;font-weight:600;color:var(--gray1);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.35;}
+  .camp-free-tag{font-size:9px;font-weight:800;letter-spacing:0.6px;color:var(--navy);background:var(--green);border-radius:4px;padding:1px 5px;}
+  .camp-actions{display:flex;gap:6px;margin-top:6px;}
+  .camp-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:42px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;font-family:'Inter',sans-serif;border:none;padding:0 8px;}
+  .camp-btn.pin{background:var(--amber);color:var(--navy);}
+  .camp-card.free .camp-btn.pin{background:var(--green);color:var(--navy);}
+  .camp-btn.call{background:transparent;border:1px solid var(--green);color:var(--green);}
+  .camp-note{margin-top:5px;font-size:11px;color:var(--gray2);line-height:1.35;}
+  .camp-hours{margin-top:3px;font-size:11px;color:var(--gray2);}
   .feedback-row{display:flex;gap:6px;margin-top:7px;align-items:center;}
   .fb-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:4px 9px;font-size:13px;cursor:pointer;opacity:0.6;transition:opacity 0.2s;}
   .fb-btn:hover{opacity:1;border-color:rgba(245,166,35,0.4);}
@@ -570,7 +584,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 05:43 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 06:05 AM AEST</div>
   </div>
 </div>
 
@@ -808,7 +822,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0543AM"></script>
+<script src="speech.js?v=31Jul2026-0605AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4327,44 +4341,56 @@ async function loadTripCampRound(scanText) {
 // with no number is normal → a neutral note (no apology); a COMMERCIAL park missing a
 // number keeps the honest wording. A number is only ever bound to a listed site. Factored
 // out so the post-reload resume re-renders a persisted round with identical cards.
+// ONE COMPACT CARD PER SITE (field 31 Jul): a header line (number · name · drive time, plus
+// a FREE tag for free camps) over TWO half-width controls — 📍 Navigate (left) and 📞 the
+// number (right); no number → the pin takes the full width. Small note + hours where known.
+// campCardNote drives call/miss/free; isFreeGroupEligible drives the green FREE accent.
+function buildCampCard(s, n) {
+  const free = isFreeGroupEligible(s);
+  const card = document.createElement('div'); card.className = 'camp-card' + (free ? ' free' : '');
+  const head = document.createElement('div'); head.className = 'camp-card-head';
+  const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
+  head.textContent = n + '. ' + s.name + (t ? ' — ' + t : '');
+  if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; head.appendChild(tag); }
+  card.appendChild(head);
+  const note = campCardNote(s);
+  const actions = document.createElement('div'); actions.className = 'camp-actions';
+  if (s.lat != null && s.lon != null) {
+    const pin = document.createElement('button'); pin.className = 'camp-btn pin';
+    pin.textContent = '📍 Navigate';                 // name is in the header; this is the compact control
+    pin.onclick = () => navigateTo(s.name, s.lat, s.lon);
+    actions.appendChild(pin);                        // flex:1 → full width alone, half width beside a call button
+  }
+  if (note.kind === 'call') {
+    const call = document.createElement('a'); call.className = 'camp-btn call';
+    call.href = 'tel:' + note.phone.replace(/[^\d+]/g, ''); call.textContent = '📞 ' + localPhone(note.phone);
+    call.addEventListener('click', () => noteCampCalled(s.name));   // feed the ring-around
+    actions.appendChild(call);
+  }
+  card.appendChild(actions);
+  if (note.kind === 'miss' || note.kind === 'free') {   // honest miss wording, or the free-camp note — small
+    const line = document.createElement('div'); line.className = 'camp-note'; line.textContent = note.text;
+    card.appendChild(line);
+  }
+  if (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) {
+    const hv = Array.isArray(s.hours) ? s.hours : [String(s.hours)];
+    const hrs = document.createElement('div'); hrs.className = 'camp-hours';
+    hrs.textContent = '🕒 ' + (hv.length > 3 ? 'Hours vary — tap Call to confirm' : hv.join(' · '));
+    card.appendChild(hrs);
+  }
+  return card;
+}
 function renderCampCards(bub, sites) {
   if (!bub) return;
-  const navBtns = [...bub.querySelectorAll('button.nav-btn')];
-  const after = (el, ref) => { if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref.nextSibling); else bub.appendChild(el); };
-  const mapNames = { apple: 'Apple Maps', google: 'Google Maps', waze: 'Waze', 'maps.me': 'Maps.me' };
-  (sites || []).forEach(s => {
-    let anchor = navBtns.find(b => b.textContent.includes(s.name));   // the pin/directions control (else the bubble end)
-    // addMsg only auto-buttons the first few mentioned places; a free camp in the appended
-    // group (or a re-rendered round with no banner names) can fall past that, so give it its
-    // own Navigate button — its card must be as complete (pin/directions control) as a park's.
-    if (!anchor && s.lat != null && s.lon != null) {
-      const nav = document.createElement('button'); nav.className = 'nav-btn';
-      nav.textContent = '📍 ' + s.name + (s.mins != null ? ` — ${hrsMins(s.mins)}` : '');   // bare site name, like the numbered cards (no verb prefix)
-      nav.onclick = () => navigateTo(s.name, s.lat, s.lon);
-      bub.appendChild(nav);
-      anchor = nav;
-    }
-    const stack = (el) => { after(el, anchor); anchor = el; };        // stack lines directly UNDER the pin, in order
-    const note = campCardNote(s);
-    if (note.kind === 'call') {
-      const call = document.createElement('a'); call.className = 'nav-btn';
-      call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
-      call.href = 'tel:' + note.phone.replace(/[^\d+]/g, ''); call.textContent = `📞 ${localPhone(note.phone)} — tap to call`;
-      call.addEventListener('click', () => noteCampCalled(s.name));   // feed the ring-around
-      stack(call);
-    } else {
-      const line = document.createElement('div');
-      line.style.cssText = 'margin-top:6px;font-size:12px;color:' + (note.kind === 'miss' ? 'var(--gray3)' : 'var(--gray2)') + ';';
-      line.textContent = note.text;
-      stack(line);
-    }
-    if (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) {
-      const hv = Array.isArray(s.hours) ? s.hours : [String(s.hours)];
-      const hrs = document.createElement('div');
-      hrs.style.cssText = 'margin-top:4px;font-size:11px;color:var(--gray2);';
-      hrs.textContent = '🕒 ' + (hv.length > 3 ? 'Hours vary — tap Call to confirm' : hv.join(' · '));
-      stack(hrs);
-    }
+  // The compact card carries its own pin, so drop the full-width Navigate buttons addMsg
+  // auto-created for the mentioned sites (they'd duplicate). Keep the banner text, the
+  // save-stop star and the feedback row; insert the cards right after the banner paragraph.
+  bub.querySelectorAll('.nav-btn').forEach(b => b.remove());
+  let after = bub.querySelector('p');
+  (sites || []).forEach((s, i) => {
+    const card = buildCampCard(s, i + 1);
+    if (after && after.parentNode) { after.parentNode.insertBefore(card, after.nextSibling); after = card; }
+    else bub.appendChild(card);
   });
 }
 async function answerCamps(scanText) {
