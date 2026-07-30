@@ -147,7 +147,7 @@
      font); small one-line note. Free-group cards get the green accent + FREE tag. Measured
      headless on the real Innisfail 5-set at 380px: 66px commercial / 82px free cards; the
      literal numbers "1300 787 275"/"07 4061 1656" are ~100px in a ≥129px call button. */
-  .camp-card{margin-top:6px;padding:5px 8px;border-radius:8px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}
+  .camp-card{margin-top:6px;padding:5px 5px;border-radius:8px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}  /* tight side padding → the flex:1 button pair reaches nearer the card edge (wider tap targets) */
   .camp-card.free{background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.45);}
   .camp-card-head{font-size:12.5px;font-weight:600;color:var(--gray1);display:flex;align-items:baseline;gap:5px;line-height:1.25;white-space:nowrap;}
   .camp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
@@ -185,8 +185,8 @@
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:0.4;}30%{transform:translateY(-4px);opacity:1;}}
 
   /* INPUT */
-  .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:10px 14px;flex-shrink:0;}
-  .input-row{display:flex;gap:8px;align-items:center;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:8px 12px;transition:border-color 0.2s;}
+  .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:7px 14px;flex-shrink:0;}  /* compact two-row dock (status line folded into the Hands-free label) */
+  .input-row{display:flex;gap:8px;align-items:center;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:6px 12px;transition:border-color 0.2s;}
   .input-row.listening{border-color:var(--red);}
   #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
   #userInput::placeholder{color:var(--gray3);}
@@ -196,7 +196,7 @@
   /* #voiceBtn is a neutral tap target now — it never reports state; setMicState does. */
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
-  .wake-bar{margin-bottom:8px;}
+  .wake-bar{margin-bottom:6px;}
   .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
   .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
   /* Mic button — ONE state machine (setMicState) drives it. Colour AND label both
@@ -205,11 +205,8 @@
   .wake-word-btn.convo-off{background:rgba(231,76,60,0.10);border-color:#E74C3C;color:#E74C3C;}
   .wake-word-btn.convo-busy{background:rgba(245,166,35,0.15);border-color:var(--amber);color:var(--amber);font-weight:600;}
   @keyframes convoPulse{0%,100%{border-color:#2ECC71;}50%{border-color:rgba(46,204,113,0.4);}}
-  /* The ONE status element — its colour matches the button; five states only. */
-  .voice-status{text-align:center;font-size:11px;margin-top:5px;height:16px;color:var(--gray3);}
-  .voice-status.mic-red{color:var(--red);}
-  .voice-status.mic-green{color:#2ECC71;}
-  .voice-status.mic-amber{color:var(--amber);}
+  /* The mic state word now rides INSIDE the Hands-free button label (setMicState) —
+     the separate #voiceStatus line under the input row is gone (tighter two-row dock). */
 
   .chat-area::-webkit-scrollbar{width:3px;}
   .chat-area::-webkit-scrollbar-thumb{background:var(--navy3);border-radius:2px;}
@@ -588,7 +585,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 06:32 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 06:48 AM AEST</div>
   </div>
 </div>
 
@@ -648,7 +645,6 @@
         <button class="voice-btn" id="voiceBtn" onclick="Voice.toggleCapture()">🎙</button>
         <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
       </div>
-      <div class="voice-status" id="voiceStatus"></div>
     </div>
   </div>
 </div>
@@ -826,7 +822,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0632AM"></script>
+<script src="speech.js?v=31Jul2026-0648AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.

@@ -396,16 +396,16 @@ function closeConversation(reason) {
 }
 function convoFailHonestly() { closeConversation('honest'); }
 
-// ── ONE MIC STATE MACHINE — the SOLE writer of every mic indicator ───────────
-// Five states: off · listening · recording · thinking · speaking. The status
-// element (#voiceStatus) shows the state word + colour; the button (#wakeBtn)
-// shows what a TAP does right now. Both derive from HERE and nowhere else, so no
-// two visible elements can report mic state independently (they can't disagree).
-// The button label also carries the ENGINE distinction: a one-shot cloud/basic
-// capture ends on SEND, an open Web-Speech session ends on CLOSE — so the driver
-// always knows whether the next tap sends or closes, even though the state word
-// and colour are shared. Any old "second indicator" is gone: #voiceBtn no longer
-// carries its own listening styling, and setVoiceStatus/setListeningUI are gone.
+// ── ONE MIC STATE MACHINE — the SOLE writer of the mic indicator ─────────────
+// Five states: off · listening · recording · thinking · speaking. The button
+// (#wakeBtn) is the ONE visible indicator: its label carries the state WORD and
+// what a TAP does right now, its class carries the colour. It derives from HERE
+// and nowhere else, so nothing can report mic state independently. The label also
+// carries the ENGINE distinction: a one-shot cloud/basic capture ends on SEND, an
+// open Web-Speech session ends on CLOSE — so the driver always knows whether the
+// next tap sends or closes. Any old "second indicator" is gone: the separate
+// #voiceStatus line was retired (dock compaction), #voiceBtn no longer carries its
+// own listening styling, and setVoiceStatus/setListeningUI are gone.
 let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
 const MIC_META = {      // state → [status word, colour]
   off:       ['Off', 'red'], listening: ['Listening', 'green'], recording: ['Recording', 'green'],
@@ -415,17 +415,15 @@ function setMicState(state) {
   if (!MIC_META[state]) state = 'off';
   if (state !== micState) logEvent('state', state);
   micState = state;
-  const [word, colour] = MIC_META[state];
-  // THE status element — five states, colour matches the button.
-  const s = document.getElementById('voiceStatus');
-  if (s) { s.textContent = word; s.className = 'voice-status mic-' + colour; }
-  // THE button — label = the tap action NOW, including which engine is live.
+  // THE button is now the SOLE mic indicator — the separate #voiceStatus line was retired
+  // (dock compaction). The state WORD rides inside the label; the colour rides in the class.
   const capturing = cloudActive || captureActive;   // one-shot capture: a tap SENDS
   const session   = convoActive;                     // hands-free session: a tap CLOSES
   let label;
   // Idle label names the FEATURE ("Hands-free") so a driver can discover the bar opens a
-  // session; while a session is open the WORD changes too, not colour alone (field 29 Jul).
-  if (state === 'off') label = '🎙 Hands-free';
+  // session, and carries the state word ("— off") now that the status line is gone; while a
+  // session is open the WORD changes too, not colour alone (field 29 Jul).
+  if (state === 'off') label = '🎙 Hands-free — off';
   else if (state === 'recording') label = capturing ? '🎙 Recording · tap to send' : '🎙 Recording · tap to close';
   else if (state === 'listening') label = session ? '🎙 Hands-free — listening' : '🎙 Listening · tap to close';
   else if (state === 'thinking') label = '🎙 Thinking…';
@@ -1070,7 +1068,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '31 Jul 2026, 06:32 AM AEST',
+    BUILD: '31 Jul 2026, 06:48 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
