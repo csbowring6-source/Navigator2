@@ -360,6 +360,20 @@ check("one-shot mic tap = Voice.toggleCapture", /id="voiceBtn"[^>]*onclick="Voic
 check("one-shot mic long-press opens the voice log (_vlAttach voiceBtn)", /_vlAttach\(document\.getElementById\('voiceBtn'\), true\)/.test(indexSrc));
 check("one-shot mic tap target ~44px", /\.voice-btn\{[^}]*width:44px;height:44px/.test(indexSrc));
 check("one-shot capture also reachable from the home mic", /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc));
+// ── constant-height dock (field 31 Jul: label switches reflowed the row + wrapped the placeholder,
+// growing the dock over the cards). Fix = fixed button width + single-line placeholder. Measured
+// headless @380px: dock height IDENTICAL 73px across Hands-free/Listening/Recording/Speaking/Thinking;
+// button width constant 116px, no clip; "Type here…" would wrap without nowrap but stays one line with it.
+const wakeRule = (indexSrc.match(/\.wake-word-btn\{[^}]*\}/) || [""])[0];
+check("Hands-free button has a FIXED width (flex:0 0 116px) → label changes can't reflow the row",
+  /flex:0 0 116px/.test(wakeRule) && !/flex-shrink:0;padding:0 12px/.test(wakeRule));
+const inputRule = (indexSrc.match(/#userInput\{[^}]*\}/) || [""])[0];
+check("type box placeholder can't wrap: white-space:nowrap + text-overflow:ellipsis on #userInput",
+  /white-space:nowrap/.test(inputRule) && /text-overflow:ellipsis/.test(inputRule));
+// point 4 (bottom padding = dock height) was DROPPED by decision: the dock is a non-overlapping flex
+// sibling of .chat-area, so the chat viewport already ends at the dock's top — no overlay to clear.
+check("no dock-sized bottom padding was added to .chat-area (dock is a flex sibling, not an overlay)",
+  /\.chat-area\{[^}]*padding:10px 14px[^}]*\}/.test(indexSrc) && !/\.chat-area\{[^}]*padding-bottom:7[0-9]px/.test(indexSrc));
 // point 1 (wider card buttons): the two controls are flex:1 with no per-button side margin,
 // so their combined width == the card's inner width by construction (measured headless: 372/372).
 const btnRule = (indexSrc.match(/\.camp-btn\{[^}]*\}/) || [""])[0];

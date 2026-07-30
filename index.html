@@ -188,7 +188,7 @@
   .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:7px 14px;flex-shrink:0;}  /* ONE-row dock: [🎙 Hands-free] · type box · ↺ · mic · send (status word rides on the Hands-free button) */
   .input-row{display:flex;gap:8px;align-items:center;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:6px 12px;transition:border-color 0.2s;}
   .input-row.listening{border-color:var(--red);}
-  #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
+  #userInput{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}  /* single line: placeholder never wraps, so the row height can't grow */
   #userInput::placeholder{color:var(--gray3);}
   /* One-shot mic — grouped with the Hands-free control on the left; tap = Voice.toggleCapture,
      long-press = voice log. ~44px tap target. Never reports state (setMicState owns that). */
@@ -199,7 +199,10 @@
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
   /* Compact IN-ROW Hands-free control — folded into the input row (no full-width bar). Keeps the
      state word + colour (convo-off/on/busy) on the button; ~44px tap target. */
-  .wake-word-btn{flex-shrink:0;padding:0 12px;min-height:44px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all 0.2s;white-space:nowrap;display:inline-flex;align-items:center;}
+  /* FIXED width sized to the widest state label (measured: "🎙 Hands-free" ~109px, the widest of
+     Hands-free/Listening/Recording/Speaking/Thinking) so a label change never reflows the row →
+     constant dock height. Centred; clips rather than reflows if a platform renders slightly wider. */
+  .wake-word-btn{flex:0 0 116px;padding:0 8px;min-height:44px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:background 0.2s,border-color 0.2s,color 0.2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;justify-content:center;}
   .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
   /* Mic button — ONE state machine (setMicState) drives it. Colour AND label both
      change (never colour alone); the label says what a TAP does right now. */
@@ -587,7 +590,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 07:52 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 08:15 AM AEST</div>
   </div>
 </div>
 
@@ -822,7 +825,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0752AM"></script>
+<script src="speech.js?v=31Jul2026-0815AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
