@@ -185,19 +185,18 @@
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:0.4;}30%{transform:translateY(-4px);opacity:1;}}
 
   /* INPUT */
-  .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:7px 14px;flex-shrink:0;}  /* compact two-row dock (status line folded into the Hands-free label) */
+  .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:7px 14px;flex-shrink:0;}  /* ONE-row dock: [🎙 Hands-free] · type box · ↺ · mic · send (status word rides on the Hands-free button) */
   .input-row{display:flex;gap:8px;align-items:center;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:6px 12px;transition:border-color 0.2s;}
   .input-row.listening{border-color:var(--red);}
   #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
   #userInput::placeholder{color:var(--gray3);}
-  .voice-btn{width:40px;height:40px;border-radius:50%;border:2px solid rgba(245,166,35,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;background:rgba(245,166,35,0.08);color:var(--amber);transition:all 0.2s;flex-shrink:0;}
   .reset-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;background:transparent;color:var(--gray2);transition:all 0.2s;flex-shrink:0;align-self:center;}
   .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
-  /* #voiceBtn is a neutral tap target now — it never reports state; setMicState does. */
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
-  .wake-bar{margin-bottom:6px;}
-  .wake-word-btn{width:100%;padding:9px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:13px;cursor:pointer;transition:all 0.2s;text-align:center;}
+  /* Compact IN-ROW Hands-free control — folded into the input row (no full-width bar). Keeps the
+     state word + colour (convo-off/on/busy) on the button; ~44px tap target. */
+  .wake-word-btn{flex-shrink:0;padding:0 12px;min-height:44px;border-radius:10px;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);color:var(--gray2);font-family:"Inter",sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all 0.2s;white-space:nowrap;display:inline-flex;align-items:center;}
   .wake-word-btn:hover{border-color:rgba(245,166,35,0.4);color:var(--gray1);}
   /* Mic button — ONE state machine (setMicState) drives it. Colour AND label both
      change (never colour alone); the label says what a TAP does right now. */
@@ -585,7 +584,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 06:48 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 07:21 AM AEST</div>
   </div>
 </div>
 
@@ -635,14 +634,11 @@
     </div>
 
     <div class="input-area">
-      <div class="wake-bar">
-        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="Voice.micTap()">🎙 Hands-free</button>
-      </div>
       <div class="input-row" id="inputRow">
+        <button class="wake-word-btn convo-off" id="wakeBtn" onclick="Voice.micTap()">🎙 Hands-free</button>
         <textarea id="userInput" placeholder="Type here…" rows="1"
           onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
-        <button class="voice-btn" id="voiceBtn" onclick="Voice.toggleCapture()">🎙</button>
         <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
       </div>
     </div>
@@ -822,7 +818,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0648AM"></script>
+<script src="speech.js?v=31Jul2026-0721AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3938,7 +3934,9 @@ function resumeCampRoundIfPersisted() {
   const chat = document.getElementById('chatArea'); if (chat) chat.innerHTML = '';   // avoid duplicating the (card-less) restored bubble
   addMsg('nav', line); lastNavReply = line; lastSpoken = line;
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
-  renderCampCards(bubbles[bubbles.length - 1], campRound.sites);
+  const bub = bubbles[bubbles.length - 1];
+  renderCampCards(bub, campRound.sites);
+  scrollFirstCardIntoView(bub);          // restore lands with card 1 at the top, same as a live answer
   const pins = campRound.sites.filter(s => s.lat != null && s.lon != null).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }));
   window._pendingPins = pins;
   notePlaces(campRound.sites.map(s => s.name));
@@ -4394,6 +4392,19 @@ function renderCampCards(bub, sites) {
     else bub.appendChild(card);
   });
 }
+// After the cards render, bring the FIRST card to the top of the chat viewport so the answer's
+// prose scrolls up out of the way and card 1 is immediately reachable (scroll up to re-read the
+// prose). REGRESSION FIX: addMsg's `scrollTop = scrollHeight` runs when the bubble holds only the
+// prose — the cards are inserted AFTER, by renderCampCards, and nothing re-scrolled — so the prose
+// filled the screen with the cards below the fold. Runs for live answers and the post-reload restore.
+function scrollFirstCardIntoView(bub) {
+  const chat = document.getElementById('chatArea');
+  const card = bub && bub.querySelector('.camp-card');
+  if (!chat || !card) return false;
+  const cRect = chat.getBoundingClientRect(), kRect = card.getBoundingClientRect();
+  chat.scrollTop += (kRect.top - cRect.top) - 8;   // card 1 to the top, 8px breathing room above it
+  return true;
+}
 async function answerCamps(scanText) {
   const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
   campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
@@ -4403,7 +4414,9 @@ async function answerCamps(scanText) {
   // stays closed until the driver opens it (SPEC §10: never bury the answer).
   if (ans.sites.length && window._pendingPins && window._pendingPins.length) showOptionPins(window._pendingPins);
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
-  renderCampCards(bubbles[bubbles.length - 1], ans.sites);
+  const bub = bubbles[bubbles.length - 1];
+  renderCampCards(bub, ans.sites);
+  scrollFirstCardIntoView(bub);          // card 1 to the top; prose scrolls up out of the way
 }
 
 // Legacy AI-context path (kept for camps mixed with other intents, e.g. "camp
@@ -5653,8 +5666,7 @@ function _vlAttach(el, guardClick) {
 }
 (function () {
   _vlAttach(document.getElementById('homeMic'), false);    // home mic — homeMic() already checks _vlLong
-  _vlAttach(document.getElementById('wakeBtn'), true);     // conversation "Hands-free" bar
-  _vlAttach(document.getElementById('voiceBtn'), true);    // conversation ROUND mic — the control field users actually long-press
+  _vlAttach(document.getElementById('wakeBtn'), true);     // in-row "Hands-free" control — long-press opens the voice log
 })();
 // Stale-module guard: speech.js pins the same stamp as #buildStamp via ?v= and
 // Voice.BUILD. If a cached old speech.js loaded against a fresh index.html, the

@@ -311,23 +311,32 @@ check("exactly one close cue for the whole session", count("cue") === 1);
 check("speak() pauses the silence + offer clocks while the app speaks",
   /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
 
-// ── SCENARIO 11: the bar NAMES the feature — 'Hands-free — off' idle, 'Hands-free — listening'
-// while a session is open (field 29 Jul: the old "Tap to talk" label hid that the wide bar
-// opens a hands-free session). The state WORD now rides in the label (the separate #voiceStatus
-// line was retired in the dock compaction), and must change between idle and open, not colour alone.
-console.log("\n--- 11. bar label: 'Hands-free — off' idle, 'Hands-free — listening' when a session is open ---");
+// ── SCENARIO 11: the compact in-row button names the feature idle ('🎙 Hands-free') and shows a
+// short state WORD when live ('🎙 Listening'). The bar was folded into the input row, so the label
+// is a state word only (colour rides in the class); the WORD must change between idle and open.
+console.log("\n--- 11. in-row label: '🎙 Hands-free' idle, '🎙 Listening' when a session is open ---");
 Voice.closeSession("tap");   // force setMicState('off') -> writes the idle label
 const idleLabel = el("wakeBtn").textContent;
-check("idle bar names the feature AND carries the state word '🎙 Hands-free — off'", idleLabel === "🎙 Hands-free — off", idleLabel);
+check("idle button names the feature '🎙 Hands-free'", idleLabel === "🎙 Hands-free", idleLabel);
 fresh(); timers.length = 0;
 Voice.openSession(); rec.onstart();   // session open, listening
 const openLabel = el("wakeBtn").textContent;
-check("open session reads '🎙 Hands-free — listening'", openLabel === "🎙 Hands-free — listening" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
-check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Hands-free/.test(idleLabel) && /listening/.test(openLabel));
+check("open session reads the compact '🎙 Listening'", openLabel === "🎙 Listening" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
+check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Hands-free/.test(idleLabel) && /Listening/.test(openLabel));
 Voice.closeSession("tap");
-check("returns to '🎙 Hands-free — off' idle after close", el("wakeBtn").textContent === "🎙 Hands-free — off");
+check("returns to '🎙 Hands-free' idle after close", el("wakeBtn").textContent === "🎙 Hands-free");
 check("Voice.canHandsFree() is exposed and true under a supporting engine", Voice.canHandsFree() === true);
 // session behaviour unchanged is covered by scenarios 1–10 above (all still pass).
+
+// three state labels retained (off / listening / speaking), via REAL transitions (setMicState is
+// the sole writer; there is no separate status line to read the word off).
+Voice.closeSession("tap");
+check("state OFF → '🎙 Hands-free'", el("wakeBtn").textContent === "🎙 Hands-free", el("wakeBtn").textContent);
+fresh(); timers.length = 0; Voice.openSession(); rec.onstart();
+check("state LISTENING → '🎙 Listening'", el("wakeBtn").textContent === "🎙 Listening", el("wakeBtn").textContent);
+Voice.speak("here are three camps near Innisfail"); tts.start();   // TTS onstart → 'speaking'
+check("state SPEAKING → '🎙 Speaking'", el("wakeBtn").textContent === "🎙 Speaking" && Voice.state() === "speaking", el("wakeBtn").textContent);
+tts.end(); Voice.closeSession("tap");
 
 // ── SCENARIO 11b: dock compaction — the mic word lives ONLY in the button; the separate
 // status line under the input row is GONE, and setMicState no longer paints #voiceStatus.
@@ -336,6 +345,14 @@ const indexSrc = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8
 const speechSrc = fs.readFileSync(new URL("./speech.js", import.meta.url), "utf8");
 check("index.html has NO voice-status element in the dock", !/id="voiceStatus"/.test(indexSrc) && !/class="voice-status"/.test(indexSrc));
 check("setMicState no longer writes a #voiceStatus element", !/getElementById\(['"]voiceStatus['"]\)/.test(speechSrc));
+// dock is ONE row: the full-width hands-free bar is gone; the button is folded INTO the input row.
+check("no full-width .wake-bar row exists", !/class="wake-bar"/.test(indexSrc) && !/\.wake-bar\{/.test(indexSrc));
+check("the Hands-free button lives inside the input row (before the textarea)", /<div class="input-row"[^>]*>\s*<button class="wake-word-btn[^>]*id="wakeBtn"/.test(indexSrc));
+check("the Hands-free button is compact, not full-width", !/\.wake-word-btn\{[^}]*width:100%/.test(indexSrc) && /\.wake-word-btn\{[^}]*min-height:44px/.test(indexSrc));
+// the redundant in-row one-shot mic (#voiceBtn) is gone — one mic in the row (the Hands-free button);
+// one-shot capture is still reachable from the home mic (homeMic -> toggleCapture).
+check("no redundant in-row #voiceBtn / .voice-btn remains", !/id="voiceBtn"/.test(indexSrc) && !/class="voice-btn"/.test(indexSrc) && !/\.voice-btn\{/.test(indexSrc));
+check("one-shot capture still reachable from the home mic", /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc));
 // point 1 (wider card buttons): the two controls are flex:1 with no per-button side margin,
 // so their combined width == the card's inner width by construction (measured headless: 372/372).
 const btnRule = (indexSrc.match(/\.camp-btn\{[^}]*\}/) || [""])[0];

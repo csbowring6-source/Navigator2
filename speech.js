@@ -397,15 +397,15 @@ function closeConversation(reason) {
 function convoFailHonestly() { closeConversation('honest'); }
 
 // ── ONE MIC STATE MACHINE — the SOLE writer of the mic indicator ─────────────
-// Five states: off · listening · recording · thinking · speaking. The button
-// (#wakeBtn) is the ONE visible indicator: its label carries the state WORD and
-// what a TAP does right now, its class carries the colour. It derives from HERE
-// and nowhere else, so nothing can report mic state independently. The label also
-// carries the ENGINE distinction: a one-shot cloud/basic capture ends on SEND, an
-// open Web-Speech session ends on CLOSE — so the driver always knows whether the
-// next tap sends or closes. Any old "second indicator" is gone: the separate
-// #voiceStatus line was retired (dock compaction), #voiceBtn no longer carries its
-// own listening styling, and setVoiceStatus/setListeningUI are gone.
+// Five states: off · listening · recording · thinking · speaking. The compact
+// in-row button (#wakeBtn) is the ONE visible indicator: its label carries a short
+// state WORD, its class carries the colour. It derives from HERE and nowhere else,
+// so nothing can report mic state independently. micTap still does the right thing
+// for whatever is live (send a one-shot capture, close a session, or open one) —
+// the label no longer spells that out ("· tap to send/close" dropped when the bar
+// was folded into the input row). Any old "second indicator" is gone: the separate
+// #voiceStatus line and the redundant in-row #voiceBtn one-shot mic were both retired
+// (one-shot capture is still reachable from the home mic), and setVoiceStatus/setListeningUI are gone.
 let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
 const MIC_META = {      // state → [status word, colour]
   off:       ['Off', 'red'], listening: ['Listening', 'green'], recording: ['Recording', 'green'],
@@ -415,19 +415,17 @@ function setMicState(state) {
   if (!MIC_META[state]) state = 'off';
   if (state !== micState) logEvent('state', state);
   micState = state;
-  // THE button is now the SOLE mic indicator — the separate #voiceStatus line was retired
-  // (dock compaction). The state WORD rides inside the label; the colour rides in the class.
-  const capturing = cloudActive || captureActive;   // one-shot capture: a tap SENDS
-  const session   = convoActive;                     // hands-free session: a tap CLOSES
+  // THE button is now the SOLE mic indicator, and it lives IN the input row (compact, no
+  // full-width bar). So the label is a short state WORD only (colour rides in the class):
+  // idle names the FEATURE for discovery, the live states are one word each. This drops the
+  // old "· tap to send / tap to close" engine hint — too long for the in-row button — but
+  // the tap still does the right thing (micTap), and the colour + word carry the state.
   let label;
-  // Idle label names the FEATURE ("Hands-free") so a driver can discover the bar opens a
-  // session, and carries the state word ("— off") now that the status line is gone; while a
-  // session is open the WORD changes too, not colour alone (field 29 Jul).
-  if (state === 'off') label = '🎙 Hands-free — off';
-  else if (state === 'recording') label = capturing ? '🎙 Recording · tap to send' : '🎙 Recording · tap to close';
-  else if (state === 'listening') label = session ? '🎙 Hands-free — listening' : '🎙 Listening · tap to close';
-  else if (state === 'thinking') label = '🎙 Thinking…';
-  else /* speaking */ label = session ? '🎙 Speaking · tap to close' : '🎙 Speaking…';
+  if (state === 'off') label = '🎙 Hands-free';
+  else if (state === 'recording') label = '🎙 Recording';
+  else if (state === 'listening') label = '🎙 Listening';
+  else if (state === 'thinking') label = '🎙 Thinking';
+  else /* speaking */ label = '🎙 Speaking';
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
   const b = document.getElementById('wakeBtn');
   if (b) { b.textContent = label; b.className = 'wake-word-btn ' + cls; }
@@ -1068,7 +1066,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '31 Jul 2026, 06:48 AM AEST',
+    BUILD: '31 Jul 2026, 07:21 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
