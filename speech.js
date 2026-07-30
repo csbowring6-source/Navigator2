@@ -403,9 +403,9 @@ function convoFailHonestly() { closeConversation('honest'); }
 // so nothing can report mic state independently. micTap still does the right thing
 // for whatever is live (send a one-shot capture, close a session, or open one) —
 // the label no longer spells that out ("· tap to send/close" dropped when the bar
-// was folded into the input row). Any old "second indicator" is gone: the separate
-// #voiceStatus line and the redundant in-row #voiceBtn one-shot mic were both retired
-// (one-shot capture is still reachable from the home mic), and setVoiceStatus/setListeningUI are gone.
+// was folded into the input row). The separate #voiceStatus line is gone; #voiceBtn
+// (the in-row one-shot mic, grouped with Hands-free on the left) is a NEUTRAL tap
+// target — it never reports state, setMicState does — and setVoiceStatus/setListeningUI are gone.
 let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
 const MIC_META = {      // state → [status word, colour]
   off:       ['Off', 'red'], listening: ['Listening', 'green'], recording: ['Recording', 'green'],
@@ -1066,7 +1066,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '31 Jul 2026, 07:21 AM AEST',
+    BUILD: '31 Jul 2026, 07:52 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

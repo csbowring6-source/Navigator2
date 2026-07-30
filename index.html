@@ -190,6 +190,9 @@
   .input-row.listening{border-color:var(--red);}
   #userInput{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;}
   #userInput::placeholder{color:var(--gray3);}
+  /* One-shot mic — grouped with the Hands-free control on the left; tap = Voice.toggleCapture,
+     long-press = voice log. ~44px tap target. Never reports state (setMicState owns that). */
+  .voice-btn{width:44px;height:44px;border-radius:50%;border:2px solid rgba(245,166,35,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;background:rgba(245,166,35,0.08);color:var(--amber);transition:all 0.2s;flex-shrink:0;}
   .reset-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;background:transparent;color:var(--gray2);transition:all 0.2s;flex-shrink:0;align-self:center;}
   .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
@@ -584,7 +587,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 07:21 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 07:52 AM AEST</div>
   </div>
 </div>
 
@@ -636,6 +639,7 @@
     <div class="input-area">
       <div class="input-row" id="inputRow">
         <button class="wake-word-btn convo-off" id="wakeBtn" onclick="Voice.micTap()">🎙 Hands-free</button>
+        <button class="voice-btn" id="voiceBtn" onclick="Voice.toggleCapture()" aria-label="Tap to talk">🎙</button>
         <textarea id="userInput" placeholder="Type here…" rows="1"
           onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
@@ -818,7 +822,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0721AM"></script>
+<script src="speech.js?v=31Jul2026-0752AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5667,6 +5671,7 @@ function _vlAttach(el, guardClick) {
 (function () {
   _vlAttach(document.getElementById('homeMic'), false);    // home mic — homeMic() already checks _vlLong
   _vlAttach(document.getElementById('wakeBtn'), true);     // in-row "Hands-free" control — long-press opens the voice log
+  _vlAttach(document.getElementById('voiceBtn'), true);    // in-row one-shot mic — tap = toggleCapture, long-press = voice log
 })();
 // Stale-module guard: speech.js pins the same stamp as #buildStamp via ?v= and
 // Voice.BUILD. If a cached old speech.js loaded against a fresh index.html, the

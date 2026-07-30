@@ -349,10 +349,17 @@ check("setMicState no longer writes a #voiceStatus element", !/getElementById\([
 check("no full-width .wake-bar row exists", !/class="wake-bar"/.test(indexSrc) && !/\.wake-bar\{/.test(indexSrc));
 check("the Hands-free button lives inside the input row (before the textarea)", /<div class="input-row"[^>]*>\s*<button class="wake-word-btn[^>]*id="wakeBtn"/.test(indexSrc));
 check("the Hands-free button is compact, not full-width", !/\.wake-word-btn\{[^}]*width:100%/.test(indexSrc) && /\.wake-word-btn\{[^}]*min-height:44px/.test(indexSrc));
-// the redundant in-row one-shot mic (#voiceBtn) is gone — one mic in the row (the Hands-free button);
-// one-shot capture is still reachable from the home mic (homeMic -> toggleCapture).
-check("no redundant in-row #voiceBtn / .voice-btn remains", !/id="voiceBtn"/.test(indexSrc) && !/class="voice-btn"/.test(indexSrc) && !/\.voice-btn\{/.test(indexSrc));
-check("one-shot capture still reachable from the home mic", /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc));
+// row order, left→right: Hands-free, one-shot mic, type box, reload (↺), send — the two VOICE
+// controls sit together on the left, the TYPING controls together on the right.
+const rowOrder = /id="wakeBtn"[\s\S]*?id="voiceBtn"[\s\S]*?id="userInput"[\s\S]*?id="resetBtn"[\s\S]*?id="sendBtn"/.test(indexSrc);
+check("row order is Hands-free · mic · type box · reload · send", rowOrder);
+check("the two voice controls are grouped on the left (mic immediately after Hands-free, before the type box)",
+  /id="wakeBtn"[^>]*>[^<]*<\/button>\s*<button class="voice-btn" id="voiceBtn"[\s\S]*?<textarea id="userInput"/.test(indexSrc));
+// one-shot mic behaviours intact: tap = Voice.toggleCapture, long-press = voice log.
+check("one-shot mic tap = Voice.toggleCapture", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc));
+check("one-shot mic long-press opens the voice log (_vlAttach voiceBtn)", /_vlAttach\(document\.getElementById\('voiceBtn'\), true\)/.test(indexSrc));
+check("one-shot mic tap target ~44px", /\.voice-btn\{[^}]*width:44px;height:44px/.test(indexSrc));
+check("one-shot capture also reachable from the home mic", /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc));
 // point 1 (wider card buttons): the two controls are flex:1 with no per-button side margin,
 // so their combined width == the card's inner width by construction (measured headless: 372/372).
 const btnRule = (indexSrc.match(/\.camp-btn\{[^}]*\}/) || [""])[0];
