@@ -141,20 +141,24 @@
   .msg.user .msg-bubble{background:var(--navy3);border:1px solid rgba(255,255,255,0.08);border-top-right-radius:3px;color:var(--gray1);}
   .msg.nav .msg-bubble{background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);border-top-left-radius:3px;}
   .nav-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;margin-top:8px;background:var(--amber);color:var(--navy);border:none;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;width:100%;}
-  /* Compact camp cards (field 31 Jul): one card per site — a header line + two half-width
-     controls + small notes — so a full result set fits one phone screen. Free-group cards
-     use a GREEN accent + a FREE tag, distinct from commercial amber, by colour AND word. */
-  .camp-card{margin-top:8px;padding:7px 9px;border-radius:9px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}
+  /* Compact camp cards (field 31 Jul): EVERY element is ONE line so a full result set fits
+     one screen. Header = number·name (ellipsised) · drive time · hours, all inline; two
+     half-width controls (pin + call — the call number stays one line via nowrap + a tight
+     font); small one-line note. Free-group cards get the green accent + FREE tag. Measured
+     headless on the real Innisfail 5-set at 380px: 66px commercial / 82px free cards; the
+     literal numbers "1300 787 275"/"07 4061 1656" are ~100px in a ≥129px call button. */
+  .camp-card{margin-top:6px;padding:5px 8px;border-radius:8px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}
   .camp-card.free{background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.45);}
-  .camp-card-head{font-size:12.5px;font-weight:600;color:var(--gray1);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.35;}
-  .camp-free-tag{font-size:9px;font-weight:800;letter-spacing:0.6px;color:var(--navy);background:var(--green);border-radius:4px;padding:1px 5px;}
-  .camp-actions{display:flex;gap:6px;margin-top:6px;}
-  .camp-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:42px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;font-family:'Inter',sans-serif;border:none;padding:0 8px;}
-  .camp-btn.pin{background:var(--amber);color:var(--navy);}
+  .camp-card-head{font-size:12.5px;font-weight:600;color:var(--gray1);display:flex;align-items:baseline;gap:5px;line-height:1.25;white-space:nowrap;}
+  .camp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .camp-meta{flex:none;font-size:10.5px;font-weight:500;color:var(--gray2);}
+  .camp-free-tag{flex:none;align-self:center;font-size:8.5px;font-weight:800;letter-spacing:0.5px;color:var(--navy);background:var(--green);border-radius:4px;padding:1px 4px;}
+  .camp-actions{display:flex;gap:6px;margin-top:4px;}
+  .camp-btn{flex:1;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:34px;border-radius:6px;font-weight:600;cursor:pointer;text-decoration:none;font-family:'Inter',sans-serif;border:none;padding:0 4px;white-space:nowrap;}
+  .camp-btn.pin{background:var(--amber);color:var(--navy);font-size:12px;}
   .camp-card.free .camp-btn.pin{background:var(--green);color:var(--navy);}
-  .camp-btn.call{background:transparent;border:1px solid var(--green);color:var(--green);}
-  .camp-note{margin-top:5px;font-size:11px;color:var(--gray2);line-height:1.35;}
-  .camp-hours{margin-top:3px;font-size:11px;color:var(--gray2);}
+  .camp-btn.call{background:transparent;border:1px solid var(--green);color:var(--green);font-size:11.5px;letter-spacing:-0.2px;}
+  .camp-note{margin-top:3px;font-size:10.5px;color:var(--gray2);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .feedback-row{display:flex;gap:6px;margin-top:7px;align-items:center;}
   .fb-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:4px 9px;font-size:13px;cursor:pointer;opacity:0.6;transition:opacity 0.2s;}
   .fb-btn:hover{opacity:1;border-color:rgba(245,166,35,0.4);}
@@ -4349,8 +4353,15 @@ function buildCampCard(s, n) {
   const free = isFreeGroupEligible(s);
   const card = document.createElement('div'); card.className = 'camp-card' + (free ? ' free' : '');
   const head = document.createElement('div'); head.className = 'camp-card-head';
+  const name = document.createElement('span'); name.className = 'camp-name';
+  name.textContent = n + '. ' + s.name;              // ellipsised so the header stays ONE line
+  head.appendChild(name);
+  // meta = drive time · hours, small, inline on the header (no full-width hours row)
   const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
-  head.textContent = n + '. ' + s.name + (t ? ' — ' + t : '');
+  const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
+  const hrs = hv ? '🕐 ' + (hv.length > 1 ? 'hours vary' : hv[0]) : '';
+  const metaText = [t, hrs].filter(Boolean).join(' · ');
+  if (metaText) { const meta = document.createElement('span'); meta.className = 'camp-meta'; meta.textContent = metaText; head.appendChild(meta); }
   if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; head.appendChild(tag); }
   card.appendChild(head);
   const note = campCardNote(s);
@@ -4363,20 +4374,14 @@ function buildCampCard(s, n) {
   }
   if (note.kind === 'call') {
     const call = document.createElement('a'); call.className = 'camp-btn call';
-    call.href = 'tel:' + note.phone.replace(/[^\d+]/g, ''); call.textContent = '📞 ' + localPhone(note.phone);
+    call.href = 'tel:' + note.phone.replace(/[^\d+]/g, ''); call.textContent = '📞 ' + localPhone(note.phone);   // one line: nowrap + tight font (verified vs the real numbers)
     call.addEventListener('click', () => noteCampCalled(s.name));   // feed the ring-around
     actions.appendChild(call);
   }
   card.appendChild(actions);
-  if (note.kind === 'miss' || note.kind === 'free') {   // honest miss wording, or the free-camp note — small
+  if (note.kind === 'miss' || note.kind === 'free') {   // honest miss wording, or the free-camp note — small, one line
     const line = document.createElement('div'); line.className = 'camp-note'; line.textContent = note.text;
     card.appendChild(line);
-  }
-  if (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) {
-    const hv = Array.isArray(s.hours) ? s.hours : [String(s.hours)];
-    const hrs = document.createElement('div'); hrs.className = 'camp-hours';
-    hrs.textContent = '🕒 ' + (hv.length > 3 ? 'Hours vary — tap Call to confirm' : hv.join(' · '));
-    card.appendChild(hrs);
   }
   return card;
 }
