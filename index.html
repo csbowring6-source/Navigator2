@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 30 Jul 2026, 05:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 30 Jul 2026, 05:58 PM AEST</div>
   </div>
 </div>
 
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=30Jul2026-0500PM"></script>
+<script src="speech.js?v=30Jul2026-0558PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3294,6 +3294,19 @@ async function fetchMergedCamps(lat, lon, radius) {
   return { results: merged, osmDown: !osm.ok, fellBack: false };
 }
 
+// PLUS FREE CAMPS (field 30 Jul): the 3-nearest cap filled every slot with in-town
+// commercial parks, burying free camps / rest areas that sit a little further out (Fred
+// Drew Rest Area ~4 km from Innisfail). If NONE of the shown top sites is a free camp
+// (source:'osm'), surface the nearest 1–2 OSM non-commercial sites from the candidate pool
+// as a DISTINCT appended group — never widening the flat top set. The pool is already
+// nearest-first, so slice takes the nearest.
+const FREE_CAMP_GROUP_MAX = 2;
+function pickFreeCampGroup(top, pool) {
+  if ((top || []).some(s => s.source === 'osm')) return [];   // a free camp already made the top set — no separate group
+  const inTop = new Set((top || []).map(s => s.name));
+  return (pool || []).filter(s => s.source === 'osm' && !inTop.has(s.name)).slice(0, FREE_CAMP_GROUP_MAX);
+}
+
 async function getCorridorCamps() {
   if (!gps) return { error: 'no-gps' };
   const onTrip = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
@@ -3309,7 +3322,8 @@ async function getCorridorCamps() {
   cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
   const sel = selectCorridorCamps(cands, { gps, routePath: onTrip ? window._tripRoute.path : null, rig: currentVehicle, windowMins: 60 });
   if (!sel.sites.length) return { error: onTrip ? 'none-ahead' : 'empty', directional: onTrip };
-  return { sites: dedupeCampSites(sel.sites).slice(0, 3), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered, osmDown: merged.osmDown };
+  const top = dedupeCampSites(sel.sites).slice(0, 3);
+  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered, osmDown: merged.osmDown };
 }
 
 // Geocode a named place browser-side (Nominatim, no key) → {lat,lon} or null.
@@ -3353,7 +3367,8 @@ async function getCampsNear(place, coords) {
   } else {
     cands.forEach(s => { s.km = s.crow; s.mins = null; });
   }
-  return { sites: dedupeCampSites(cands).slice(0, 3), directional: false, near: true, place, osmDown: merged.osmDown };
+  const top = dedupeCampSites(cands).slice(0, 3);
+  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: false, near: true, place, osmDown: merged.osmDown };
 }
 
 // ── ANSWER SHAPE + CALL HANDOFF (S2.3) — deterministic, so the TRUST RULE is
@@ -3443,7 +3458,8 @@ function formatCampsAnswer(res) {
     const t = map[res.error] || map['service'];
     return { text: t, spoken: t, sites: [] };
   }
-  const sites = (res.sites || []).slice(0, 3);
+  const sites = (res.sites || []).slice(0, 3);   // the commercial top set (head counts THESE)
+  const freeCamps = (res.freeCamps || []);        // the distinct "plus free camps" group (may be empty)
   const n = sites.length;
   const where = res.near ? `near ${res.place}` : res.directional ? 'ahead' : 'nearby';
   // COUNT-FIRST — never imply three exist when they don't.
@@ -3480,21 +3496,37 @@ function formatCampsAnswer(res) {
       return `${s.name}, ${t}.`;
     return `${s.name}, ${t} — ${facts.join(', ')}.`;
   });
+  // PLUS FREE CAMPS — a distinct, clearly-marked-free group appended when none of the top
+  // sites is a free camp. Spoken shape stays name + drive time; each is introduced as
+  // "Plus <name>, a free camp/rest area, N minutes." The count-first head keeps counting the
+  // COMMERCIAL top set (n); the free group is presented separately so counts stay coherent.
+  const freeLabel = s => (s.type === 'rest area') ? 'a rest area' : 'a free camp';
+  const freeText = freeCamps.length
+    ? `Plus free ${freeCamps.length === 1 ? 'stop' : 'stops'}: ${freeCamps.map(s => `${s.name} (${timePhrase(s)})`).join(', ')}.`
+    : '';
+  const freeSpoken = freeCamps.map(s => {
+    const t = s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
+    return `Plus ${s.name}, ${freeLabel(s)}, ${t}.`;
+  }).join(' ');
   // PHASE 3: the numbers now sit ON each card (visible, tap to call), so the spoken/text
   // answer no longer offers number-fetching — it stays name + drive time per site (the
   // TRUST RULE still holds: digits are never spoken). If the OSM (free-camp) source was
   // down for THIS request, say so honestly — Places-only, free camps unchecked.
   const spokenBits = [head, spokenLines.join(' ')];
   if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
+  if (freeSpoken) spokenBits.push(freeSpoken);
   if (res.osmDown) spokenBits.push("Couldn't check free camps just now — showing the caravan parks only.");
   const textParts = [head, lines.join(' ')];
+  if (freeText) textParts.push(freeText);
   if (res.osmDown) textParts.push("Couldn't check free camps just now — showing the caravan parks only.");
   return {
     text: textParts.join(' '),
     spoken: spokenBits.join(' '),
-    // Carry source/hours/type through so the cards render the number, hours and a
-    // per-card note, and a debug/voice-log view can report which source each came from.
-    sites: sites.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', hours: s.hours || null, type: s.type || '' })),
+    // Cards / ring-around / pins see the SAME combined list: the commercial top set FOLLOWED
+    // by the free-camps group. Free camps carry source:'osm' so campCardNote gives them the
+    // neutral no-bookings note (never the missing-number apology). Source/hours/type carried
+    // through for the cards and a debug/voice-log view.
+    sites: [...sites, ...freeCamps].map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', hours: s.hours || null, type: s.type || '' })),
   };
 }
 // Per-card number/status decision (pure → benchable). A verified number → tap-to-call;
@@ -4236,8 +4268,19 @@ async function answerCamps(scanText) {
   if (!bub) return;
   const navBtns = [...bub.querySelectorAll('button.nav-btn')];
   const after = (el, ref) => { if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref.nextSibling); else bub.appendChild(el); };
+  const mapNames = { apple: 'Apple Maps', google: 'Google Maps', waze: 'Waze', 'maps.me': 'Maps.me' };
   ans.sites.forEach(s => {
     let anchor = navBtns.find(b => b.textContent.includes(s.name));   // the pin/directions control (else the bubble end)
+    // addMsg only auto-buttons the first few mentioned places; a free camp in the appended
+    // group can fall past that cap, so give it its own Navigate button — its card must be as
+    // complete (pin/directions control to stack under) as a park's.
+    if (!anchor && s.lat != null && s.lon != null) {
+      const nav = document.createElement('button'); nav.className = 'nav-btn';
+      nav.textContent = '📍 Navigate to ' + s.name + (s.mins != null ? ` (${hrsMins(s.mins)})` : '') + ' — ' + mapNames[selectedMap];
+      nav.onclick = () => navigateTo(s.name, s.lat, s.lon);
+      bub.appendChild(nav);
+      anchor = nav;
+    }
     const stack = (el) => { after(el, anchor); anchor = el; };        // stack lines directly UNDER the pin, in order
     const note = campCardNote(s);
     if (note.kind === 'call') {
