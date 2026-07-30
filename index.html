@@ -570,7 +570,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 30 Jul 2026, 06:30 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 05:18 AM AEST</div>
   </div>
 </div>
 
@@ -808,7 +808,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=30Jul2026-0630PM"></script>
+<script src="speech.js?v=31Jul2026-0518AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3868,6 +3868,50 @@ function loadCampRound() {
 }
 function clearCampRound() { campRound = null; campOutcomePending = null; try { localStorage.removeItem(CAMP_ROUND_KEY); } catch(e) {} }
 
+// ── POST-RELOAD RESUME (field QAKH2GZ) ────────────────────────────────────────
+// Returning from an external map app reloads the backgrounded tab. restoreSession()
+// brings back the conversation as text but CANNOT rebuild the live camp cards (their
+// JS handlers don't survive HTML serialisation), and it lands on home — so the driver
+// saw no cards and the resume re-ran the trip questions. Fix: if a committed trip AND a
+// camp round FROM that trip both persist, restore the camps answer silently.
+function tripRoundMatch() {
+  if (!campRound || !(campRound.sites || []).length) return false;
+  const dest = (currentRunDest || savedTripDest() || '').toLowerCase();
+  if (!dest) return false;
+  const rp = (campRound.place || '').toLowerCase();
+  return !rp || rp === dest;   // '' = a near-me round made during this trip; otherwise it must be for the trip's town
+}
+// Which restore path does the persisted state call for? Pure → benchable.
+function resumeMode() {
+  const hasTrip = !!(currentRunDest || savedTripDest());
+  if (!hasTrip) return 'fresh';          // (3) genuinely fresh open — nothing changes
+  return tripRoundMatch() ? 'round' : 'trip-only';
+}
+function resumeCampRoundIfPersisted() {
+  // Bring back the mode + committed coords that restoreSession() doesn't carry, so the
+  // committed mode is REUSED (never re-interviewed) on either path.
+  try { const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); if (raw.mode) tripMode = raw.mode; if (!currentRunDest && raw.dest) currentRunDest = raw.dest; } catch (e) {}
+  loadCommittedDest();
+  if (!campRound) loadCampRound();
+  if (resumeMode() !== 'round') return;   // trip-only → the confirm opener fires on the first query; fresh → nothing
+  // (1) Silent restore: OWN the camps display cleanly. State (messages, run) already came
+  // back from restoreSession; we replace only the visual it couldn't rebuild. No questions.
+  firstQueryAfterOpen = false;            // the trip is confirmed by the restore itself
+  openAppView();
+  const dest = currentRunDest || campRound.place || 'your trip';
+  const line = `Back to your ${dest} trip — parks are still up.`;
+  const chat = document.getElementById('chatArea'); if (chat) chat.innerHTML = '';   // avoid duplicating the (card-less) restored bubble
+  addMsg('nav', line); lastNavReply = line; lastSpoken = line;
+  const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
+  renderCampCards(bubbles[bubbles.length - 1], campRound.sites);
+  const pins = campRound.sites.filter(s => s.lat != null && s.lon != null).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }));
+  window._pendingPins = pins;
+  notePlaces(campRound.sites.map(s => s.name));
+  if (window._navMap) { if (currentRunDest) drawCommittedRoute(currentRunDest); if (pins.length) showOptionPins(pins); }
+  else { if (currentRunDest) window._pendingRouteDest = currentRunDest; if (pins.length) window._pendingOptionPins = pins; }
+  speak(line);
+}
+
 // Start a fresh round from a produced answer (part 1) — persisted immediately.
 function startCampRound(place, query, sites) {
   campRound = {
@@ -4256,30 +4300,22 @@ async function loadTripCampRound(scanText) {
   }
   return ans;
 }
-async function answerCamps(scanText) {
-  const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
-  campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
-  addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
-  speak(ans.spoken || ans.text);         // aloud: confirmed facts only
-  // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
-  // stays closed until the driver opens it (SPEC §10: never bury the answer).
-  if (ans.sites.length && window._pendingPins && window._pendingPins.length) showOptionPins(window._pendingPins);
-  // PHASE 3 CARDS: under each site's Navigate (pin/directions) control, show the number
-  // by DEFAULT (visible, tap to call — never on request), then hours where the record has
-  // them. campCardNote decides: a verified number → tap-to-call; a FREE camp / rest area
-  // with no number is normal → a neutral note (no apology); a COMMERCIAL park missing a
-  // number keeps the honest wording. A number is only ever bound to a listed site.
-  const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
-  const bub = bubbles[bubbles.length - 1];
+// PHASE 3 CARDS: under each site's Navigate (pin/directions) control, show the number
+// by DEFAULT (visible, tap to call — never on request), then hours where the record has
+// them. campCardNote decides: a verified number → tap-to-call; a FREE camp / rest area
+// with no number is normal → a neutral note (no apology); a COMMERCIAL park missing a
+// number keeps the honest wording. A number is only ever bound to a listed site. Factored
+// out so the post-reload resume re-renders a persisted round with identical cards.
+function renderCampCards(bub, sites) {
   if (!bub) return;
   const navBtns = [...bub.querySelectorAll('button.nav-btn')];
   const after = (el, ref) => { if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref.nextSibling); else bub.appendChild(el); };
   const mapNames = { apple: 'Apple Maps', google: 'Google Maps', waze: 'Waze', 'maps.me': 'Maps.me' };
-  ans.sites.forEach(s => {
+  (sites || []).forEach(s => {
     let anchor = navBtns.find(b => b.textContent.includes(s.name));   // the pin/directions control (else the bubble end)
     // addMsg only auto-buttons the first few mentioned places; a free camp in the appended
-    // group can fall past that cap, so give it its own Navigate button — its card must be as
-    // complete (pin/directions control to stack under) as a park's.
+    // group (or a re-rendered round with no banner names) can fall past that, so give it its
+    // own Navigate button — its card must be as complete (pin/directions control) as a park's.
     if (!anchor && s.lat != null && s.lon != null) {
       const nav = document.createElement('button'); nav.className = 'nav-btn';
       nav.textContent = '📍 Navigate to ' + s.name + (s.mins != null ? ` (${hrsMins(s.mins)})` : '') + ' — ' + mapNames[selectedMap];
@@ -4309,6 +4345,17 @@ async function answerCamps(scanText) {
       stack(hrs);
     }
   });
+}
+async function answerCamps(scanText) {
+  const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
+  campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
+  addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
+  speak(ans.spoken || ans.text);         // aloud: confirmed facts only
+  // Pin the offered sites — this only surfaces the 🗺 toggle; the map itself
+  // stays closed until the driver opens it (SPEC §10: never bury the answer).
+  if (ans.sites.length && window._pendingPins && window._pendingPins.length) showOptionPins(window._pendingPins);
+  const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
+  renderCampCards(bubbles[bubbles.length - 1], ans.sites);
 }
 
 // Legacy AI-context path (kept for camps mixed with other intents, e.g. "camp
@@ -5578,6 +5625,7 @@ restoreSession();
 // If a phone call (and maybe a reload) interrupted a ring-around, resume the
 // call-outcome prompt now that the app is back (part 1 + 2).
 loadCampRound();
+resumeCampRoundIfPersisted();   // trip+round → silent re-render of the camps answer, no questions (field QAKH2GZ)
 checkCampReturn();
 setInterval(fetchWeather,600000);
 checkVersion();
