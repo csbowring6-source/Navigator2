@@ -374,11 +374,23 @@ check("type box placeholder can't wrap: white-space:nowrap + text-overflow:ellip
 // sibling of .chat-area, so the chat viewport already ends at the dock's top — no overlay to clear.
 check("no dock-sized bottom padding was added to .chat-area (dock is a flex sibling, not an overlay)",
   /\.chat-area\{[^}]*padding:10px 14px[^}]*\}/.test(indexSrc) && !/\.chat-area\{[^}]*padding-bottom:7[0-9]px/.test(indexSrc));
+// dock polish: placeholder shortened to "Type…" (fits the 64px box on one line; nowrap keeps it single).
+check("type box placeholder is \"Type…\" (not the longer \"Type here…\")", /placeholder="Type…"/.test(indexSrc) && !/placeholder="Type here…"/.test(indexSrc));
+// ── slimmed cards (field 31 Jul: all five Innisfail cards must fit above the dock @380×800). Cut the
+// card's vertical padding/margins; the 34px buttons stay (driver-tappable) so they set the height floor.
+// Measured headless @380px: commercial 66→57px, free 82→72px; five-card block 330px, banner+5-card bubble
+// 377px < the ~647px chat budget (800 − appview-bar 42 − context-panel 38 − dock 73). All five fit.
+const campCardRule = (indexSrc.match(/\.camp-card\{[^}]*\}/) || [""])[0];
+check("card vertical padding trimmed to 2px (was 5px)", /padding:2px 5px/.test(campCardRule));
+check("inter-card margin trimmed to 4px (was 6px)", /margin-top:4px/.test(campCardRule));
+check("header→buttons gap trimmed to 2px", /\.camp-actions\{[^}]*margin-top:2px/.test(indexSrc));
+check("free-camp note gap trimmed to 2px, still one readable line", /\.camp-note\{[^}]*margin-top:2px[^}]*white-space:nowrap[^}]*text-overflow:ellipsis/.test(indexSrc));
+check("card buttons stay driver-tappable (min-height:34px, unchanged)", /\.camp-btn\{[^}]*min-height:34px/.test(indexSrc));
 // point 1 (wider card buttons): the two controls are flex:1 with no per-button side margin,
 // so their combined width == the card's inner width by construction (measured headless: 372/372).
 const btnRule = (indexSrc.match(/\.camp-btn\{[^}]*\}/) || [""])[0];
 check("both card buttons are flex:1 → pair spans the card's full inner width", /flex:1/.test(btnRule) && !/margin-(left|right|inline)/.test(btnRule));
-check("card side padding trimmed (8px → 5px) so the button pair reaches nearer the card edge", /\.camp-card\{[^}]*padding:5px 5px/.test(indexSrc));
+check("card SIDE padding stays 5px (wider button pair) while vertical is slimmed", /\.camp-card\{[^}]*padding:\dpx 5px/.test(indexSrc));
 
 // ── SCENARIO 12: 9XJ9UWR 145-151s — a driver speaking continuously across THREE engine
 // restarts is NEVER closed on; the accumulated turn survives the restarts and delivers on
