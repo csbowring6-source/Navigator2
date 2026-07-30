@@ -109,6 +109,7 @@ const CONVO_MAX_FLIPS = 8;      // oscillation ceiling — close honestly beyond
 const CONVO_MAX_CYCLES = 3;     // empty (no-delivery) reopens before an honest close (~15s at the field's ~5s churn cadence)
 let convoUndelivered = 0;       // consecutive sub-healthy reopens with nothing delivered
 let convoCycleHadSpeech = false;// did the CURRENT recogniser cycle see a genuine speechstart? progress = captured SPEECH, not a delivered turn
+let convoReplyPending = false;  // a delivered turn's reply is being composed/spoken — NOT the driver's turn yet, so no-progress cycles are FREE until it finishes (tts.end + tail)
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
 let convoCued = false;          // close cue already played this session? (at most once)
@@ -140,7 +141,7 @@ function openConversation() {
   convoActive = true; convoOffered = false; convoHadExchange = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
-  convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoCycleHadSpeech = false; clearTimeout(convoResumeTimer);    // fresh oscillation guards
+  convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoCycleHadSpeech = false; convoReplyPending = false; clearTimeout(convoResumeTimer);    // fresh oscillation guards
   convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoUndelivered = 0;            // the opening start is not an "undelivered reopen" — only reopens AFTER open count toward the churn ceiling
@@ -183,6 +184,12 @@ function convoSetState(state) {
 // CONVO_MAX_CYCLES we're in a stuck restart loop (the source of the once-a-second
 // native earcon) → close honestly, reason on screen. Returns true if it closed.
 function convoNoteReopen() {
+  // NOT the driver's turn yet: a delivered turn is still being composed (thinking) or the
+  // reply is playing (TTS + tail). Those cycles are the APP's doing, not idle driver churn,
+  // so they NEVER count toward the no-progress ceiling — the counter is suspended across
+  // deliver → reply-finished (field 4D6EDK9: a ~14s compose gap ran the ceiling to 3 and
+  // closed the session before the reply even played). Genuine post-reply idle still counts.
+  if (convoReplyPending || convoSpeaking || _isBusy()) return false;
   // Progress = genuine CAPTURED SPEECH this cycle, not a delivered turn. A cycle in which
   // the driver actually spoke (rec.speechstart fired) is real progress even if the engine
   // restarted mid-utterance before the pause — it must NOT count toward the no-progress
@@ -214,7 +221,7 @@ function convoStartRecogniser() {
     convoRec.continuous = true;
     convoRec.interimResults = true;
     convoRec.onstart = () => { convoRecRunning = true; logEvent('rec.onstart', 'convo'); if (convoActive && !convoSpeaking) convoSetState('listening'); console.log('[convo] recogniser started'); };
-    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoCycleHadSpeech = true; convoFlips = 0; convoArmSilence(); if (convoActive) convoSetState('recording'); };  // genuine speech onset is real input, NOT echo churn — it marks THIS reopen cycle as progress (so a driver speaking across engine restarts is never closed on) and must never be the flip that trips the oscillation ceiling (the field close-on-speechstart bug). Ambient-only cycles (no speechstart) still bound a real restart loop.
+    convoRec.onspeechstart = () => { if (convoSpeaking) return; logEvent('rec.speechstart', 'convo'); convoCycleHadSpeech = true; convoReplyPending = false; convoFlips = 0; convoArmSilence(); if (convoActive) convoSetState('recording'); };  // genuine speech onset is real input, NOT echo churn — it marks THIS reopen cycle as progress (so a driver speaking across engine restarts is never closed on) and must never be the flip that trips the oscillation ceiling (the field close-on-speechstart bug). Ambient-only cycles (no speechstart) still bound a real restart loop.
     convoRec.onresult = e => {
       if (convoSpeaking) return;             // ignore anything heard during playback/tail (our own voice)
       logEvent('rec.onresult', 'convo');
@@ -292,7 +299,7 @@ function convoDeliverTurn() {
   const pending = convoTurn.length > convoDelivered.length ? convoTurn.slice(convoDelivered.length).trim() : '';
   if (!pending) return;
   convoDelivered = convoTurn;                          // consume — never re-delivered
-  convoFlips = 0; convoUndelivered = 0; convoCycleHadSpeech = false;   // a delivered turn is real progress — clear the oscillation guards AND the cycle-speech credit (a fresh reopen must re-earn it)
+  convoFlips = 0; convoUndelivered = 0; convoCycleHadSpeech = false; convoReplyPending = true;   // a delivered turn is real progress — clear the oscillation guards + the cycle-speech credit, and mark a reply pending so the compose/TTS gap can't run the no-progress ceiling
   convoHandleUtterance(pending, 'silence');            // a session turn always ends on a pause
 }
 function convoHandleUtterance(text, endReason) {
@@ -360,7 +367,7 @@ function closeConversation(reason) {
   logEvent('close', reason + (wasActive ? '' : ' (noop)'));
   convoActive = false; convoSpeaking = false; convoRecRunning = false;
   clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer); clearTimeout(convoDeliverTimer); clearTimeout(convoResumeTimer);
-  convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = ''; convoUndelivered = 0;   // drop any half-heard turn / oscillation state
+  convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoReplyPending = false;   // drop any half-heard turn / oscillation state
   if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
   convoRec = null;                       // fresh instance next session; alive across THIS one
   releaseConvoStream();
@@ -1038,9 +1045,12 @@ function _afterSpeak() {
   clearTimeout(convoResumeTimer);
   convoResumeTimer = setTimeout(() => {
     convoSpeaking = false;
-    // convoStartRecogniser may close the session (reopen ceiling); re-check
-    // convoActive before arming the silence timer so no stray timer survives.
-    if (convoActive) { convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
+    // The reply for the previous turn has finished (tts.end + tail) — NOW it's genuinely the
+    // driver's turn. Clear reply-pending and reset the ceiling to 0 BEFORE reopening, so the
+    // driver gets the FULL fresh grace (the compose/TTS cycles were suspended, never counted)
+    // and the resume reopen counts as the first idle driver-turn cycle, exactly as the ceiling
+    // was designed. convoStartRecogniser may close the session (reopen ceiling) — re-check.
+    if (convoActive) { convoReplyPending = false; convoUndelivered = 0; convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
   }, CONVO_TTS_TAIL_MS);
 }
 
@@ -1060,7 +1070,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '30 Jul 2026, 03:53 PM AEST',
+    BUILD: '30 Jul 2026, 05:00 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

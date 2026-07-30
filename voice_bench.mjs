@@ -258,8 +258,8 @@ check("no close cue during the offer answer", count("cue") === 0);
 console.log("\n--- 9. both engines' restart churn is bounded (fix covers the basic engine too) ---");
 check("convo: alive-time no longer resets the no-delivery ceiling (the leak is closed)",
   /if \(alive >= CONVO_HEALTHY_MS\) convoRestarts = 0;/.test(SRC) && !/alive >= CONVO_HEALTHY_MS\) \{ convoRestarts = 0; convoUndelivered = 0; \}/.test(SRC));
-check("convo: genuine speech onset marks the cycle as progress AND resets the flip ceiling",
-  /logEvent\('rec\.speechstart', 'convo'\); convoCycleHadSpeech = true; convoFlips = 0;/.test(SRC));
+check("convo: genuine speech onset marks the cycle as progress, clears reply-pending AND resets the flip ceiling",
+  /logEvent\('rec\.speechstart', 'convo'\); convoCycleHadSpeech = true; convoReplyPending = false; convoFlips = 0;/.test(SRC));
 check("convo: the offer resume clears the oscillation guards for the answer",
   /convoSpeaking = false; if \(convoActive\) \{ convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState\('listening'\)/.test(SRC));
 check("basic: restart cap is heardSpeech-INDEPENDENT (time-since-progress window)",
@@ -381,6 +381,43 @@ const recBefore = H.rec;
 Voice.openSession();
 check("a fresh session opens afterward on a NEW recogniser instance", H.rec !== recBefore && Voice.isSessionOpen() === true);
 Voice.closeSession("tap");
+
+// ── SCENARIO 14: 4D6EDK9 24755-24809s — a delivered turn, then a ~14s compose gap while
+// the app builds the camps answer, then the reply. The empty mic cycles DURING the compose
+// are the app's thinking, not idle driver churn, so the no-progress ceiling must NOT count
+// them (before the fix it ran to 3 and closed honest at 24793.71, the reply playing to a
+// dead session). After the reply + tail, GENUINELY-idle driver cycles still close the ceiling.
+console.log("\n--- 14. 4D6EDK9: a 14s compose gap after a delivered turn must NOT close; idle after the reply still does ---");
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+// the driver's turn: speak, pause -> DELIVER (~2800ms), +600ms send handoff
+rec.speech(); rec.final("are there any campsites at innisfail");
+advance(2800);                 // end-of-turn pause -> convoDeliverTurn -> reply pending
+advance(600);                  // deliver->send handoff -> onTranscript
+check("the driver's turn delivered", delivered === 1);
+// the app now composes the camps answer for ~14s (busy). The mic keeps cycling EMPTY —
+// no speechstart — but these are the app thinking, so they must NOT count toward the ceiling.
+busyFlag = true;
+for (let i = 0; i < 5; i++) { rec.onstart(); advance(2500); rec.end(); advance(300); }   // ~14s of empty (healthy-length) cycles
+check("NO close during the ~14s compose gap", !kinds().some(k => k.startsWith("close")), kinds().join(","));
+check("no cue fired while thinking", count("cue") === 0);
+// compose done — the reply plays and ends
+busyFlag = false;
+Voice.speak("Three parks near Innisfail, closest first.");
+tts.start();
+advance(1500); tts.end();
+check("session STILL OPEN when the reply ends (not closed by the compose gap)", Voice.isSessionOpen() === true);
+check("no close fired anywhere between deliver and reply-end", !kinds().some(k => k.startsWith("close")));
+advance(700);                  // reopen after the tail (CONVO_TTS_TAIL_MS)
+check("open through the reopen tail; the ceiling was reset for a full fresh grace", Voice.isSessionOpen() === true && !kinds().some(k => k.startsWith("close")));
+// NOW it is genuinely the driver's turn — three genuinely-idle cycles still close the ceiling.
+let closed14 = false;
+for (let i = 0; i < 6 && !closed14; i++) { rec.onstart(); advance(2500); rec.end(); advance(300); closed14 = kinds().some(k => k.startsWith("close:honest")); }
+check("post-reply GENUINELY-idle cycles STILL close at the ceiling (churn protection intact)", closed14);
+Voice.closeSession("tap");
+// source-lock the fix: the no-progress ceiling is suspended while a reply is pending / thinking / speaking
+check("no-progress ceiling suspended across deliver -> reply-finished",
+  /if \(convoReplyPending \|\| convoSpeaking \|\| _isBusy\(\)\) return false;/.test(SRC) && /convoReplyPending = true;/.test(SRC));
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
