@@ -2,92 +2,112 @@
 
 Navigator is a **voice-first travel co-pilot web app for Australian road trippers — especially caravanners** (and cars, campervans, trucks). It plans the journey, finds what you need along the way (cheapest fuel, camps & caravan parks, weather, accommodation, POIs), and hands the actual driving to a real sat-nav — *"Navigator thinks, Google Maps steers."* A conversational AI receives the driver's live situation (GPS, vehicle, fuel type/range, trip plan, conditions) as context. A permanent SOS button is always visible.
 
-**`SPEC.md` (v1.2) in the repo root is the product doctrine — read it before UI/UX work; §0 (honesty: never silently overpromise) governs every wording choice.** §13 lists the build order; the app is being restructured session-by-session toward it.
+**`SPEC.md` (v1.2) in the repo root is the product doctrine — read it before UI/UX work; §0 (honesty: never silently overpromise) governs every wording choice.**
 
-**UI shape (as of Session 1 — SPEC §10–11):** the app opens to a **home screen** — greeting · guidance (what it is, three example spoken phrases, the Drive→Stop→Brief rhythm) · a big central **mic** · a trip card when a trip is live · Solo indicator when armed. The **map is not on the home screen**: it lives behind a **results view** (`#appView`) that opens when a query returns mappable results (`showOptionPins` reveals `#mapWrap`), with an in-app "← Home" back button. **First run shows a one-time setup interview** (`#setupScreen`: name · rig · fuel · height/length · owned apps → `ownedApps` handoffs · optional solo contact), each question carrying a short "why". Returning/old profiles migrate silently and go straight home. **There is no welcome/start overlay** — it was deleted along with its popstate/pageshow/history guards (Bug 2 has nothing to resurrect). **The suggestion pegs are retired** — those are spoken requests now.
+**UI shape:** opens to a **home screen** — greeting · guidance · a big central **mic** · a trip card when a trip is live · Solo indicator when armed. The **map is not on the home screen**: it lives behind a **results view** (`#appView`) that opens when a query returns mappable results. **First run shows a one-time setup interview** (`#setupScreen`: name · rig · fuel · height/length · owned apps → `ownedApps` handoffs · optional solo contact); returning/old profiles migrate silently and go straight home. **No welcome/start overlay.** The suggestion pegs are retired — those are spoken requests now.
 
-## Shape of the codebase
+## Three maintained files & the voice boundary
 
-- **Two files ship: `index.html` and `speech.js`.** `index.html` holds all markup, all CSS (one `<style>` block), and all app JavaScript (one inline `<script>`). **The voice subsystem lives ONLY in `speech.js`** (conversation session, cloud + Web-Speech capture, the mic state machine, cues, TTS + the suppression tail, the oscillation ceiling, and the event ring buffer). It is loaded as a **classic** script *before* the inline app script (`<script src="speech.js?v=STAMP">`), so the two share one global scope. There is still **no build step, no framework, no bundler, no `node_modules`** — what you see in the files is exactly what ships. (`.nojekyll` at the repo root keeps GitHub Pages from running Jekyll — it must stay in every push.)
-- **The voice boundary is strict.** Nothing outside `speech.js` may touch voice internals. `index.html` reaches voice ONLY through the global **`Voice`** API: `openSession()`, `closeSession(reason)`, `toggleCapture()`, `micTap()`, `reset()`, `speak(text)`, `cancelSpeech()`, `unlockAudio()`, `state()`, `isSessionOpen()`, `isCapturing()`, `onTranscript(cb)`, `setBusyGetter(fn)`, `takeTurnEnd()`, `getLog()`, `clearLog()`, `BUILD`. The two app couplings are **injected** at INIT — `Voice.onTranscript(sendMessage)` (transcript handoff) and `Voice.setBusyGetter(() => busy)` — so the module never reads app state. The module still *calls* a few app globals by name (`addMsg`, `setPending`, `pendingQuestion`, `pendingIsFresh`, `cleanTranscript`, `autoResize`, `API_URL`, `lastSpoken`); a thin global `speak()` shim in `index.html` delegates to `Voice.speak` so the ~40 reply sites are unchanged.
-- **Version pinning across the two files:** the `?v=` on the `speech.js` tag AND `Voice.BUILD` both carry the `#buildStamp`. Bump all three together on every ship. INIT compares `Voice.BUILD` to `#buildStamp` and shows the update banner on any mismatch, so a stale cached module can't hide. The on-phone **voice-log view** (long-press the home mic) shows the event ring buffer + BOTH stamps.
-- **Voice bench rig:** `voice_bench.mjs` (repo root) loads the real `speech.js` under mocked browser globals, drives the state machine (normal turn · early-onend loop · ambient finalisation · TTS overlap · the four close paths), asserts the invariants (cue ≤ once/session; a no-delivery reopen loop closes regardless of cycle length; no capture during TTS), and **replays a pasted field event log**. Run: `node voice_bench.mjs`.
-- Deployed as a static page via **GitHub Pages** at **https://csbowring6-source.github.io/Navigator2** (repo `csbowring6-source/Navigator2`, branch `main`).
-- The app self-updates: on load and every 15 min it re-fetches its own URL, compares an embedded `#buildStamp` against the live copy, and shows a "tap to update" banner if stale (`checkVersion()` near the bottom of `index.html`).
+- **`index.html`** — all markup, all CSS (one `<style>`), all app JS (one inline `<script>`). Ships to GitHub Pages.
+- **`speech.js`** — the voice subsystem ONLY (conversation session, cloud + Web-Speech capture, the mic state machine, cues, TTS + suppression tail, the no-progress/oscillation ceilings, the event ring buffer). Loaded as a **classic** script *before* the inline app script (`<script src="speech.js?v=STAMP">`), so the two share one global scope. Ships to GitHub Pages.
+- **`worker-camps.js`** — the Cloudflare Worker relay source. **It IS in this repo** (tracked). It does NOT ship to Pages — it deploys separately via `wrangler deploy`.
+
+**No build step, no framework, no bundler, no `node_modules`** — what you see in the files is exactly what ships. `.nojekyll` at the repo root keeps GitHub Pages from running Jekyll — it must stay in every push.
+
+**The voice boundary is strict.** Nothing outside `speech.js` may touch voice internals. `index.html` reaches voice ONLY through the global **`Voice`** API:
+`openSession()` · `closeSession(reason)` · `toggleCapture()` · `micTap()` · `reset()` · `speak(text)` · `queueReplies(on)` · `cancelSpeech()` · `unlockAudio()` · `state()` · `isSessionOpen()` · `isCapturing()` · `canHandsFree()` · `onTranscript(cb)` · `setBusyGetter(fn)` · `takeTurnEnd()` · `log(kind,detail)` · `getLog()` · `clearLog()` · `BUILD`.
+The two app couplings are **injected** at INIT — `Voice.onTranscript(sendMessage)` and `Voice.setBusyGetter(() => busy)` — so the module never reads app state. The module still *calls* a few app globals by name (`addMsg`, `setPending`, `pendingQuestion`, `pendingIsFresh`, `cleanTranscript`, `autoResize`, `API_URL`, `lastSpoken`); a thin global `speak()` shim in `index.html` delegates to `Voice.speak`.
+
+## Versioning & the deploy split
+
+- **Frontend triad — bump together on every frontend ship:** the `?v=` on the `speech.js` tag, `Voice.BUILD` (in speech.js), and `#buildStamp` (in index.html) all carry the same stamp. INIT compares `Voice.BUILD` to `#buildStamp` and shows the update banner on mismatch, so a stale cached module can't hide. The app also self-updates: on load and every 15 min it re-fetches its own URL and shows a "tap to update" banner if `#buildStamp` is stale (`checkVersion()`).
+- **Worker stamp — separate:** `WORKER_BUILD` in worker-camps.js, returned by `/version`. Bump it on any Worker change.
+- **Deploy split:** a **GitHub Desktop push** (branch `main`, repo `csbowring6-source/Navigator2`) ships the frontend to GitHub Pages at **https://csbowring6-source.github.io/Navigator2**. A **`wrangler deploy`** ships the Worker. A frontend-only change needs no wrangler deploy; a Worker change needs one and takes effect only after redeploy (and cached KV entries refresh). **State explicitly in every report whether worker-camps.js changed.**
+- The on-phone **voice-log view** (long-press the mic) shows the event ring buffer + both stamps.
 
 ## Architecture: frontend ↔ Cloudflare Worker
 
-The frontend is fully public and holds **no secrets**. Every credentialed call goes through a **Cloudflare Worker relay**:
+The frontend is fully public and holds **no secrets**. Every credentialed call goes through the Worker, which holds all keys in its encrypted settings.
 
 ```
-const API_URL = "https://delicate-credit-a17e.csbowring6.workers.dev/";  // index.html, ~line 685
+const API_URL = "https://delicate-credit-a17e.csbowring6.workers.dev/";  // index.html ~line 815
 ```
 
-The Worker holds all API keys in its own encrypted settings and proxies to the real upstreams. **The Worker's source is NOT in this repo** — only the frontend lives here. The route contract below is inferred from how `index.html` calls it.
+Worker `fetch(request, env)` dispatches by exact pathname (wrapped in try/catch → 503), with an AI-chat fallthrough at root. KV binding `env.PLACES_KV`; secrets in `env` (`GOOGLE_PLACES_KEY`, Anthropic, NSW/TAS fuel, weather).
 
-### Worker routes used by the frontend
+| Route | Method | Purpose | Cache / TTL |
+|---|---|---|---|
+| `/` (root) | POST | AI chat — Anthropic Messages body `{model:'claude-sonnet-4-6', max_tokens:300, system, messages}`; reads `data.content[0].text`. Has an 8s AbortController timeout on the frontend. | — |
+| `/weather` | GET | Weather for a position | — |
+| `/stations` | GET | Nearby fuel stations (OSM proximity, all brands) | — |
+| `/fuel` | GET | Live fuel prices by type (NSW & TAS) | — |
+| `/camps` | GET | OSM camps/caravan parks (Overpass) — **phase-3 merge fallback; do not remove** | `camps:` 7-day, stale-serve on Overpass error |
+| `/camps2` | GET | Places-backed camps (Google Places searchText, exact field mask) — **phase 1** | `camps2:` 30-day |
+| `/camps2-osm` | GET | Filtered OSM **non-commercial** camps / rest areas — **phase 2** | `camps2-osm:` 7-day |
+| `/accom` | GET | Accommodation (hotels/motels/backpackers) | — |
+| `/poi` | GET | POIs by kind | — |
+| `/transcribe` | POST | Cloud speech-to-text for the cloud-ears capture path | — |
+| `/place-phone` | GET | One site's phone by OSM/Places id — **do not remove** | `place-phone:` 90-day (found) / 7-day (miss) |
+| `/geocode` | GET | Nominatim geocode via the Worker (proper UA + retry) | 30-day |
+| `/reverse-geocode` | GET | Nominatim reverse-geocode via the Worker | 7-day |
+| `/places-probe` | GET | TEMPORARY diagnostic — remove at phase 4 | — |
+| `/log` · `/log/<id>` | POST · GET | Share a voice log: POST stores text under a short id, returns `{id}`; GET retrieves | `log:` 7-day |
+| `/version` | GET | Returns `WORKER_BUILD` | — |
 
-| Call | Route | Purpose |
-|------|-------|---------|
-| `POST {API_URL}` | root | AI chat. Sends an Anthropic Messages-shaped body `{model:'claude-sonnet-4-6', max_tokens:300, system, messages}`; reads back `data.content[0].text`. The Worker injects the Anthropic key. |
-| `GET {API_URL}weather?lat=&lon=` | `/weather` | Weather for current position |
-| `GET {API_URL}stations?lat=&lon=&radius=` | `/stations` | Fuel stations near a point |
-| `GET {API_URL}fuel?lat=&lon=&type=&radius=` | `/fuel` | Live fuel prices (NSW & TAS coverage) by fuel type |
-| `GET {API_URL}camps?lat=&lon=&radius=` | `/camps` | Camps / caravan parks |
-| `GET {API_URL}accom?lat=&lon=&radius=` | `/accom` | Accommodation (hotels/motels/backpackers) |
-| `GET {API_URL}poi?lat=&lon=&kind=&radius=` | `/poi` | Points of interest by kind |
+The shared `overpass(q)` helper (four mirrors, retry/backoff, 30-min in-memory cache) backs `/camps`, `/camps2-osm`, `/poi`, `/accom`, `/stations`. Data routes are called `fetch(...).then(r=>r.json())`, mostly `.catch(()=>({}))` so a failed route degrades gracefully.
 
-Data routes are called with plain `fetch(...).then(r=>r.json())`, mostly wrapped in `.catch(()=>({}))` so a failed route degrades gracefully instead of breaking the app.
+**Called directly from the browser (no key needed):** Nominatim (fallback), OSRM (routing/snap/distance tables), Overpass (ad-hoc POI), Leaflet + CartoDB tiles (map), Google Fonts (Inter).
 
-### Called directly from the browser (no Worker, because no key is needed)
+## THE IRON RULE: no secrets in the shipped frontend
 
-- **Nominatim** (`nominatim.openstreetmap.org`) — geocoding / reverse geocoding
-- **OSRM** (`router.project-osrm.org`) — routing, nearest-road snapping, distance tables
-- **Overpass** (`overpass-api.de`) — ad-hoc OSM POI queries
-- **Leaflet** (from `unpkg.com`) — map rendering; base tiles from CartoDB
-- **Google Fonts** — Inter font
+**No API keys/tokens/secrets are ever hardcoded in `index.html` or `speech.js`.** Both are public and served as-is. Everything secret lives only behind the Worker; any new keyed capability is a **Worker route**, never a browser-side call with an embedded key. **Before any commit, scan both frontend files for hardcoded secrets** (`sk-ant-…`, `AKIA…`, `AIza…`, bearer/auth headers, `?key=`/`?token=`). The only non-keyless endpoint in the frontend is the public Worker URL itself.
 
-## THE IRON RULE: no secrets in the frontend
+## Places camps architecture (phases ①–④)
 
-**No API keys, tokens, or secrets are ever hardcoded in the shipped frontend files (`index.html`, `speech.js`).** Everything secret (Anthropic, NSW/TAS fuel, weather, and any future keyed service) lives **only** behind the Cloudflare Worker. Both frontend files are public and served as-is — anything placed in them is exposed to the world.
+The approved 26 Jul plan, additive and field-proven stage by stage:
+- **① `/camps2`** — Places (commercial). **LIVE.**
+- **② `/camps2-osm`** — OSM non-commercial (free camps, bush camps, rest areas); tag- + name-based classifier excludes commercial-named sites. **LIVE.**
+- **③ Frontend merge** — `fetchMergedCamps` fetches `/camps2` + `/camps2-osm` for the anchor, dedupes (Places wins within ~100 m + shared name token), orders by drive time, appends a **"plus free camps"** group when the top-3 are all commercial. Numbers render **on every card** (tap to call). Fallback: `/camps2` down → old `/camps`; `/camps2-osm` down → Places-only + an honest "couldn't check free camps" line. **LIVE.**
+- **④ Retirement — NOT DONE.** Do **not** remove `/camps`, `/place-phone`, or `/places-probe` yet — the phase-3 fallback and the on-request number lookup still depend on them.
 
-- The **only** non-keyless endpoint referenced in the frontend is the Worker URL itself, which is a public relay endpoint (not a secret).
-- Any new capability that needs a key must be added as a **Worker route**, not a browser-side call with an embedded key.
-- **Before any commit, scan both `index.html` and `speech.js` for hardcoded secrets** (provider key formats like `sk-ant-…`, `AKIA…`, `AIza…`, bearer/auth headers, high-entropy blobs, `?key=`/`?token=` params). The frontend was verified clean as of the last review — keep it that way.
+## Key subsystems
 
-## Workflow rules (how this project is maintained)
+- **Gazetteer + phonetic rescue** (`AU_TOWNS`, ~2968 towns bundled offline, from GeoNames, **CC-BY 4.0**, floor lowered to ~200-pop populated places). *(The array's own header comment still says pop≥1000/~1,013 — stale; trust the count.)* Mishears are rescued phonetically (`phonKey` consonant-skeleton keys, precomputed). **Rejection loop** (`escalateAfterRejection`): on a rejected candidate, don't re-run the same strategy — geocode the raw transcript WITH the said state if not already tried, widen the phonetic search, offer up to three NEW candidates (never re-offer rejected ones), and if nothing new, honestly say it can't place the town and suggest typing it.
+- **Day/overnight classify spike** (`classifyTripMode`) — a cheap `claude-haiku-4-5` call with `output_config` `json_schema` → `{mode: day|journey|mixed|none}`, a hard **2s** AbortController timeout, `outcome: ok|timeout|network|invalid`. It **never throws** and logs via `Voice.log`. `classifyTripModeOrGate` uses it first and **falls back to the deterministic `tripModeVote` gate** on any failure — the gates remain the offline fallback and the source of truth when the AI is unreachable.
 
-- **The user reviews every change before it is committed.** Do not commit speculatively — show the diff / explain the change and let the user approve first.
-- **The user pushes via GitHub Desktop**, not from this environment. This machine has no GitHub push credentials (HTTPS remote, no `gh` CLI, no token). Do not attempt `git push`; stage/commit only when asked, and leave publishing to the user's GitHub Desktop.
-- **Test changes before committing.** Because there's no build/test harness, "test" means exercising the affected behavior in a browser — load `index.html`, drive the flow that changed (e.g. ask the AI, trigger a fuel/camps/weather lookup, check the map pins), and confirm it works and the console is clean — before proposing a commit.
-- The GitHub remote for this repo is `csbowring6-source/Navigator2` (`origin`), branch `main`.
-- **Always report the build stamp.** The final line of every job must be the current `#buildStamp` — version plus date/time in AEST — in exactly this format, so it can be checked against the phone at a glance:
+## Wording & honesty conventions (locked — do not drift)
 
-  ```
-  DEPLOYED: ✓ v 22 Jul 2026, 01:03 AM AEST
-  ```
+Match these exactly; treat drift as a regression.
+1. **Durations** — always hours-and-minutes (`"1 hr 35"`, `hrsMins`/`hrsMinsSpoken`). Never total minutes (`"95 minutes"`), never decimal hours.
+2. **Stop-sync rhythm line** — exactly **"when you pull in, I'll size up the next stretch."** Descriptive, not directive.
+3. **Sat-nav handoff** — names the driver's own preferred sat-nav (Google/Apple Maps or Waze, per setup). Never hardcode "Google Maps."
+4. **Honest failure** — OUR lookup failing is stated as ours (*"couldn't find a number for X"*, *"couldn't check free camps just now"*), **never dressed as a fact about the world** (*never* "the park has no number"). SPEC §0.
+5. **Numbers on the card by default** — every park card shows a tap-to-call number under its directions control, on by default, never on request.
+6. **Free camps are normal, not a failure** — a free camp / rest area with no phone gets a neutral note (pub/showground → "check at the bar/office"), **never the missing-number apology**.
 
-  Print it as the last line even when the job didn't change the stamp (say so if it's unchanged), and get the time from `TZ="Australia/Sydney" date` rather than guessing.
+## How we work (ticket discipline)
 
-## Engineering discipline — how we work
+- **Conflict-check preamble.** Most tickets open with: check the current code for what this conflicts with / duplicates / supersedes; if there's a conflict, **report it and stop** — do not work around it.
+- **Report-first for investigations.** Field-bug tickets ask for a trace/diagnosis before any code change; report the exact cause, then fix.
+- **Relevant suites only.** Run only the test suites relevant to the change unless told to run the full sweep.
+- **Bench replay for field logs.** A shared field log (id like `4D6EDK9`) becomes a permanent bench replay case reproducing the sequence.
+- **One behaviour per ticket.** Never ship "part 1"; if too big, split *before* starting.
+- **Bench-test before commit — "tested" means executed.** Core logic is exercised as pure functions with fake inputs (extract-and-`geval` pattern, mocked globals); put the output in the report. Worker logic is benched the same way.
+- **Regression-check every commit** — the **mic capture path**, the **home render**, and the **setup interview** stay working (mic capture has regressed before).
+- **The user reviews every change before commit; the user pushes via GitHub Desktop** (this machine has no push creds — never `git push`).
+- **Bump /version and end every report with the stamp(s)** — frontend `DEPLOYED: ✓ v <DD Mon YYYY, HH:MM AM/PM AEST>` and, if the Worker changed, the `WORKER_BUILD` line + a wrangler-deploy note. Get the time from `TZ="Australia/Sydney" date`, never guess.
 
-1. **One behaviour per ticket.** Never ship "part 1" of a ticket. If a ticket is too big for one pass, say so and split it **before** starting — not halfway through, and not in the final report.
-2. **Bench-test before commit.** Core logic (trip creation, corridor search, ranking) must be callable as pure functions and actually **run with fake inputs** before committing. "Tested" means *executed*, not read. Put the test output in the report.
-3. **Regression check every commit.** Confirm the **mic capture path**, the **home screen render**, and the **setup interview** are untouched or still working. The mic capture has regressed twice already — once from a gap in its own fix, once when a revert removed it — so it gets checked every time regardless of what the change was about.
-4. **Every report ends with the build stamp** — see the Workflow rule above for the exact format.
+## Benches
 
-## Wording conventions (locked — do not drift)
-
-These three phrasings are settled. Do not "improve", paraphrase, or re-derive them — match them exactly, and treat any drift as a regression.
-
-1. **Durations** — always spoken and displayed as **hours and minutes** (`"1 hr 35"`). Never total minutes (`"95 minutes"`).
-2. **Stop-sync rhythm line** — the exact wording is **"when you pull in, I'll size up the next stretch."** Descriptive, not directive. Do not rewrite it.
-3. **Sat-nav handoff** — handoff wording names the **user's own preferred sat-nav** (Google Maps, Apple Maps, or Waze, per their setup answer). Never hardcode "Google Maps."
+- **`voice_bench.mjs`** (repo root, tracked) loads the real `speech.js` under mocked browser globals, drives the state machine (normal turn · early-onend loop · ambient finalisation · TTS overlap · compose-gap · the four close paths · the bar label), asserts the invariants, and replays pasted field logs. Run: `node voice_bench.mjs`.
+- Other benches (camps merge/anchor/routing, phone-miss, hands-free tip, worker camps2 / camps2-osm) live in the session scratchpad, not the repo — they `geval` functions extracted from `index.html`/`worker-camps.js`. Recreate with the same pattern.
+- **Known-stale — do NOT chase in sweeps:** `convo_fixb_test`, `oscillation_test`, `recovery_test`, `timeout_test`. These four fail on drifted extraction regexes / moved symbols against the evolved frontend; they are not regressions and are excluded from the "all green" bar.
 
 ## Practical orientation for editing `index.html`
 
-- **Screens & view switching**: `#setupScreen` (first-run interview) · `#homeScreen` (default landing) · `#appView` (results/conversation, holds the map + chat + input). `loadProfile()` decides home-vs-setup on load; `showHome()` / `openAppView()` / `backHome()` swap them; `homeMic()` opens the results view and starts listening; `revealMap()` un-hides `#mapWrap` when results land. No overlays gate any of this.
-- **Vehicle profiles** (`VEHICLES`, `FUEL_TYPES`) define per-vehicle fuel range and AI "system notes" that shape advice — car / caravan / campervan / truck. (The old per-vehicle suggestion pegs are retired; `updateSuggestions()` is now a dormant no-op.)
-- **Profile schema** (`navigator_profile`): `name, vehicles, rego, van, fuel, height, length, ownedApps[], soloContact{name,phone}`. Old profiles lack the last four — code defaults them; never force a returning user back through setup.
-- **AI request assembly** builds a big `[Context: …]` string (fuel, economy, route, camps, accom, POI, vehicle note, drive time, solo mode, trip plan) prepended to the user's message, and trims the running `messages` array to the last 16 turns to bound payload size.
-- Because everything is one file, keep edits localized and preserve the existing terse, comment-annotated style; update the `#buildStamp` when shipping a user-visible change so the self-update banner works.
+- **Screens & view switching**: `#setupScreen` (first-run) · `#homeScreen` (landing) · `#appView` (results/conversation + map + chat + input). `loadProfile()` decides home-vs-setup; `showHome()` / `openAppView()` / `backHome()` swap them; `homeMic()` opens results and starts listening; `revealMap()` un-hides `#mapWrap`. No overlays gate any of this.
+- **Vehicle profiles** (`VEHICLES`, `FUEL_TYPES`) define per-vehicle fuel range + AI "system notes" (car / caravan / campervan / truck). `updateSuggestions()` is a dormant no-op (pegs retired).
+- **Profile schema** (`navigator_profile`): `name, vehicles, rego, van, fuel, height, length, ownedApps[], soloContact{name,phone}`, plus `everUsedHandsFree`. Old profiles lack later fields — code defaults them; never force a returning user back through setup.
+- **Camps routing**: `answerCamps → loadTripCampRound → campsAnchor` (destination-anchored, with persistence-recovery of `committedDest`) → `getCampsNear` / `getCorridorCamps` → `fetchMergedCamps` → `formatCampsAnswer` + card render. A committed trip anchors camps on the **destination**, not GPS.
+- **AI request assembly** builds a big `[Context: …]` string (fuel, economy, route, camps, accom, POI, vehicle note, drive time, solo mode, trip plan) prepended to the user's message, and trims `messages` to the last 16 turns.
+- Everything is one file — keep edits localized, preserve the terse comment-annotated style, and bump the frontend triad on any user-visible change.
