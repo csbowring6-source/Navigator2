@@ -440,7 +440,9 @@ async function handleCamps2(request, env) {
 //   INCLUDE if  fee explicitly free (no/none/free/0)      — a free site
 //           OR  highway=rest_area                          — a roadside rest area
 //           OR  backcountry=yes                            — a bush/backcountry camp
-//   EXCLUDE if  fee=yes / a charge tag                     — a paid site
+//   EXCLUDE if  a COMMERCIAL NAME (caravan/holiday/tourist park, cabins, resort, motel,
+//               villas) — commercial even with no fee tag; belongs to the Places side
+//           OR  fee=yes / a charge tag                     — a paid site
 //           OR  tourism=caravan_site (not marked free)     — the commercial van-park category
 //   otherwise INCLUDE (an untagged tourism=camp_site is ambiguous → keep it).
 // Edge cases: a rest area is non-commercial even if it carries a nominal fee (the
@@ -448,12 +450,19 @@ async function handleCamps2(request, env) {
 // marked fee=no is kept (explicitly free); access=private is NOT currently filtered
 // (rare, and the include-bias favours surfacing it).
 function campFee(tags) { return String((tags && tags.fee) || "").toLowerCase(); }
+// A NAME that says commercial — a caravan/holiday/tourist park, cabins, resort, motel or
+// villas — is commercial even with NO fee tag (field 30 Jul: "Etty Bay Cabins and Caravan
+// Park" was tagged tourism=camp_site with no fee, so the ambiguity-include wrongly kept it
+// as a free camp). Such a site belongs to the Places side, which carries its number. Rest
+// areas, pubs/hotels/showgrounds and plainly-named camp grounds don't carry these words.
+const COMMERCIAL_NAME = /\b(caravan\s*park|holiday\s*park|tourist\s*park|cabins?|resort|motel|villas?)\b/i;
 function isNonCommercialCamp(tags) {
   const t = tags || {};
   const fee = campFee(t);
   if (fee === "no" || fee === "none" || fee === "free" || fee === "0") return true;   // explicitly free
-  if (t.highway === "rest_area") return true;                                          // rest area
+  if (t.highway === "rest_area") return true;                                          // rest area (name check N/A)
   if (String(t.backcountry || "").toLowerCase() === "yes") return true;                // bush/backcountry camp
+  if (COMMERCIAL_NAME.test(String(t.name || ""))) return false;                        // NAME says commercial → belongs to Places, exclude
   if (fee === "yes" || fee === "true" || (t.charge != null && t.charge !== "")) return false;   // paid
   if (t.tourism === "caravan_site") return false;   // commercial van-park category (deduped vs Places in phase 3)
   return true;                                       // ambiguous camp_site → INCLUDE (bias)
@@ -831,7 +840,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 30 Jul 2026, 08:36 AM AEST (phase 2: adds /camps2-osm — filtered OSM non-commercial camps/rest-areas, shared overpass, KV 7-day TTL, source:osm, additive)";
+const WORKER_BUILD = "Navigator Worker — 30 Jul 2026, 06:30 PM AEST (camps2-osm: name-based commercial exclusion in isNonCommercialCamp — caravan/holiday/tourist park, cabins, resort, motel, villas excluded even with no fee tag)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
