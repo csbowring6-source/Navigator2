@@ -590,7 +590,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 08:28 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 10:43 AM AEST</div>
   </div>
 </div>
 
@@ -825,7 +825,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-0828AM"></script>
+<script src="speech.js?v=31Jul2026-1043AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1976,17 +1976,25 @@ function resumeTrip() {
     updateSuggestions();   // chips announce route-aware mode
     if (raw.cond) document.getElementById('condChip').textContent = `🌤 ${raw.cond}`;
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
+    // ONE restore path (field 31 Jul: the resume button used to bypass the boot restore and land
+    // on a bare pin). A committed trip WITH a matching persisted round re-renders the camp cards
+    // EXACTLY as the boot restore does — same function, not a second copy. Otherwise fall through
+    // to the trip-only opener; the stale-trip confirm still fires on the first query.
+    loadCommittedDest();
+    if (!campRound) loadCampRound();
+    if (resumeMode() === 'round') { resumeCampRoundIfPersisted(); return; }
     openAppView();
     drawCommittedRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
-    // The Navigate offer comes from TRIP STATE — never scraped from chat text.
+    // The Navigate offer comes from TRIP STATE — never scraped from chat text. Bare place name,
+    // no "Navigate to" verb — consistent with every other pin.
     if (currentRunDest) {
       const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
       const bub = bubbles[bubbles.length - 1];
       if (bub) {
         const btn = document.createElement('button'); btn.className = 'nav-btn';
         btn.style.marginTop = '8px';
-        btn.textContent = '📍 Navigate to ' + currentRunDest;
+        btn.textContent = '📍 ' + currentRunDest;
         btn.onclick = () => navigateTo(currentRunDest);
         bub.appendChild(btn);
       }
@@ -2742,7 +2750,7 @@ function addMsg(role,text,spoken){
       if(dest){
         const btn=document.createElement('button'); btn.className='nav-btn';
         const c1 = coordsFor(dest);
-        btn.textContent='📍 Navigate to '+dest+(c1?.mins ? ` (${hrsMins(c1.mins)})` : '')+' — '+mapNames[selectedMap];
+        btn.textContent='📍 '+dest+(c1?.mins ? ` (${hrsMins(c1.mins)})` : '')+' — '+mapNames[selectedMap];
         btn.onclick=()=>navigateTo(dest, c1?.lat, c1?.lon);
         bub.appendChild(btn);
         // Star: remember this stop for the active run
@@ -4025,7 +4033,7 @@ function campOutcome(name, outcome) {
       if (bub) {
         const mn = { apple:'Apple Maps', google:'Google Maps', waze:'Waze', 'maps.me':'Maps.me' }[selectedMap] || 'your maps';
         const b = document.createElement('button'); b.className = 'nav-btn'; b.style.marginTop = '8px';
-        b.textContent = `📍 Navigate to ${site.name} — ${mn}`;
+        b.textContent = `📍 ${site.name} — ${mn}`;
         // Hand off to the preferred nav app with the site's OWN coordinates, exactly
         // as the existing result blocks do (coords beat a name search).
         b.onclick = () => navigateTo(site.name, site.lat, site.lon);
@@ -4891,7 +4899,7 @@ function restoreSession() {
             btn.className = 'nav-btn';
             btn.style.marginTop = idx === 0 ? '8px' : '6px';
             const t = p.mins ? ` — ${hrsMins(p.mins)}` : '';
-            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}${t}` : `📍 Navigate to ${p.name}${t}`;
+            btn.textContent = relevant.length > 1 ? `📍 ${idx+1}. ${p.name}${t}` : `📍 ${p.name}${t}`;
             btn.onclick = () => navigateTo(p.name, p.lat, p.lon);
             lastBub.appendChild(btn);
           });

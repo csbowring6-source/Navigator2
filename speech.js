@@ -113,6 +113,7 @@ let convoReplyPending = false;  // a delivered turn's reply is being composed/sp
 let convoLastStart = 0;         // when convoRec last started (for the alive-check + logging)
 let convoRestarts = 0;          // consecutive reopens with NO capture — bounded, never infinite
 let convoCued = false;          // close cue already played this session? (at most once)
+let openCued = false;           // OPEN cue already played for the CURRENT driver-turn window? reset by setMicState whenever the mic leaves listening/recording (→ never re-fires on an internal restart, only on a genuine new turn)
 let convoLastError = '';        // last onerror reason, for the honest-fail log
 const CONVO_MAX_RESTARTS = 3;   // after this many rapid empty reopens, stop + honest fallback
 const CONVO_HEALTHY_MS = 2000;  // an onend later than this = genuine listening (just quiet), not a fail
@@ -145,6 +146,7 @@ function openConversation() {
   convoSetState('listening');       // session open, waiting for speech
   convoStartRecogniser();          // creates + starts convoRec IN the gesture
   convoUndelivered = 0;            // the opening start is not an "undelivered reopen" — only reopens AFTER open count toward the churn ceiling
+  if (convoActive) convoOpenCue(); // audible RISING cue — the session just opened for the driver
   convoArmSilence();
   // Warm the mic ONLY where it demonstrably helps. On Android Chrome a held
   // getUserMedia stream blocks SpeechRecognition from acquiring the mic (the
@@ -330,7 +332,7 @@ function convoOffer() {
   // oscillation guards on resume so the answer's speech onset can never be the flip/reopen
   // that trips a ceiling (the field close-fired-exactly-on-speechstart bug). The offer
   // fires at most once per quiet spell, so this can't be gamed into masking a real churn.
-  const resume = () => { clearTimeout(convoResumeTimer); convoResumeTimer = setTimeout(() => { convoSpeaking = false; if (convoActive) { convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState('listening'); convoStartRecogniser(); } }, CONVO_TTS_TAIL_MS); };
+  const resume = () => { clearTimeout(convoResumeTimer); convoResumeTimer = setTimeout(() => { convoSpeaking = false; if (convoActive) { convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoOpenCue(); } }, CONVO_TTS_TAIL_MS); };   // "anything else?" spoken → mic reopens for the driver → RISING cue (once)
   try {
     synth && synth.cancel();
     const u = new SpeechSynthesisUtterance('Anything else?');
@@ -339,6 +341,37 @@ function convoOffer() {
     u.onerror = resume;
     synth ? synth.speak(u) : resume();
   } catch (e) { resume(); }
+}
+
+// A short RISING tone so a driver not looking at the screen HEARS the moment the mic opens
+// for them (field 31 Jul: the "Listening" label is invisible while driving). Deliberately the
+// opposite character to the close cue (which falls): this glides UP. Fires ONLY from the genuine
+// turn-start call sites (session open, one-shot start, reply/offer-end reopen) — NEVER from the
+// onstart/reopen churn path. Two hard guards from the beep-loop history: (1) openCued caps it at
+// ONE per driver-turn window (setMicState clears the flag only when the mic leaves listening/
+// recording, so an internal restart that re-enters 'listening' can't re-fire it); (2) the mic must
+// currently BE open for the driver (listening/recording) — so it's silent during TTS ('speaking'),
+// thinking ('thinking') and after a close ('off'). Logged as `cue open`, mirroring the close cue.
+function convoOpenCue() {
+  if (openCued) return;                                              // at most ONE per driver-turn window — never per restart
+  if (micState !== 'listening' && micState !== 'recording') return;  // only when the mic is genuinely open for the driver (never TTS/thinking/off)
+  openCued = true;
+  logEvent('cue', 'open');
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = convoAudioCtx || (Ctx && new Ctx());
+    if (!ctx) return; convoAudioCtx = ctx;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(494, t);                        // rising glide (the close cue is a flat/falling 420)
+    o.frequency.exponentialRampToValueAtTime(784, t + 0.18);   // ~B4 → ~G5
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.15, t + 0.03);       // quick soft attack
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);      // gentle decay
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t); o.stop(t + 0.24);
+  } catch (e) {}
 }
 
 // A short beep so a driver not looking at the screen knows the session closed.
@@ -415,6 +448,10 @@ function setMicState(state) {
   if (!MIC_META[state]) state = 'off';
   if (state !== micState) logEvent('state', state);
   micState = state;
+  // OPEN-cue window boundary: leaving the driver's listening/recording window (to off/thinking/
+  // speaking) arms the next open cue; staying within it (a listening<->recording flip, or an
+  // internal restart that re-enters 'listening') does NOT — so churn can never re-trigger the cue.
+  if (state !== 'listening' && state !== 'recording') openCued = false;
   // THE button is now the SOLE mic indicator, and it lives IN the input row (compact, no
   // full-width bar). So the label is a short state WORD only (colour rides in the class):
   // idle names the FEATURE for discovery, the live states are one word each. This drops the
@@ -698,6 +735,7 @@ async function startCloudCapture() {
   cloudActive = true; captureActive = true;
   showCaptured('');
   setMicState('recording');    // one-shot cloud capture is live — a tap SENDS
+  convoOpenCue();              // one-shot mic actually started → RISING cue (once)
   armRecordingSilence();
   clearTimeout(recMaxTimer);
   recMaxTimer = setTimeout(() => { if (cloudActive) { cloudEndReason = 'cutoff'; stopCloudCapture(true); } }, REC_MAX_MS);   // hard cutoff — likely mid-word
@@ -851,7 +889,7 @@ function startRecogniser() {
   recognition.continuous = true;       // hold the line through pauses
   recognition.interimResults = true;   // so partials can be shown and stitched
 
-  recognition.onstart = () => { isListening = true; logEvent('rec.onstart', 'basic'); setMicState('recording'); };   // basic ears open — a tap SENDS
+  recognition.onstart = () => { isListening = true; logEvent('rec.onstart', 'basic'); setMicState('recording'); convoOpenCue(); };   // basic ears open — a tap SENDS; RISING cue (openCued caps it at once even though basic restarts continuously)
 
   recognition.onresult = e => {
     // Rebuild both segments from scratch every event (e.results is cumulative).
@@ -1046,7 +1084,7 @@ function _afterSpeak() {
     // driver gets the FULL fresh grace (the compose/TTS cycles were suspended, never counted)
     // and the resume reopen counts as the first idle driver-turn cycle, exactly as the ceiling
     // was designed. convoStartRecogniser may close the session (reopen ceiling) — re-check.
-    if (convoActive) { convoReplyPending = false; convoUndelivered = 0; convoSetState('listening'); convoStartRecogniser(); if (convoActive) convoArmSilence(); }
+    if (convoActive) { convoReplyPending = false; convoUndelivered = 0; convoSetState('listening'); convoStartRecogniser(); if (convoActive) { convoArmSilence(); convoOpenCue(); } }   // reply done (tts.end + tail) → driver's turn again → RISING cue (once)
   }, CONVO_TTS_TAIL_MS);
 }
 
@@ -1066,7 +1104,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '31 Jul 2026, 08:28 AM AEST',
+    BUILD: '31 Jul 2026, 10:43 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

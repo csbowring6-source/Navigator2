@@ -90,6 +90,7 @@ const tts = { start: () => H.utt && H.utt.onstart && H.utt.onstart(), end: () =>
 
 const kinds = () => Voice.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
 const count = (k) => Voice.getLog().filter(e => e.kind === k).length;
+const countCue = (which) => Voice.getLog().filter(e => e.kind === "cue" && e.detail === which).length;   // open vs close cues
 function fresh() { Voice.clearLog(); delivered = 0; busyFlag = false; H.started = 0; H.stopped = 0; H.rec = null; H.utt = null; }
 
 let ok = true;
@@ -104,7 +105,8 @@ advance(2800);                     // end-of-turn pause fires the deliver timer.
 advance(600);                      // ...then the deliver->send debounce calls onTranscript
 check("transcript delivered once", delivered === 1);
 check("no close during a normal turn", count("close") === 0);
-check("no cue during a normal turn", count("cue") === 0);
+check("exactly ONE open cue at session open (the driver's turn began)", countCue("open") === 1);
+check("no close cue during a normal (non-closing) turn", countCue("close") === 0);
 Voice.closeSession("tap");
 
 // ── SCENARIO 2: TTS overlap — no capture while the app speaks ─────────────────
@@ -127,8 +129,8 @@ fresh();
 Voice.openSession();
 for (let i = 0; i < 12; i++) { rec.onstart(); rec.end(); advance(300); }   // sub-healthy reopens
 check("session closed honestly", kinds().some(k => k.startsWith("close:honest")));
-check("cue fired at most once", count("cue") <= 1);
-check("cue fired exactly once (a real close)", count("cue") === 1);
+check("close cue fired exactly once (a real honest close)", countCue("close") === 1);
+check("churn added NO cues: exactly one OPEN cue at session start, ZERO per restart", countCue("open") === 1);
 
 // ── SCENARIO 4: ambient-noise finalisation loop, VARIED cycle length ──────────
 // Interim ambient resets the old restart cap (the leak) but never delivers; the
@@ -146,7 +148,8 @@ for (const spacings of [[250,250,250,250,250], [100,5000,100,4000,100], [1900,19
     closed = kinds().some(k => k.startsWith("close:"));
   }
   check("closed with no delivered turn [spacings " + spacings.join(",") + "]", closed && delivered === 0);
-  check("...cue exactly once", count("cue") === 1);
+  check("...close cue exactly once", countCue("close") === 1);
+  check("...one open cue at start, none from the ambient churn", countCue("open") === 1);
 }
 
 // ── SCENARIO 5: the four close paths — each closes, cue once, state off ───────
@@ -155,7 +158,7 @@ for (const reason of ["tap", "phrase", "silence", "honest"]) {
   fresh();
   Voice.openSession(); rec.onstart();
   Voice.closeSession(reason);
-  check(reason + ": cue once + state off", count("cue") === 1 && Voice.state() === "off");
+  check(reason + ": one open cue at start + one close cue + state off", countCue("open") === 1 && countCue("close") === 1 && Voice.state() === "off");
 }
 
 // ── SCENARIO 6: REPLAY a pasted field log ─────────────────────────────────────
@@ -184,7 +187,7 @@ function replay(log) {
 }
 replay(fieldLog);
 check("replay reproduces the honest close", kinds().some(k => k.startsWith("close:honest")));
-check("replay reproduces exactly one cue", count("cue") === 1);
+check("replay reproduces exactly one close cue (+ one open at start, none per restart)", countCue("close") === 1 && countCue("open") === 1);
 check("replay delivered nothing (matches the field failure)", delivered === 0);
 
 // ── SCENARIO 7: TIMED replay of the 28 Jul 10:11AM convo beep-loop field log ───
@@ -219,7 +222,8 @@ to(25.5); trackedSpeech();
 to(43.0); trackedSpeech();
 check("turn 1 delivered (its results were NOT lost)", delivered === 1);
 check("the beep loop closed honestly", kinds().some(k => k.startsWith("close:honest")));
-check("exactly one close cue (not one per restart)", count("cue") === 1);
+check("exactly one close cue (not one per restart)", countCue("close") === 1);
+check("open cues ONLY at genuine turn-starts (session open + reply-end reopen = 2), none from the ~5s churn", countCue("open") === 2);
 check("closed by the reopen ceiling in ~3 reopens, not 13", count("reopen") <= 4, "reopens=" + count("reopen"));
 check("no undelivered speechstarts — driver speech is never left ignored while 'listening'", openSpeechPending === 0);
 check("session is CLOSED at the end", Voice.isSessionOpen() === false);
@@ -252,7 +256,8 @@ to(31.5);                                 // the answer delivers (~30.6); its ha
 check("session stayed OPEN through the driver's answer (speech not used to close)", openBefore === true && Voice.isSessionOpen() === true);
 check("the driver's answer during the offer window was CAPTURED (delivered)", delivered === 2);
 check("no honest close fired on the answer's speechstart", !kinds().some(k => k.startsWith("close:honest")));
-check("no close cue during the offer answer", count("cue") === 0);
+check("no CLOSE cue during the offer answer (the session never closed)", countCue("close") === 0);
+check("an open cue fired at each genuine turn-start: session open + reply-end reopen + offer reopen = 3", countCue("open") === 3);
 
 // ── SCENARIO 9: both engines' restart churn is bounded (source of the fix) ─────
 console.log("\n--- 9. both engines' restart churn is bounded (fix covers the basic engine too) ---");
@@ -295,6 +300,7 @@ to(20.1); tts.start();
 const closesAtSpeechStart = count("close");
 to(35.0);                                 // ~15s into the 30s reply — WITHOUT the fix, 'close silence' fires here (~47s abs)
 check("no close DURING the reply (silence clock is paused)", count("close") === closesAtSpeechStart, "closes=" + count("close"));
+check("no OPEN cue during the reply — the cue is SILENT while the app speaks (TTS/thinking)", countCue("open") === 1, "open=" + countCue("open"));
 check("still speaking mid-reply — the reply was not truncated", Voice.state() === "speaking");
 check("no anything-else offer interrupted the reply", count("offer") === 0);
 to(50.1); tts.end();                      // 30-second reply ends
@@ -306,7 +312,8 @@ check("session open through the reopen tail, still no close", Voice.isSessionOpe
 to(97.0);                                 // > tts.end(50.1)+tail(0.6)+45s -> honest silence close
 check("closes only after GENUINE driver silence afterwards", kinds().some(k => k === "close:silence"));
 check("session is closed at the end", Voice.isSessionOpen() === false);
-check("exactly one close cue for the whole session", count("cue") === 1);
+check("exactly one close cue for the whole session", countCue("close") === 1);
+check("open cues only at the two turn-starts (session open + the post-reply reopen), none mid-reply", countCue("open") === 2);
 // source-lock the fix: speak() clears BOTH session-lifetime timers as the reply begins
 check("speak() pauses the silence + offer clocks while the app speaks",
   /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
@@ -410,7 +417,8 @@ advance(300); rec.onstart();          // restart 2 — still progress
 rec.speech(); rec.final("are there any campsites near innisfail"); advance(1500); rec.end();
 advance(300); rec.onstart();          // restart 3 — still progress
 check("NEVER closed while the driver spoke across the 3 restarts", !kinds().some(k => k.startsWith("close")));
-check("no cue fired mid-speech", count("cue") === 0);
+check("open cue only at session start — the 3 mid-speech restarts add ZERO cues", countCue("open") === 1);
+check("no close cue mid-speech", countCue("close") === 0);
 check("speechstart cycles logged as progress, not an accumulating count", count("reopen") >= 1 && kinds().includes("reopen:progress"));
 // the driver finally PAUSES -> the accumulated turn delivers, session stays open
 advance(2800); advance(600);
@@ -464,7 +472,7 @@ check("the driver's turn delivered", delivered === 1);
 busyFlag = true;
 for (let i = 0; i < 5; i++) { rec.onstart(); advance(2500); rec.end(); advance(300); }   // ~14s of empty (healthy-length) cycles
 check("NO close during the ~14s compose gap", !kinds().some(k => k.startsWith("close")), kinds().join(","));
-check("no cue fired while thinking", count("cue") === 0);
+check("no NEW cue while thinking — the only open cue was at session start, none from the compose-gap cycles", countCue("open") === 1 && countCue("close") === 0);
 // compose done — the reply plays and ends
 busyFlag = false;
 Voice.speak("Three parks near Innisfail, closest first.");
@@ -482,6 +490,25 @@ Voice.closeSession("tap");
 // source-lock the fix: the no-progress ceiling is suspended while a reply is pending / thinking / speaking
 check("no-progress ceiling suspended across deliver -> reply-finished",
   /if \(convoReplyPending \|\| convoSpeaking \|\| _isBusy\(\)\) return false;/.test(SRC) && /convoReplyPending = true;/.test(SRC));
+
+// ── SCENARIO 15: ONE-SHOT capture start fires the OPEN cue once ───────────────
+// The third turn-start trigger (alongside session open + reply-end reopen): a one-shot mic tap.
+// The bench has no MediaRecorder, so startListening() takes the BASIC Web-Speech path; its
+// onstart fires the RISING cue. Basic restarts continuously — the openCued guard caps it at one.
+console.log("\n--- 15. one-shot capture start: one open cue, none from the basic restart churn ---");
+Voice.closeSession("tap");                     // make sure no session owns the mic
+fresh(); timers.length = 0;
+Voice.toggleCapture();                          // one-shot tap → startListening() (async granted-mic gate)
+for (let i = 0; i < 6; i++) await Promise.resolve();   // flush the permission microtasks so the recogniser is built
+rec.onstart();                                  // the one-shot mic actually opens → RISING cue
+check("one-shot start fired exactly ONE open cue", countCue("open") === 1, "open=" + countCue("open"));
+check("one-shot mic is 'recording' (a tap SENDS)", Voice.state() === "recording");
+rec.end(); rec.onstart(); rec.end(); rec.onstart();   // basic restart churn — re-enters 'recording' each time
+check("basic restart churn adds NO further open cues (openCued caps it)", countCue("open") === 1, "open=" + countCue("open"));
+check("no close cue during one-shot capture", countCue("close") === 0);
+// source-lock: the open cue is wired at BOTH one-shot start points (cloud recorder start + basic onstart)
+check("open cue wired at the one-shot cloud start", /setMicState\('recording'\);    \/\/ one-shot cloud capture is live[\s\S]{0,80}?convoOpenCue\(\)/.test(SRC));
+check("open cue wired at the one-shot basic onstart", /recognition\.onstart = \(\) => \{[^}]*setMicState\('recording'\); convoOpenCue\(\);/.test(SRC));
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
