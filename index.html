@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 06:05 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 06:32 PM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-0605PM"></script>
+<script src="speech.js?v=04Aug2026-0632PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3551,20 +3551,19 @@ function formatCampsAnswer(res) {
   const where = res.near ? `near ${res.place}` : res.directional ? 'ahead' : 'nearby';
   const wPrefix = res.widened ? 'Nothing inside the hour — ' : '';
   const timeOf = s => s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
-  // ── SPOKEN — INFORMATION ONLY once the cards render. Shape: "<N> parks near <place>. Nearest:
-  // up to three names+times. Rest on screen. Plus <M> free." Nothing else — no amenity spiel, no
-  // "unconfirmed"/"worth asking", no closing offer. Digits/amenities are NEVER spoken. ──
-  let spoken;
-  if (!nP && nF) {
-    spoken = `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}, below.`;
-  } else {
-    const named = parks.slice(0, 3).map(s => `${s.name}, ${timeOf(s)}`);
-    spoken = `${wPrefix}${nP} ${nP === 1 ? 'park' : 'parks'} ${where}.`;
-    if (named.length) spoken += ` Nearest: ${named.join('; ')}.`;
-    const moreParks = nP - named.length;             // the remainder clause names WHERE the rest are —
-    if (moreParks > 0) spoken += ` ${moreParks} more below.`;   // omitted entirely when nothing is unshown
-    if (nF) spoken += ` Plus ${nF} free below.`;
-  }
+  // ── SPOKEN (field 4 Aug) — BOTH counts up front, then the nearest three (colour-blind, the list is
+  // mins-sorted and INTERLEAVED), then a remainder that counts ALL unspoken rows regardless of colour.
+  // Shape: "<N> parks and <M> free camps near <place>. Nearest: name, time; name, time; name, time.
+  // <K> more below." The free-camps clause is omitted when M=0; the remainder is omitted when nothing
+  // is unshown. NO "free" wording in the remainder — interleaving means free sites aren't reliably
+  // below. Information only — no amenity spiel, no "unconfirmed", no offer; digits are NEVER spoken. ──
+  const named = shown.slice(0, 3).map(s => `${s.name}, ${timeOf(s)}`);   // the nearest three overall
+  const parksPart = nP ? `${nP} ${nP === 1 ? 'park' : 'parks'}` : '';
+  const freePart  = nF ? `${nF} free ${nF === 1 ? 'camp' : 'camps'}` : '';
+  let spoken = `${wPrefix}${[parksPart, freePart].filter(Boolean).join(' and ') || 'nothing'} ${where}.`;
+  if (named.length) spoken += ` Nearest: ${named.join('; ')}.`;
+  const more = shown.length - named.length;   // ALL unspoken rows, colour-blind
+  if (more > 0) spoken += ` ${more} more below.`;
   if (res.osmDown) spoken += " Couldn't check free camps just now.";   // honest failure, trimmed
   // ── BANNER text — HONEST header via campHeaderText (ONE source of truth, shared with the filter
   // chips' on-tap updates). Full "<N> parks + <M> free camps near <place>" for the ALL filter.
