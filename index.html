@@ -171,6 +171,10 @@
   .camp-card.tried .camp-pin{opacity:0.6;}
   .camp-card.tried .camp-call.greyed{opacity:0.45;border-color:var(--gray3);color:var(--gray3);}
   .camp-card.next-up .camp-pin{box-shadow:0 0 0 2px rgba(255,255,255,0.85);}
+  /* RESULTS FILTER CHIPS — All | Parks | Free, at the top of a camps result (field 4 Aug). */
+  .camp-filters{display:flex;gap:6px;margin:4px 0 2px;}
+  .camp-filter-chip{flex:none;background:var(--navy3);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:4px 12px;font-size:11.5px;font-weight:600;color:var(--gray2);cursor:pointer;font-family:'Inter',sans-serif;min-height:30px;}
+  .camp-filter-chip.active{background:var(--amber);border-color:var(--amber);color:var(--navy);}
   .feedback-row{display:flex;gap:6px;margin-top:7px;align-items:center;}
   .fb-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:4px 9px;font-size:13px;cursor:pointer;opacity:0.6;transition:opacity 0.2s;}
   .fb-btn:hover{opacity:1;border-color:rgba(245,166,35,0.4);}
@@ -518,11 +522,13 @@
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo" onclick="toggleVersionLine()" title="Tap for version">
+  <div class="logo" onclick="backHome()" title="Home">
     <div class="logo-icon">🧭</div>
     <div><div class="logo-text">Navigator</div></div>
   </div>
   <div class="header-right">
+    <!-- Map show/hide moved UP from the old second row; hidden until a query returns mappable results (offerMap) -->
+    <button class="appview-back" id="mapToggle" onclick="toggleMapView()" style="display:none;">🗺 Map</button>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -541,6 +547,7 @@
         <div class="menu-item" onclick="menuGo('setup')">⚙ Edit setup<span>Name · rig · fuel · apps</span></div>
         <div class="menu-item" onclick="menuGo('trip')">↺ Clear this trip<span>Wipes chat and trip. Keeps your profile.</span></div>
         <div class="menu-item danger" onclick="menuGo('fresh')">⚠ Start completely fresh<span>Erases everything. Back to setup.</span></div>
+        <div class="menu-item" onclick="menuGo('version')">ⓘ Version<span>Build stamp + update check</span></div>
       </div>
     </div>
     <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
@@ -603,19 +610,13 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 01:11 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 02:42 PM AEST</div>
   </div>
 </div>
 
 <!-- APP / RESULTS VIEW — the map is wallpaper here, revealed only on results -->
 <div id="appView" class="hidden">
-  <div class="appview-bar">
-    <button class="appview-back" onclick="backHome()">← Home</button>
-    <div class="appview-title">Navigator</div>
-    <button class="appview-back" id="mapToggle" onclick="toggleMapView()"
-            style="display:none;margin-left:auto;">🗺 Map</button>
-  </div>
-
+  <!-- Second nav row removed (field 4 Aug): Home is now the top-left title, Map moved into the top header row. -->
   <!-- MAP (revealed only when a query returns mappable results — SPEC §10) -->
   <div class="map-wrap" id="mapWrap" style="display:none;">
     <div id="map">
@@ -642,7 +643,7 @@
     <div class="ctx-chip" id="soloChip" onclick="toggleChip(this)">🧍 Solo</div>
     <div class="ctx-chip" id="fuelTypeChip" onclick="setFuelType()" style="display:none;">⛽ U91</div>
     <div class="ctx-chip" id="rangeChip" onclick="setRange()" style="display:none;">🛣 Range</div>
-    <div class="ctx-chip" id="condChip" onclick="setCond()">🌤 Conditions</div>
+    <div class="ctx-chip" id="condChip" onclick="setCond()" style="display:none;">🌤 Conditions</div>
     <div class="ctx-chip" id="logChip" onclick="openFillSheet()" style="display:none;">📒 Fill-up</div>
   </div>
 
@@ -838,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-0111PM"></script>
+<script src="speech.js?v=04Aug2026-0242PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -982,6 +983,7 @@ async function adoptTrip(dest) {
   currentRunDest = dest;
   destReaskCount = 0;    // committed — clear the re-ask escalation
   tripMode = '';         // new trip — mode not known until the driver says
+  campFilter = 'all';    // new trip — the results filter resets to ALL
   campsOwed = false;     // new trip — no camps owed until THIS trip's utterance asks (set moments later by setPending)
   updateSuggestions();   // chips announce route-aware mode
   tripContext = `Destination: ${dest}.`;
@@ -2555,6 +2557,7 @@ function menuGo(what) {
   if (what === 'setup') openSetup(true);
   else if (what === 'trip') clearThisTrip();          // confirms, then wipes chat/trip
   else if (what === 'fresh') startCompletelyFresh();  // confirms, then wipes everything
+  else if (what === 'version') toggleVersionLine();   // the title is now Home, so version lives here
 }
 
 // Tap anywhere else closes the menus rather than leaving them hanging open
@@ -3560,15 +3563,13 @@ function formatCampsAnswer(res) {
     if (nF) spoken += ` Plus ${nF} free below.`;
   }
   if (res.osmDown) spoken += " Couldn't check free camps just now.";   // honest failure, trimmed
-  // ── BANNER text — HONEST header: the REAL counts of what is shown, split by colour (field 4 Aug:
-  // "5 parks near Innisfail" above a 10-row list read as an undercount). "<N> parks + <M> free camps".
-  const parksStr = nP ? `${nP} ${nP === 1 ? 'park' : 'parks'}` : '';
-  const freeStr  = nF ? `${nF} free ${nF === 1 ? 'camp' : 'camps'}` : '';
-  let text = `${wPrefix}${[parksStr, freeStr].filter(Boolean).join(' + ') || 'nothing'} ${where}:`;
-  if (res.osmDown) text += " Couldn't check free camps just now.";
+  // ── BANNER text — HONEST header via campHeaderText (ONE source of truth, shared with the filter
+  // chips' on-tap updates). Full "<N> parks + <M> free camps near <place>" for the ALL filter.
+  const meta = { nP, nF, where, wPrefix, osmDown: !!res.osmDown };
   return {
-    text,
+    text: campHeaderText(nP, nF, 'all', where, wPrefix, res.osmDown),
     spoken,
+    meta,   // {nP, nF, where, wPrefix, osmDown} — for the results filter chips (All | Parks | Free)
     // Cards / ring-around / pins see the SHOWN list (commercial + free, time-ordered, ≤10). Free
     // camps carry source:'osm' so campCardNote gives them the neutral note (never the miss apology).
     sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
@@ -3746,7 +3747,7 @@ function needsStaleTripConfirm(isFirst, hasTrip, text) {
 }
 // Drop a leftover trip WITHOUT the confirm dialog / chat wipe of clearThisTrip.
 function clearLeftoverTrip() {
-  tripContext = ''; currentRunDest = ''; committedDest = null; tripMode = ''; campsOwed = false; window._tripRoute = null;
+  tripContext = ''; currentRunDest = ''; committedDest = null; tripMode = ''; campsOwed = false; campFilter = 'all'; window._tripRoute = null;
   try {
     localStorage.removeItem('navigator_last_trip');
     localStorage.removeItem('navigator_last_trip_raw');
@@ -3894,6 +3895,27 @@ const CAMP_ROUND_KEY = 'navigator_camp_round';
 const CAMP_ROUND_MAX_AGE = 6 * 60 * 60 * 1000;   // one night's ring-around, not forever
 let campRound = null;            // {place, query, sites:[{name,lat,lon,km,mins,phone}], tried:[names], calledSite, ts}
 let campOutcomePending = null;   // the site we've already shown an outcome prompt for (dedupe focus events)
+// RESULTS FILTER (field 4 Aug): All | Parks | Free. Default ALL; lasts the SESSION; reset to ALL on a
+// new trip (adoptTrip). A spoken preference ("free camps only") pre-selects the chip. No question is
+// ever asked. Filtering shows/hides rendered rows + updates the header counts — never re-fetches.
+let campFilter = 'all';          // 'all' | 'parks' | 'free'
+function campFilterFromText(t) { // a spoken preference → a pre-selected chip, else null (keep the session choice)
+  const s = (t || '').toLowerCase();
+  if (/\b(free\s?camps?\s?only|only\s?free|just\s?free|free\s?only|no\s?(caravan\s?)?parks?)\b/.test(s)) return 'free';
+  if (/\b((caravan\s?)?parks?\s?only|only\s?(caravan\s?)?parks?|just\s?(caravan\s?)?parks?|no\s?free\s?camps?)\b/.test(s)) return 'parks';
+  return null;
+}
+// The banner header for a given filter — ONE source of truth for the initial answer AND on-tap updates.
+function campHeaderText(nP, nF, filter, where, wPrefix, osmDown) {
+  const parksStr = nP ? `${nP} ${nP === 1 ? 'park' : 'parks'}` : '';
+  const freeStr  = nF ? `${nF} free ${nF === 1 ? 'camp' : 'camps'}` : '';
+  const counts = filter === 'parks' ? (parksStr || '0 parks')
+               : filter === 'free'  ? (freeStr || '0 free camps')
+               : ([parksStr, freeStr].filter(Boolean).join(' + ') || 'nothing');
+  let text = `${wPrefix || ''}${counts} ${where}:`;
+  if (osmDown) text += " Couldn't check free camps just now.";
+  return text;
+}
 let campWidenScale = 1;          // radius multiplier the search reads; only "widen" changes it
 let lastBookedSite = null;       // {name,lat,lon,mins} of the just-booked site, for a Navigate handoff
 
@@ -3953,6 +3975,8 @@ function resumeCampRoundIfPersisted() {
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
   const bub = bubbles[bubbles.length - 1];
   renderCampCards(bub, campRound.sites);
+  // Filter chips on restore too (choice lasts the session), but KEEP the reassurance banner (field QAKH2GZ).
+  renderCampFilterChips(bub, { nP: campRound.sites.filter(s => !isFreeGroupEligible(s)).length, nF: campRound.sites.filter(s => isFreeGroupEligible(s)).length, where: currentRunDest ? 'near ' + currentRunDest : 'nearby', keepBanner: true });
   scrollFirstCardIntoView(bub);          // restore lands with card 1 at the top, same as a live answer
   const pins = campRound.sites.filter(s => s.lat != null && s.lon != null).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }));
   window._pendingPins = pins;
@@ -4422,6 +4446,39 @@ function renderRoundCards(bub, sites, tried, nextUp) {
     if (nextUp && s.name === nextUp) card.className += ' next-up';
   });
 }
+// RESULTS FILTER CHIPS (field 4 Aug): three compact chips — All | Parks | Free — at the top of a camps
+// result. Tapping filters the rendered rows instantly and updates the header counts; NO question is
+// ever asked, no re-fetch. The choice is the session's campFilter (pre-selectable by a spoken preference).
+function renderCampFilterChips(bub, meta) {
+  if (!bub || !meta) return;
+  bub._campMeta = meta;
+  const row = document.createElement('div'); row.className = 'camp-filters';
+  [['all', 'All'], ['parks', 'Parks'], ['free', 'Free']].forEach(([val, label]) => {
+    const chip = document.createElement('button'); chip.className = 'camp-filter-chip'; chip._filter = val; chip.textContent = label;
+    chip.onclick = () => { campFilter = val; applyCampFilter(bub); };
+    row.appendChild(chip);
+  });
+  const p = bub.querySelector('p');
+  if (p && p.parentNode) p.parentNode.insertBefore(row, p.nextSibling);   // between the header and the cards
+  else bub.insertBefore(row, bub.firstChild);
+  applyCampFilter(bub);   // apply the current session filter (incl. a spoken pre-selection) on first render
+}
+// Apply campFilter to a rendered camps bubble: show/hide rows by nature, highlight the active chip,
+// and rebuild the header counts. Pure DOM — no re-fetch, no question.
+function applyCampFilter(bub) {
+  if (!bub) return;
+  const meta = bub._campMeta || {};
+  bub.querySelectorAll('.camp-card').forEach(c => {
+    const isFree = (c.className || '').split(' ').includes('free');
+    const show = campFilter === 'all' || (campFilter === 'parks' && !isFree) || (campFilter === 'free' && isFree);
+    c.style.display = show ? '' : 'none';
+  });
+  const frow = bub.querySelector('.camp-filters');
+  if (frow) frow.querySelectorAll('.camp-filter-chip').forEach(ch => { ch.className = 'camp-filter-chip' + (ch._filter === campFilter ? ' active' : ''); });
+  // Rebuild the counts header — UNLESS this bubble keeps its own banner (the restore reassurance line).
+  const p = bub.querySelector('p');
+  if (p && !meta.keepBanner) p.textContent = campHeaderText(meta.nP || 0, meta.nF || 0, campFilter, meta.where || 'nearby', meta.wPrefix, meta.osmDown);
+}
 // After the cards render, bring the FIRST card to the top of the chat viewport so the answer's
 // prose scrolls up out of the way and card 1 is immediately reachable (scroll up to re-read the
 // prose). REGRESSION FIX: addMsg's `scrollTop = scrollHeight` runs when the bubble holds only the
@@ -4436,6 +4493,7 @@ function scrollFirstCardIntoView(bub) {
   return true;
 }
 async function answerCamps(scanText) {
+  const pref = campFilterFromText(scanText); if (pref) campFilter = pref;   // a spoken preference pre-selects the chip (no question asked)
   const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
   campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
@@ -4446,6 +4504,7 @@ async function answerCamps(scanText) {
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
   const bub = bubbles[bubbles.length - 1];
   renderCampCards(bub, ans.sites);
+  renderCampFilterChips(bub, ans.meta);  // All | Parks | Free — applies the current/pre-selected filter
   scrollFirstCardIntoView(bub);          // card 1 to the top; prose scrolls up out of the way
 }
 
