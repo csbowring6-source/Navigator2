@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 03:16 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 03:50 AM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=05Aug2026-0316AM"></script>
+<script src="speech.js?v=05Aug2026-0350AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4603,10 +4603,13 @@ async function fetchCamps() {
   const list = res.sites.map(s => {
     const am = campAmenities(s);
     const price = s.fee === 'no' ? 'FREE' : (s.fee === 'yes' ? null : 'price unconfirmed');   // 'paid' removed — noise
-    const ph = verifiedPhone(s) ? `phone ${verifiedPhone(s)}` : 'NUMBER NOT FOUND BY LOOKUP';
-    return `${s.name} (${s.type}) — ${timePhrase(s)}${price ? ', ' + price : ''}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}; ${ph}`;
+    // A missing phone is stated NOWHERE in the message (field 5 Aug): the park's on-screen
+    // card is the single home for number status (miss note / absent call control). The AI
+    // must not repeat it — so an unnumbered site simply lists no phone field at all.
+    const ph = verifiedPhone(s) ? `; phone ${verifiedPhone(s)}` : '';
+    return `${s.name} (${s.type}) — ${timePhrase(s)}${price ? ', ' + price : ''}; ${am.known.length?am.known.join(', '):'nothing confirmed'}${am.unknown.length?`; unconfirmed: ${am.unknown.join(', ')}`:''}${ph}`;
   }).join(' | ');
-  return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here. "NUMBER NOT FOUND BY LOOKUP" means OUR lookup missed it — never say the park has no phone; say we couldn't find it and they can search or ask on arrival.`;
+  return `CAMPS — ${res.directional ? 'AHEAD on the '+currentRunDest+' route only' : 'nearest by road'}, real drive times:${res.widened?' (nothing inside the hour — say so first)':''} ${list}. A blank field is neither yes nor no — say "unconfirmed"; NEVER speak a number not given here. Some sites list no phone — do NOT mention missing numbers at all, in text or aloud (the on-screen cards carry each park's number status); never state or imply that a park has no phone.`;
 }
 
 // ── NEARBY FUEL STATIONS — proximity ground truth (OSM, all brands, no prices) ─
