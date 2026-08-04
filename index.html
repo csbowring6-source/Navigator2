@@ -140,6 +140,12 @@
   .msg-bubble{padding:10px 13px;border-radius:12px;font-size:13px;line-height:1.65;max-width:calc(100% - 38px);}
   .msg.user .msg-bubble{background:var(--navy3);border:1px solid rgba(255,255,255,0.08);border-top-right-radius:3px;color:var(--gray1);}
   .msg.nav .msg-bubble{background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);border-top-left-radius:3px;}
+  /* A camps RESULTS block spans the usable chat width (field 4 Aug): drop the avatar column + the
+     max-width cap, tiny bubble padding — cards fill the width minus a small uniform gutter (the
+     chat-area's 14px padding + 6px bubble = 20px each side), so names get more characters. */
+  .msg.cards-msg{max-width:none;}
+  .msg.cards-msg .msg-avatar{display:none;}
+  .msg.cards-msg .msg-bubble{max-width:100%;width:100%;padding:8px 6px;}
   .nav-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;margin-top:8px;background:var(--amber);color:var(--navy);border:none;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;width:100%;}
   /* SINGLE-ROW camp cards (field 31 Jul): the pin button IS the card — "📍 N. Name — time" on ONE
      row (no "Navigate" word; name ellipsises, time pinned). Commercial = amber + a compact icon-only
@@ -597,7 +603,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 12:50 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 01:11 PM AEST</div>
   </div>
 </div>
 
@@ -832,7 +838,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-1250PM"></script>
+<script src="speech.js?v=04Aug2026-0111PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3481,7 +3487,7 @@ function hrsMins(totalMins) {
   const t = Math.max(0, Math.round(totalMins));
   if (t < 60) return `${t} min`;
   const h = Math.floor(t / 60), m = t % 60;
-  return m ? `${h} hr ${m}` : `${h} hr`;
+  return m ? `${h} hr ${String(m).padStart(2, '0')}` : `${h} hr`;   // pad the minute remainder — "1 hr 06", not "1 hr 6"
 }
 function hrsMinsSpoken(totalMins) {
   const t = Math.max(0, Math.round(totalMins));
@@ -3526,10 +3532,13 @@ function formatCampsAnswer(res) {
   }
   const commercial = (res.sites || []);
   const freeCamps = (res.freeCamps || []);
-  // SHOWN LIST — commercial + free, time-ordered (top is already time-ordered; a free-camp group
-  // is appended only when the top set was all commercial), capped at CAMPS_SHOWN_MAX. Scroll for
-  // the tail. parks/frees split by nature so the count-first head counts PARKS, free reads separately.
-  const shown = [...commercial, ...freeCamps].slice(0, CAMPS_SHOWN_MAX);
+  // SHOWN LIST — commercial + free, STRICTLY by ascending drive time, INTERLEAVED (field 4 Aug: the
+  // list used to render commercial-by-crow then free appended — neither time order nor interleaved).
+  // ONE rule, applied here so it flows to the live render, the persisted round, restored rounds and
+  // the ring-around alike. Null-mins (no road distance) sort last, tie-broken by km. Then cap.
+  const shown = [...commercial, ...freeCamps]
+    .sort((a, b) => (a.mins == null ? 9e9 : a.mins) - (b.mins == null ? 9e9 : b.mins) || (a.km == null ? 9e9 : a.km) - (b.km == null ? 9e9 : b.km))
+    .slice(0, CAMPS_SHOWN_MAX);
   const parks = shown.filter(s => !isFreeGroupEligible(s));
   const frees = shown.filter(s =>  isFreeGroupEligible(s));
   const nP = parks.length, nF = frees.length;
@@ -4376,6 +4385,10 @@ function buildCampCard(s, n) {
 }
 function renderCampCards(bub, sites) {
   if (!bub) return;
+  // FULL-WIDTH results block (field 4 Aug: cards sat in a bubble with dead margin either side). Mark
+  // the message so the bubble spans the usable chat width with a small uniform gutter — the name gets
+  // the extra characters before it truncates. (Layout only; the card DOM is unchanged.)
+  const msg = bub.parentNode; if (msg && !(' ' + (msg.className || '') + ' ').includes(' cards-msg ')) msg.className = ((msg.className || '') + ' cards-msg').trim();
   // The compact card carries its own pin, so drop the full-width Navigate buttons addMsg
   // auto-created for the mentioned sites (they'd duplicate). Keep the banner text, the
   // save-stop star and the feedback row; insert the cards right after the banner paragraph.

@@ -1163,7 +1163,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '04 Aug 2026, 12:50 PM AEST',
+    BUILD: '04 Aug 2026, 01:11 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
