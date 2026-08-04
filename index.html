@@ -159,6 +159,12 @@
   .camp-free-tag{flex:none;font-size:8.5px;font-weight:800;letter-spacing:0.5px;color:var(--green);background:var(--navy);border-radius:4px;padding:1px 5px;}
   .camp-call{flex:none;width:44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--green);border-radius:9px;background:transparent;color:var(--green);font-size:18px;text-decoration:none;}
   .camp-note{margin-top:2px;padding:0 2px;font-size:10.5px;color:var(--gray2);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* RING-AROUND overlay on the ONE renderer (field 4 Aug): a tried park greys its call icon + gains a
+     compact in-row "tried" tag; the next-up target's row is highlighted. Never a strikethrough line. */
+  .camp-tried-tag{flex:none;font-size:8.5px;font-weight:700;letter-spacing:0.3px;color:var(--gray1);background:rgba(0,0,0,0.28);border-radius:4px;padding:1px 5px;}
+  .camp-card.tried .camp-pin{opacity:0.6;}
+  .camp-card.tried .camp-call.greyed{opacity:0.45;border-color:var(--gray3);color:var(--gray3);}
+  .camp-card.next-up .camp-pin{box-shadow:0 0 0 2px rgba(255,255,255,0.85);}
   .feedback-row{display:flex;gap:6px;margin-top:7px;align-items:center;}
   .fb-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:4px 9px;font-size:13px;cursor:pointer;opacity:0.6;transition:opacity 0.2s;}
   .fb-btn:hover{opacity:1;border-color:rgba(245,166,35,0.4);}
@@ -591,7 +597,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 12:35 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 12:50 PM AEST</div>
   </div>
 </div>
 
@@ -826,7 +832,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-1235PM"></script>
+<script src="speech.js?v=04Aug2026-1250PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4050,17 +4056,10 @@ function campOutcome(name, outcome) {
   const msg = `${prefix} Next up: ${next.name}${next.mins != null ? ', ' + hrsMinsSpoken(next.mins) : ''} — give them a ring.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   const bub = lastNavBubble();
-  if (bub) {
-    // Keep the tried ones visible but greyed, then a one-press dial for the next.
-    campRound.sites.forEach(s => {
-      if (!s.phone || !campRound.tried.includes(s.name)) return;
-      const t = document.createElement('div');
-      t.style.cssText = 'margin-top:6px;font-size:12px;color:var(--gray3);text-decoration:line-through;opacity:0.6;';
-      t.textContent = `✗ ${s.name} — tried`;
-      bub.appendChild(t);
-    });
-    roundCallButton(bub, next);
-  }
+  // ONE renderer: the full round as single-row cards (each with its own 📞 icon). The overlay greys
+  // the tried rows + tags them, and highlights the next-up row — no strikethrough lines, no
+  // full-width Call button, nothing between cards (field 4 Aug).
+  if (bub) renderRoundCards(bub, campRound.sites, campRound.tried, next.name);
 }
 
 // Part 5 action — re-run the EXISTING search over a bigger area (campWidenScale),
@@ -4241,20 +4240,10 @@ async function getNumbersForAll() {
   addMsg('nav', head); lastNavReply = head; lastSpoken = head; speak(head);   // no digits spoken
   const bub = lastNavBubble();
   if (!bub) return;
-  results.forEach(r => {
-    if (r.phone) {
-      const line = document.createElement('div');
-      line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
-      line.textContent = `${r.site.name}: ${localPhone(r.phone)}`;
-      bub.appendChild(line);
-      roundCallButton(bub, { name: r.site.name, phone: r.phone });   // one-tap dial (found only)
-    } else {
-      const line = document.createElement('div');
-      line.style.cssText = 'margin-top:6px;font-size:12px;color:var(--gray3);';
-      line.textContent = `${r.site.name}: couldn't find a number`;
-      bub.appendChild(line);                                          // shown, but no dial
-    }
-  });
+  // ONE renderer: the round's sites as single-row cards — a found site carries its own 📞 icon (tap
+  // to call, hooks the ring-around); an unfound one carries the honest miss note INSIDE its card. No
+  // "Name: number" text lines, no full-width Call buttons, nothing between cards (field 4 Aug).
+  renderRoundCards(bub, campRound.sites, campRound.tried, currentRingSite());
 }
 // Voice entry point — returns true if it handled the utterance.
 async function handleNumberRequest(text) {
@@ -4396,6 +4385,28 @@ function renderCampCards(bub, sites) {
     const card = buildCampCard(s, i + 1);
     if (after && after.parentNode) { after.parentNode.insertBefore(card, after.nextSibling); after = card; }
     else bub.appendChild(card);
+  });
+}
+// RING-AROUND view = the ONE renderer + an overlay (field 4 Aug: the old ring-around path rendered
+// bare pills + a full-width Call button + a strikethrough "tried" line between cards). Render the
+// round's sites through renderCampCards (single-row cards, each with its own 📞 icon that already
+// hooks noteCampCalled), THEN layer state ON TOP: a tried park greys its call icon + gains a compact
+// in-row "tried" tag; the next-up target's row is highlighted. No text between cards, ever.
+function renderRoundCards(bub, sites, tried, nextUp) {
+  if (!bub) return;
+  renderCampCards(bub, sites || []);
+  const triedSet = new Set(tried || []);
+  const cards = bub.querySelectorAll('.camp-card');
+  (sites || []).forEach((s, i) => {
+    const card = cards[i]; if (!card) return;
+    const row = card.querySelector('.camp-row');
+    if (triedSet.has(s.name)) {
+      card.className += ' tried';
+      const call = row && row.querySelector('.camp-call'); if (call) call.className += ' greyed';
+      const pin = row && row.querySelector('.camp-pin');
+      if (pin) { const tag = document.createElement('span'); tag.className = 'camp-tried-tag'; tag.textContent = '✓ tried'; pin.appendChild(tag); }
+    }
+    if (nextUp && s.name === nextUp) card.className += ' next-up';
   });
 }
 // After the cards render, bring the FIRST card to the top of the chat viewport so the answer's
