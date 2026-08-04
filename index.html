@@ -192,6 +192,7 @@
   .reset-btn:hover,.reset-btn:active{color:var(--amber);border-color:rgba(245,166,35,0.5);transform:rotate(-90deg);}
   .send-btn{width:36px;height:36px;border-radius:9px;background:var(--amber);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--navy);font-size:15px;flex-shrink:0;}
   .send-btn:disabled{background:var(--gray3);cursor:not-allowed;}
+  .send-btn.cancel{background:#E7202A;color:#fff;}   /* while a capture is recording, the arrow is a red ✕ cancel */
   /* Compact IN-ROW Hands-free control — folded into the input row (no full-width bar). Keeps the
      state word + colour (convo-off/on/busy) on the button; ~44px tap target. */
   /* FIXED width sized to the widest state label (measured: "🎙 Hands-free" ~109px, the widest of
@@ -585,7 +586,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 10:18 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 11:27 AM AEST</div>
   </div>
 </div>
 
@@ -641,7 +642,7 @@
         <textarea id="userInput" placeholder="Type…" rows="1"
           onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="reset-btn" id="resetBtn" onclick="resetConversation()" title="Start again — clear this conversation">↺</button>
-        <button class="send-btn" onclick="sendMessage()" id="sendBtn">➤</button>
+        <button class="send-btn" onclick="sendOrCancel()" id="sendBtn">➤</button>
       </div>
     </div>
   </div>
@@ -820,7 +821,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-1018AM"></script>
+<script src="speech.js?v=04Aug2026-1127AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3516,13 +3517,14 @@ function formatCampsAnswer(res) {
   // "unconfirmed"/"worth asking", no closing offer. Digits/amenities are NEVER spoken. ──
   let spoken;
   if (!nP && nF) {
-    spoken = `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}. On screen.`;
+    spoken = `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}, below.`;
   } else {
     const named = parks.slice(0, 3).map(s => `${s.name}, ${timeOf(s)}`);
     spoken = `${wPrefix}${nP} ${nP === 1 ? 'park' : 'parks'} ${where}.`;
     if (named.length) spoken += ` Nearest: ${named.join('; ')}.`;
-    if (nP > named.length) spoken += ' Rest on screen.';
-    if (nF) spoken += ` Plus ${nF} free.`;
+    const moreParks = nP - named.length;             // the remainder clause names WHERE the rest are —
+    if (moreParks > 0) spoken += ` ${moreParks} more below.`;   // omitted entirely when nothing is unshown
+    if (nF) spoken += ` Plus ${nF} free below.`;
   }
   if (res.osmDown) spoken += " Couldn't check free camps just now.";   // honest failure, trimmed
   // ── BANNER text — a short header; the single-row cards below carry each site's detail ──
@@ -4904,6 +4906,13 @@ window.addEventListener('focus', checkCampReturn);
 window.addEventListener('pageshow', checkCampReturn);
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
+// The one control on the ➤ button: WHILE a capture is recording it is a red ✕ (setMicState swaps
+// the glyph) that bins the capture; otherwise it sends the typed/heard message. The mic button's
+// own tap-to-send is unchanged — this only repurposes the arrow, which has nothing to send mid-capture.
+function sendOrCancel(){
+  if (Voice.state() === 'recording') { Voice.cancelCapture(); return; }
+  sendMessage();
+}
 async function sendMessage(silent){
   Voice.unlockAudio();
   const inp=document.getElementById('userInput');

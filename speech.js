@@ -312,6 +312,34 @@ function isConvoClosePhrase(text) {
   const t = cleanTranscript(text).toLowerCase();
   return t.length <= 25 && /^(that'?s it|that'?s all|that is all|thanks|thank you|cheers|done|all done|i'?m done|no that'?s it|that will do|bye|goodbye|close|stop( listening)?)\b/.test(t);
 }
+// A TRAILING "cancel that" / "scratch that" / "forget that" bins the whole utterance — no reply,
+// no routing. Trailing only (the phrase must END the transcript), so a mid-sentence mention
+// ("cancel that booking and…") does NOT trigger it. Punctuation-insensitive.
+function isCancelPhrase(text) {
+  const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '');
+  return /\b(cancel|scratch|forget) that$/.test(t);
+}
+// CANCEL a capture in progress (the red ✕ that replaces the send arrow while recording). Discards
+// the utterance — nothing transcribed, delivered or replied to — plays the neutral blip, and then:
+// one-shot → the mic closes; a session → stays OPEN and returns to a FRESH listening turn (one open
+// cue as normal). A session rebuilds a fresh recogniser so the muddled cumulative results can't
+// re-deliver as the next turn.
+function cancelCapture() {
+  const wasSession = convoActive;
+  if (!(cloudActive || captureActive || wasSession)) return;   // nothing recording → no-op
+  logEvent('cancel', wasSession ? 'tap-session' : 'tap-oneshot');
+  cancelBlip();
+  if (cloudActive || captureActive) stopCapture(false);        // one-shot: stop WITHOUT sending → discarded, mic off
+  if (wasSession) {
+    clearTimeout(convoDeliverTimer);
+    convoTurn = ''; convoDelivered = '';                       // drop the half-heard turn
+    convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoReplyPending = false; convoCycleHadSpeech = false;
+    if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch (e) {} }
+    convoRec = null; convoRecRunning = false;                  // fresh instance next start → muddled results gone
+    openCued = false;                                          // the fresh turn earns a new open cue
+    if (convoActive) { convoSetState('listening'); convoStartRecogniser(); convoOpenCue(); convoArmSilence(); }
+  }
+}
 
 // Silence handling: nudge at 20s, hard close at 45s. Reset on any speech/reply.
 function convoArmSilence() {
@@ -352,44 +380,61 @@ function convoOffer() {
 // recording, so an internal restart that re-enters 'listening' can't re-fire it); (2) the mic must
 // currently BE open for the driver (listening/recording) — so it's silent during TTS ('speaking'),
 // thinking ('thinking') and after a close ('off'). Logged as `cue open`, mirroring the close cue.
+// A short MELODIC cue — three quick sine notes so it carries over road noise (the single ding
+// was easy to miss), phone-assistant style, well under half a second. RISING for open, the SAME
+// notes DESCENDING for close. Same WebAudio + volume ballpark as the old single tone — only the
+// SOUND changed; every firing rule and guard below is untouched.
+function playCueMelody(freqs) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = convoAudioCtx || (Ctx && new Ctx());
+    if (!ctx) return; convoAudioCtx = ctx;
+    const t0 = ctx.currentTime, step = 0.11, dur = 0.13;   // 3 notes → ~0.35s total, under half a second
+    freqs.forEach((f, i) => {
+      const t = t0 + i * step;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);   // same volume ballpark as the old ding
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    });
+  } catch (e) {}
+}
+const CUE_OPEN_NOTES  = [523.25, 659.25, 783.99];   // C5·E5·G5 — RISING (it just became the driver's turn)
+const CUE_CLOSE_NOTES = [783.99, 659.25, 523.25];   // G5·E5·C5 — the same three notes DESCENDING (mic closed)
+
 function convoOpenCue() {
   if (openCued) return;                                              // at most ONE per driver-turn window — never per restart
   if (micState !== 'listening' && micState !== 'recording') return;  // only when the mic is genuinely open for the driver (never TTS/thinking/off)
   openCued = true;
   logEvent('cue', 'open');
+  playCueMelody(CUE_OPEN_NOTES);   // rising three-note sequence
+}
+
+// Descending three-note cue so a driver not looking at the screen knows the session closed.
+// Uses the gesture-created AudioContext, so it sounds even on a timer-driven close.
+function convoCloseCue() {
+  if (convoCued) return;   // at most ONE close cue per session — never per restart
+  convoCued = true;
+  logEvent('cue', 'close');
+  playCueMelody(CUE_CLOSE_NOTES);   // the same notes, descending
+}
+
+// A brief NEUTRAL blip (deliberately not the melodic cue) confirming a capture was binned by CANCEL.
+function cancelBlip() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     const ctx = convoAudioCtx || (Ctx && new Ctx());
     if (!ctx) return; convoAudioCtx = ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(494, t);                        // rising glide (the close cue is a flat/falling 420)
-    o.frequency.exponentialRampToValueAtTime(784, t + 0.18);   // ~B4 → ~G5
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.15, t + 0.03);       // quick soft attack
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);      // gentle decay
+    o.type = 'square'; o.frequency.setValueAtTime(300, t);   // low, flat, square — clearly NOT the sine melody
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     o.connect(g); g.connect(ctx.destination);
-    o.start(t); o.stop(t + 0.24);
-  } catch (e) {}
-}
-
-// A short beep so a driver not looking at the screen knows the session closed.
-// Uses the gesture-created AudioContext, so it sounds even on a timer-driven close.
-function convoCloseCue() {
-  if (convoCued) return;   // at most ONE close cue per session — never per restart
-  convoCued = true;
-  logEvent('cue', 'close');
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = convoAudioCtx || (Ctx && new Ctx());
-    if (!ctx) return; convoAudioCtx = ctx;
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sine'; o.frequency.value = 420;
-    g.gain.setValueAtTime(0.16, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
-    o.connect(g); g.connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime + 0.3);
+    o.start(t); o.stop(t + 0.13);
   } catch (e) {}
 }
 
@@ -466,6 +511,11 @@ function setMicState(state) {
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
   const b = document.getElementById('wakeBtn');
   if (b) { b.textContent = label; b.className = 'wake-word-btn ' + cls; }
+  // The SEND arrow doubles as a CANCEL control WHILE a capture is recording: a red ✕ during
+  // 'recording' (one-shot or a session turn), back to the send arrow ➤ otherwise. The tap action
+  // branches in the app's sendOrCancel (Voice.state()==='recording' → cancelCapture, else send).
+  const sendEl = document.getElementById('sendBtn');
+  if (sendEl) { const rec = (state === 'recording'); sendEl.textContent = rec ? '✕' : '➤'; sendEl.classList.toggle('cancel', rec); }
   // Cosmetic ring on the mic entry points — driven from HERE (not independent).
   const live = (state === 'listening' || state === 'recording');
   document.getElementById('homeMic')?.classList.toggle('listening', live);
@@ -967,6 +1017,15 @@ function deliverTranscript(text, source, endReason) {
   // once HERE so "Cardwell." and "Cardwell" are the same word everywhere after.
   text = cleanTranscript(text);
   if (text.length <= 1 || _isBusy()) return;
+  // SPOKEN cancel: a transcript ENDING with "cancel/scratch/forget that" is binned — no reply, no
+  // routing. A session returns to a fresh listening turn (one open cue); a one-shot closes the mic.
+  if (isCancelPhrase(text)) {
+    logEvent('cancel', 'spoken');
+    showCaptured('');
+    if (convoActive) { openCued = false; convoReplyPending = false; convoSetState('listening'); convoOpenCue(); convoArmSilence(); }
+    else setMicState('off');
+    return;
+  }
   // How the turn ended ('silence' natural · 'cutoff' force-ended · 'tap' driver
   // chose to send). sendMessage consumes it once to guard destination resolution
   // against fragments left by a hard cutoff. Not a second route — just metadata.
@@ -1104,11 +1163,12 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '04 Aug 2026, 10:18 AM AEST',
+    BUILD: '04 Aug 2026, 11:27 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
     toggleCapture: toggleVoice,
+    cancelCapture: cancelCapture,   // bin the in-progress capture (the red ✕ / a spoken "scratch that")
     micTap:       micTap,
     reset:        voiceReset,
     // speech out

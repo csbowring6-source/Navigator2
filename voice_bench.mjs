@@ -506,5 +506,61 @@ check("no close cue during one-shot capture", countCue("close") === 0);
 check("open cue wired at the one-shot cloud start", /setMicState\('recording'\);    \/\/ one-shot cloud capture is live[\s\S]{0,80}?convoOpenCue\(\)/.test(SRC));
 check("open cue wired at the one-shot basic onstart", /recognition\.onstart = \(\) => \{[^}]*setMicState\('recording'\); convoOpenCue\(\);/.test(SRC));
 
+// ── SCENARIO 16: MELODIC cues (A) — rising open, the same notes falling for close, distinct ──
+console.log("\n--- 16. melodic cues: rising open, falling close, distinct sequences ---");
+const openNotes = JSON.parse(SRC.match(/const CUE_OPEN_NOTES\s*=\s*(\[[^\]]*\])/)[1]);
+const closeNotes = JSON.parse(SRC.match(/const CUE_CLOSE_NOTES\s*=\s*(\[[^\]]*\])/)[1]);
+check("open cue is a three-note sequence", openNotes.length === 3);
+check("close cue is a three-note sequence", closeNotes.length === 3);
+check("open notes strictly RISE", openNotes.every((f, i) => i === 0 || f > openNotes[i - 1]), JSON.stringify(openNotes));
+check("close notes strictly FALL", closeNotes.every((f, i) => i === 0 || f < closeNotes[i - 1]), JSON.stringify(closeNotes));
+check("close is the open sequence reversed (same notes, opposite direction)", JSON.stringify(closeNotes) === JSON.stringify([...openNotes].reverse()));
+check("both cues route through the shared melody player (triggers unchanged)", /playCueMelody\(CUE_OPEN_NOTES\)/.test(SRC) && /playCueMelody\(CUE_CLOSE_NOTES\)/.test(SRC) && /function playCueMelody\(freqs\)/.test(SRC));
+check("the cue GUARDS are unchanged (openCued + micState gate on open; convoCued on close)", /function convoOpenCue\(\) \{\s*if \(openCued\) return;[\s\S]{0,140}micState !== 'listening'/.test(SRC) && /function convoCloseCue\(\) \{\s*if \(convoCued\) return;/.test(SRC));
+
+// ── SCENARIO 17: CANCEL a capture (B) ─────────────────────────────────────────
+console.log("\n--- 17. cancel: session survives + reopens listening; one-shot bins + closes; spoken 'scratch that' routes nowhere ---");
+// (a) SESSION tap-cancel mid-turn: nothing delivered, session stays open, back to a fresh listening turn + one open cue
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("find me a serv");         // driver gets muddled mid-utterance
+const openBeforeCancel = countCue("open");
+Voice.cancelCapture();                              // TAP the red ✕
+check("session cancel is logged", kinds().includes("cancel:tap-session"));
+check("cancel delivered NOTHING", delivered === 0);
+check("session STAYS OPEN after a cancel", Voice.isSessionOpen() === true);
+check("session returned to a fresh LISTENING turn", Voice.state() === "listening");
+check("the fresh turn earns exactly ONE open cue", countCue("open") === openBeforeCancel + 1);
+rec.onstart(); rec.speech(); rec.final("cheapest fuel"); advance(2800); advance(600);
+check("a clean utterance AFTER the cancel delivers normally (muddled turn is gone)", delivered === 1);
+Voice.closeSession("tap");
+
+// (b) SPOKEN cancel: a transcript ENDING "scratch that" routes nowhere; mid-sentence does NOT trigger
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("find fuel scratch that"); advance(2800); advance(600);
+check("a transcript ending 'scratch that' is binned — nothing routed", delivered === 0);
+check("spoken cancel is logged", kinds().includes("cancel:spoken"));
+check("session survives the spoken cancel, back to listening", Voice.isSessionOpen() === true && Voice.state() === "listening");
+Voice.closeSession("tap");
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("cancel that booking then find fuel"); advance(2800); advance(600);
+check("mid-sentence 'cancel that' does NOT trigger — it routes normally", delivered === 1);
+Voice.closeSession("tap");
+
+// (c) ONE-SHOT tap-cancel: send arrow → ✕ while recording, bins the capture, mic closes, arrow reverts
+fresh(); timers.length = 0;
+Voice.toggleCapture();
+for (let i = 0; i < 6; i++) await Promise.resolve();
+rec.onstart();
+check("the send arrow becomes ✕ while a capture is recording", el("sendBtn").textContent === "✕");
+Voice.cancelCapture();
+check("one-shot cancel is logged", kinds().includes("cancel:tap-oneshot"));
+check("one-shot cancel delivered NOTHING", delivered === 0);
+check("the mic CLOSES after a one-shot cancel", Voice.state() === "off");
+check("the send arrow REVERTS to ➤ outside recording", el("sendBtn").textContent === "➤");
+check("sendOrCancel branches on a recording state (index.html)", /Voice\.state\(\) === 'recording'.*Voice\.cancelCapture\(\)/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
