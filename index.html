@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 01:53 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 02:19 AM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=05Aug2026-0153AM"></script>
+<script src="speech.js?v=05Aug2026-0219AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3788,6 +3788,31 @@ function clearLeftoverTrip() {
   try { renderHomeTripCard(); } catch (e) {}
 }
 
+// PURE: same town said two ways ("Innisfail" / "Innisfail in Queensland") — the
+// contained test resolveDestination already uses for name drift.
+function sameTownName(a, b) {
+  a = (a || '').toLowerCase().trim(); b = (b || '').toLowerCase().trim();
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+// PURE: the trip statement inside a CONFIRM answer (field 5 Aug). "Yes, sorry, we're
+// going to Innisfail, and can you pull me some campsites" — the tacked-on request
+// clause makes parseTripIntent bail as a request (isRequest sees "campsites"), so on
+// a null parse we drop trailing request clauses (", and can you…" / " and find…")
+// and re-try. The clause must FOLLOW something (comma or " and ") so lead-ins like
+// "get me to X" / "take me to X" are never truncated. Returns the intent or null.
+function confirmAnswerTrip(text) {
+  let nt = parseTripIntent(text, { currentDest: '' });
+  if (!nt) {
+    const bare = (text || '')
+      .replace(/(?:[,;]\s*(?:and\s+|then\s+)?|\s+(?:and|then)\s+)(?:can|could|will|would)\s+you\b[\s\S]*$/i, '')
+      .replace(/(?:[,;]\s*(?:and\s+|then\s+)?|\s+(?:and|then)\s+)(?:find|show|pull|grab|get|give)\b[\s\S]*$/i, '')
+      .trim();
+    if (bare && bare !== text) nt = parseTripIntent(bare, { currentDest: '' });
+  }
+  return (nt && nt.dest && (nt.action === 'create' || nt.action === 'switch')) ? nt : null;
+}
+
 // PURE: interpret a short reply as an answer to the pending question.
 // Returns {action:'search', site} | {action:'declined'} | null (= a new query).
 function matchPendingAnswer(text, pending, tripModeOverride) {
@@ -3856,6 +3881,11 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
   if (pending.type === 'trip-resume-confirm') {
     // "Still on that trip to X, or starting fresh?" — an affirmation keeps it; a "no",
     // "fresh", or a newly-named destination drops the stale trip (trip-fresh re-routes).
+    // A stated NEW destination OUTRANKS the yes/no word (field 5 Aug): "Yes, still —
+    // actually we're going to Innisfail" is a restatement, never a keep.
+    const rnt = confirmAnswerTrip(text);
+    if (rnt && !sameTownName(rnt.dest, pending.dest))
+      return { action: 'restate', dest: rnt.dest, origin: rnt.origin || null, orig: text };
     if (/\b(?:yes|yeah|yep|yup|still|keep|same|carry on|resume|stay on|on it|leave it|that one|correct|still on it)\b/.test(t) && !isTopicChange(t))
       return { action: 'trip-keep', dest: pending.dest };
     return { action: 'trip-fresh' };
@@ -3864,6 +3894,11 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
     // "That's N km — really heading to X, or did I mishear?" — a yes commits the distant
     // trip as-is (scaleOk, mode/camps carry from the stored utterance); anything reading as
     // no / a mishear drops it and re-asks for the town. Never a silent commit either way.
+    // A stated NEW destination OUTRANKS the yes/no word (field 5 Aug): "Yes, sorry, we're
+    // going to Innisfail…" restates — re-commit to Innisfail, never confirm the stored one.
+    const snt = confirmAnswerTrip(text);
+    if (snt && !sameTownName(snt.dest, pending.dest))
+      return { action: 'restate', dest: snt.dest, origin: snt.origin || null, orig: text };
     if (/^(?:yes|yeah|yep|yup|correct|that'?s right|sure|really|i am|we are|it is|go ahead|do it|heading (?:there|to)|keep it)\b/.test(t) && !isTopicChange(t))
       return { action: 'scale-yes', dest: pending.dest, lat: pending.lat, lon: pending.lon, orig: pending.orig, wantsCamps: pending.wantsCamps };
     return { action: 'scale-no' };
@@ -3904,6 +3939,13 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
     return null;
   }
   if (pending.type === 'dest-confirm') {
+    // THE FIELD GATE (5 Aug): the scale-only "^yes" below took "Yes, sorry, we're going
+    // to Innisfail…" literally and committed Melbourne. A stated NEW destination — one
+    // that names NEITHER offered candidate — OUTRANKS the yes/no word: restate, and
+    // re-commit through the normal flow. Naming an offered candidate stays a pick.
+    const dnt = confirmAnswerTrip(text);
+    if (dnt && !sameTownName(dnt.dest, pending.spoken) && !sameTownName(dnt.dest, pending.resolved))
+      return { action: 'restate', dest: dnt.dest, origin: dnt.origin || null, orig: text };
     // Carry the data forward — the pending is cleared the moment it's consumed.
     const carry = { origin: pending.origin, wantsPlan: pending.wantsPlan, wantsCamps: pending.wantsCamps, ask: pending.ask };
     if (pending.drift) {
@@ -5240,6 +5282,35 @@ async function sendMessage(silent){
           const m = `Fresh start — where are we headed?`;
           setPending({ type: 'destination' });
           addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        }
+      } else if (pa.action === 'restate') {
+        // A trip confirm answered with a NEW destination (field 5 Aug) — the whole answer
+        // is a restatement: re-commit through the NORMAL flow — resolve → scale guard →
+        // commit → mode + camps carry ("…and pull me some campsites" must carry).
+        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+        const v = await resolveDestination(pa.dest);
+        hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+        if (v.verdict === 'lookup-failed') {
+          const m = `The map lookup's playing up just now — give it a moment and say ${pa.dest} again.`;
+          setPending({ type: 'destination' });
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        } else if (v.verdict === 'notfound') {
+          const m = respondToUnresolved(pa.dest, pa.orig);
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        } else if (v.verdict === 'confirm') {
+          // Still suspect (drift/scale) — ask again for the RESTATED town, carrying its ask.
+          setPending({ type: 'dest-confirm', spoken: pa.dest, resolved: v.name, rlat: v.lat, rlon: v.lon, rkm: v.km, drift: v.drift, origin: pa.origin, wantsPlan: false, wantsCamps: isCampsQuery(pa.orig), ask: pa.orig, orig: pa.orig });
+          const m = v.drift
+            ? `I heard ${pa.dest}, but the closest match is ${v.name}${v.km != null ? `, about ${v.km} km away` : ''}. Which one — ${pa.dest} near you, or ${v.name}?`
+            : `That's about ${v.km} km to ${v.name} — a long way for one trip. Is that really where you're headed, or did you mean somewhere closer?`;
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        } else {
+          // resolveDestination vetted the scale at the same bound — commit and carry.
+          const committed = await adoptTripAt(pa.dest, v.lat, v.lon, { scaleOk: true, orig: pa.orig, wantsCamps: isCampsQuery(pa.orig) });
+          if (committed) {
+            if (pa.origin) tripContext = `Origin: ${pa.origin}. Destination: ${pa.dest}.`;
+            await resolveTripModeFromUtterance(pa.dest, pa.orig, pa.origin);
+          }
         }
       } else if (pa.action === 'scale-yes') {
         // "Yes, really heading there" to the scale-confirm — commit the distant trip as-is
