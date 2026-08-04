@@ -70,6 +70,8 @@ The approved 26 Jul plan, additive and field-proven stage by stage:
 - **③ Frontend merge** — `fetchMergedCamps` fetches `/camps2` + `/camps2-osm` for the anchor, dedupes (Places wins within ~100 m + shared name token), orders by drive time, appends a **"plus free camps"** group when the top-3 are all commercial. Numbers render **on every card** (tap to call). Fallback: `/camps2` down → old `/camps`; `/camps2-osm` down → Places-only + an honest "couldn't check free camps" line. **LIVE.**
 - **④ Retirement — NOT DONE.** Do **not** remove `/camps`, `/place-phone`, or `/places-probe` yet — the phase-3 fallback and the on-request number lookup still depend on them.
 
+**Data-coverage limit (free status):** a genuinely-free site that exists ONLY in Places under a commercial name (e.g. "Cowley Beach Caravan Park") with no OSM non-commercial twin has NO fee signal in any feed — it renders brown-with-call honestly; do NOT guess it green. (Free-by-nature is carried from an OSM twin via `freeByNature` when a dedupe drops it; a Places-only record has no such twin.)
+
 ## Key subsystems
 
 - **Gazetteer + phonetic rescue** (`AU_TOWNS`, ~2968 towns bundled offline, from GeoNames, **CC-BY 4.0**, floor lowered to ~200-pop populated places). *(The array's own header comment still says pop≥1000/~1,013 — stale; trust the count.)* Mishears are rescued phonetically (`phonKey` consonant-skeleton keys, precomputed). **Rejection loop** (`escalateAfterRejection`): on a rejected candidate, don't re-run the same strategy — geocode the raw transcript WITH the said state if not already tried, widen the phonetic search, offer up to three NEW candidates (never re-offer rejected ones), and if nothing new, honestly say it can't place the town and suggest typing it.

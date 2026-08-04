@@ -586,7 +586,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 11:53 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 12:16 PM AEST</div>
   </div>
 </div>
 
@@ -821,7 +821,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-1153AM"></script>
+<script src="speech.js?v=04Aug2026-1216PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3262,6 +3262,11 @@ function dedupeCampSites(sites) {
       const preferNew = (s.source === 'places' && cur.source !== 'places') ? true
                       : (cur.source === 'places' && s.source !== 'places') ? false
                       : sn.length > norm(cur.name).length;
+      const winner = preferNew ? s : cur, loser = preferNew ? cur : s;
+      // NATURE CARRY (field 4 Aug: Bramston Beach): if the DROPPED twin is an OSM free camp (or
+      // already flagged), the survivor IS that free site — stamp it so it renders green + FREE even
+      // when a phone-bearing Places record won the dedupe. FREE MEANS GREEN, phone-independent.
+      if (isFreeNature(loser)) winner.freeByNature = true;
       if (preferNew) out[j] = s;
     }
   }
@@ -3316,7 +3321,7 @@ async function fetchMergedCamps(lat, lon, radius) {
   for (const o of (osm.ok ? osm.results : [])) {
     const twin = places.results.find(p => distKm(p.lat, p.lon, o.lat, o.lon) <= 0.1 && sharesNameToken(p.name, o.name));
     if (!twin) { merged.push(o); continue; }                 // no twin — keep the OSM record
-    if (verifiedPhone(twin)) continue;                        // Places twin has a number — Places wins, drop the OSM copy
+    if (verifiedPhone(twin)) { twin.freeByNature = true; continue; }   // Places wins on its number, but carry the OSM free-camp NATURE onto it (green + FREE + call)
     const mi = merged.indexOf(twin); if (mi !== -1) merged.splice(mi, 1);   // empty twin — keep OSM instead
     merged.push(o);
   }
@@ -3342,9 +3347,13 @@ const CAMPS_POOL_MAX = 40;    // pre-cap crow-nearest slice — a city's parks a
 // The CALL control is decided separately by campCardNote on the phone alone, so a green site WITH
 // a number shows both the green pin and the 📞 icon.
 const FREE_CAMP_NAME = /\b(rest area|free camp|rv free camp)\b/i;
+// "Free by NATURE" = came from the OSM non-commercial feed, OR a dedupe carried that nature onto a
+// kept Places record (freeByNature — field 4 Aug: Bramston Beach, an OSM free camp whose phone-
+// bearing Places twin won the dedupe and would otherwise render brown).
+function isFreeNature(s) { return !!(s && (s.source === 'osm' || s.freeByNature)); }
 function isFreeGroupEligible(s) {
   if (!s) return false;
-  if (s.source === 'osm') return true;
+  if (isFreeNature(s)) return true;
   return FREE_CAMP_NAME.test(s.name || '') || FREE_CAMP_NAME.test(s.type || '');
 }
 function pickFreeCampGroup(top, pool) {
@@ -3541,7 +3550,7 @@ function formatCampsAnswer(res) {
     spoken,
     // Cards / ring-around / pins see the SHOWN list (commercial + free, time-ordered, ≤10). Free
     // camps carry source:'osm' so campCardNote gives them the neutral note (never the miss apology).
-    sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', hours: s.hours || null, type: s.type || '' })),
+    sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
   };
 }
 // Per-card number/status decision (pure → benchable). A verified number → tap-to-call;
@@ -3936,7 +3945,7 @@ function startCampRound(place, query, sites) {
   campRound = {
     place: place || '',
     query: query || '',
-    sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '', source: s.source || '', hours: s.hours || null, type: s.type || '' })),
+    sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '', source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
     tried: [], calledSite: null, ts: Date.now(),
   };
   campOutcomePending = null;
