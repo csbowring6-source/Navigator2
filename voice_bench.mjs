@@ -383,21 +383,17 @@ check("no dock-sized bottom padding was added to .chat-area (dock is a flex sibl
   /\.chat-area\{[^}]*padding:10px 14px[^}]*\}/.test(indexSrc) && !/\.chat-area\{[^}]*padding-bottom:7[0-9]px/.test(indexSrc));
 // dock polish: placeholder shortened to "Type…" (fits the 64px box on one line; nowrap keeps it single).
 check("type box placeholder is \"Type…\" (not the longer \"Type here…\")", /placeholder="Type…"/.test(indexSrc) && !/placeholder="Type here…"/.test(indexSrc));
-// ── slimmed cards (field 31 Jul: all five Innisfail cards must fit above the dock @380×800). Cut the
-// card's vertical padding/margins; the 34px buttons stay (driver-tappable) so they set the height floor.
-// Measured headless @380px: commercial 66→57px, free 82→72px; five-card block 330px, banner+5-card bubble
-// 377px < the ~647px chat budget (800 − appview-bar 42 − context-panel 38 − dock 73). All five fit.
-const campCardRule = (indexSrc.match(/\.camp-card\{[^}]*\}/) || [""])[0];
-check("card vertical padding trimmed to 2px (was 5px)", /padding:2px 5px/.test(campCardRule));
-check("inter-card margin trimmed to 4px (was 6px)", /margin-top:4px/.test(campCardRule));
-check("header→buttons gap trimmed to 2px", /\.camp-actions\{[^}]*margin-top:2px/.test(indexSrc));
-check("free-camp note gap trimmed to 2px, still one readable line", /\.camp-note\{[^}]*margin-top:2px[^}]*white-space:nowrap[^}]*text-overflow:ellipsis/.test(indexSrc));
-check("card buttons stay driver-tappable (min-height:34px, unchanged)", /\.camp-btn\{[^}]*min-height:34px/.test(indexSrc));
-// point 1 (wider card buttons): the two controls are flex:1 with no per-button side margin,
-// so their combined width == the card's inner width by construction (measured headless: 372/372).
-const btnRule = (indexSrc.match(/\.camp-btn\{[^}]*\}/) || [""])[0];
-check("both card buttons are flex:1 → pair spans the card's full inner width", /flex:1/.test(btnRule) && !/margin-(left|right|inline)/.test(btnRule));
-check("card SIDE padding stays 5px (wider button pair) while vertical is slimmed", /\.camp-card\{[^}]*padding:\dpx 5px/.test(indexSrc));
+// ── SINGLE-ROW cards (field 31 Jul): the pin button IS the card — one row, no "Navigate" word, an
+// icon-only 📞 call button beside it. Free = green, full-width pin, FREE tag on the row, note under.
+// Measured headless @380px: pin 44px tall, call 44×44; commercial-with-call row ~49px, note-cards ~64px;
+// ~13 rows fit the ~647px chat budget (800 − 42 − 38 − 73). The old .camp-btn/.camp-actions are gone.
+const pinRule = (indexSrc.match(/\.camp-pin\{[^}]*\}/) || [""])[0];
+check("the pin button IS the card — flex:1, ~44px tap target", /flex:1/.test(pinRule) && /min-height:44px/.test(pinRule));
+check("the call control is an icon-only ≥44px square", /\.camp-call\{[^}]*width:44px[^}]*height:44px/.test(indexSrc));
+check("free pin is full-width green (its own row, one control)", /\.camp-card\.free \.camp-pin\{background:var\(--green\)/.test(indexSrc));
+check("the FREE tag rides on the row (pin)", /\.camp-free-tag\{/.test(indexSrc));
+check("the old multi-element card CSS is gone (.camp-btn / .camp-actions / .camp-card-head)", !/\.camp-btn\{/.test(indexSrc) && !/\.camp-actions\{/.test(indexSrc) && !/\.camp-card-head\{/.test(indexSrc));
+check("no card pin label carries the word 'Navigate'", !/camp-pin-name['"\s].*Navigate/.test(indexSrc) && !/\.textContent = '📍 Navigate'/.test(indexSrc));
 
 // ── SCENARIO 12: 9XJ9UWR 145-151s — a driver speaking continuously across THREE engine
 // restarts is NEVER closed on; the accumulated turn survives the restarts and delivers on

@@ -141,24 +141,20 @@
   .msg.user .msg-bubble{background:var(--navy3);border:1px solid rgba(255,255,255,0.08);border-top-right-radius:3px;color:var(--gray1);}
   .msg.nav .msg-bubble{background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);border-top-left-radius:3px;}
   .nav-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;margin-top:8px;background:var(--amber);color:var(--navy);border:none;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;width:100%;}
-  /* Compact camp cards (field 31 Jul): EVERY element is ONE line so a full result set fits
-     one screen. Header = number·name (ellipsised) · drive time · hours, all inline; two
-     half-width controls (pin + call — the call number stays one line via nowrap + a tight
-     font); small one-line note. Free-group cards get the green accent + FREE tag. Measured
-     headless on the real Innisfail 5-set at 380px: 66px commercial / 82px free cards; the
      literal numbers "1300 787 275"/"07 4061 1656" are ~100px in a ≥129px call button. */
-  .camp-card{margin-top:4px;padding:2px 5px;border-radius:8px;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}  /* slim: tight vertical padding (buttons stay 34px) → all 5 Innisfail cards fit above the dock */
-  .camp-card.free{background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.45);}
-  .camp-card-head{font-size:12.5px;font-weight:600;color:var(--gray1);display:flex;align-items:baseline;gap:5px;line-height:1.2;white-space:nowrap;}
-  .camp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
-  .camp-meta{flex:none;font-size:10.5px;font-weight:500;color:var(--gray2);}
-  .camp-free-tag{flex:none;align-self:center;font-size:8.5px;font-weight:800;letter-spacing:0.5px;color:var(--navy);background:var(--green);border-radius:4px;padding:1px 4px;}
-  .camp-actions{display:flex;gap:6px;margin-top:2px;}
-  .camp-btn{flex:1;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:34px;border-radius:6px;font-weight:600;cursor:pointer;text-decoration:none;font-family:'Inter',sans-serif;border:none;padding:0 4px;white-space:nowrap;}
-  .camp-btn.pin{background:var(--amber);color:var(--navy);font-size:12px;}
-  .camp-card.free .camp-btn.pin{background:var(--green);color:var(--navy);}
-  .camp-btn.call{background:transparent;border:1px solid var(--green);color:var(--green);font-size:11.5px;letter-spacing:-0.2px;}
-  .camp-note{margin-top:2px;font-size:10.5px;color:var(--gray2);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* SINGLE-ROW camp cards (field 31 Jul): the pin button IS the card — "📍 N. Name — time" on ONE
+     row (no "Navigate" word; name ellipsises, time pinned). Commercial = amber + a compact icon-only
+     📞 call button (44×44, no digits). Free = green, full-width pin, FREE tag on the row, note under.
+     Tap targets ~44px. Same shape for live answers and restored rounds. Up to 10 rows; scroll the tail. */
+  .camp-card{margin-top:5px;}                                  /* container only — the button carries the visual */
+  .camp-row{display:flex;gap:6px;align-items:stretch;}
+  .camp-pin{flex:1;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:none;border-radius:9px;background:var(--amber);color:var(--navy);font-family:'Inter',sans-serif;font-weight:700;cursor:pointer;text-align:left;overflow:hidden;}
+  .camp-card.free .camp-pin{background:var(--green);}
+  .camp-pin-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;}
+  .camp-pin-time{flex:none;font-size:11px;font-weight:600;opacity:0.8;white-space:nowrap;}
+  .camp-free-tag{flex:none;font-size:8.5px;font-weight:800;letter-spacing:0.5px;color:var(--green);background:var(--navy);border-radius:4px;padding:1px 5px;}
+  .camp-call{flex:none;width:44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--green);border-radius:9px;background:transparent;color:var(--green);font-size:18px;text-decoration:none;}
+  .camp-note{margin-top:2px;padding:0 2px;font-size:10.5px;color:var(--gray2);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .feedback-row{display:flex;gap:6px;margin-top:7px;align-items:center;}
   .fb-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:4px 9px;font-size:13px;cursor:pointer;opacity:0.6;transition:opacity 0.2s;}
   .fb-btn:hover{opacity:1;border-color:rgba(245,166,35,0.4);}
@@ -590,7 +586,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 31 Jul 2026, 10:43 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 10:18 AM AEST</div>
   </div>
 </div>
 
@@ -825,7 +821,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=31Jul2026-1043AM"></script>
+<script src="speech.js?v=04Aug2026-1018AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3241,7 +3237,7 @@ function selectCorridorCamps(camps, opts) {
     return (a.mins ?? 9999) - (b.mins ?? 9999);
   });
 
-  return { directional, widened, rigFiltered, total: inWindow.length, sites: inWindow.slice(0, 6) };
+  return { directional, widened, rigFiltered, total: inWindow.length, sites: inWindow.slice(0, CAMPS_SHOWN_MAX) };
 }
 
 // Two OSM records for the SAME park (e.g. "BIG4 Innisfail" and "BIG 4 Innisfail
@@ -3334,6 +3330,8 @@ async function fetchMergedCamps(lat, lon, radius) {
 // as a DISTINCT appended group — never widening the flat top set. The pool is already
 // nearest-first, so slice takes the nearest.
 const FREE_CAMP_GROUP_MAX = 2;
+const CAMPS_SHOWN_MAX = 10;   // display cap — up to 10 sites (commercial + free, time-ordered); scroll for the tail
+const CAMPS_POOL_MAX = 40;    // pre-cap crow-nearest slice — a city's parks aren't cut before road-timing
 // A record belongs on a FREE-CAMP card (field 31 Jul). source:'osm' is the OSM
 // non-commercial feed. But a free camp can ALSO come only from Places (e.g. "Hughenden RV
 // Free Camp", phase-1 probe), so a Places record ALSO qualifies when its name/type clearly
@@ -3361,12 +3359,12 @@ async function getCorridorCamps() {
   if (!d.results || !d.results.length) return { error: 'empty', directional: onTrip };
   const cands = d.results.filter(s => s.lat && s.lon)
     .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
-    .sort((a,b) => a.crow - b.crow).slice(0, 12);
+    .sort((a,b) => a.crow - b.crow).slice(0, CAMPS_POOL_MAX);
   const roads = await roadDistances(gps.lat, gps.lon, cands);
   cands.forEach((c,i) => { c.km = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow; c.mins = roads[i] ? roads[i].mins : null; });
   const sel = selectCorridorCamps(cands, { gps, routePath: onTrip ? window._tripRoute.path : null, rig: currentVehicle, windowMins: 60 });
   if (!sel.sites.length) return { error: onTrip ? 'none-ahead' : 'empty', directional: onTrip };
-  const top = dedupeCampSites(sel.sites).slice(0, 3);
+  const top = dedupeCampSites(sel.sites).slice(0, CAMPS_SHOWN_MAX);
   return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered, osmDown: merged.osmDown };
 }
 
@@ -3394,7 +3392,7 @@ async function getCampsNear(place, coords) {
   if (!d.results || !d.results.length) return { error: 'empty-place', place };
   let cands = d.results.filter(s => s.lat && s.lon)
     .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(c.lat, c.lon, s.lat, s.lon) }))
-    .sort((a,b) => a.crow - b.crow).slice(0, 12);
+    .sort((a,b) => a.crow - b.crow).slice(0, CAMPS_POOL_MAX);
   // Same rig-fit hard filter as the corridor, but NO ahead/drive-time-window filter.
   const bigRig = currentVehicle === 'caravan' || currentVehicle === 'truck';
   if (bigRig) {
@@ -3411,7 +3409,7 @@ async function getCampsNear(place, coords) {
   } else {
     cands.forEach(s => { s.km = s.crow; s.mins = null; });
   }
-  const top = dedupeCampSites(cands).slice(0, 3);
+  const top = dedupeCampSites(cands).slice(0, CAMPS_SHOWN_MAX);
   return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: false, near: true, place, osmDown: merged.osmDown };
 }
 
@@ -3502,75 +3500,43 @@ function formatCampsAnswer(res) {
     const t = map[res.error] || map['service'];
     return { text: t, spoken: t, sites: [] };
   }
-  const sites = (res.sites || []).slice(0, 3);   // the commercial top set (head counts THESE)
-  const freeCamps = (res.freeCamps || []);        // the distinct "plus free camps" group (may be empty)
-  const n = sites.length;
+  const commercial = (res.sites || []);
+  const freeCamps = (res.freeCamps || []);
+  // SHOWN LIST — commercial + free, time-ordered (top is already time-ordered; a free-camp group
+  // is appended only when the top set was all commercial), capped at CAMPS_SHOWN_MAX. Scroll for
+  // the tail. parks/frees split by nature so the count-first head counts PARKS, free reads separately.
+  const shown = [...commercial, ...freeCamps].slice(0, CAMPS_SHOWN_MAX);
+  const parks = shown.filter(s => !isFreeGroupEligible(s));
+  const frees = shown.filter(s =>  isFreeGroupEligible(s));
+  const nP = parks.length, nF = frees.length;
   const where = res.near ? `near ${res.place}` : res.directional ? 'ahead' : 'nearby';
-  // COUNT-FIRST — never imply three exist when they don't.
-  let head = n === 1 ? `Only one ${where}:` : n === 2 ? `I can only find two ${where}:` : `Three ${where}:`;
-  if (res.widened) head = n === 1 ? `Nothing inside the hour — one a bit further ${where}:`
-                                  : `Nothing inside the hour — the ${n === 2 ? 'two' : 'three'} nearest ${where}:`;
-  const lines = sites.map(s => {
-    const am = campAmenities(s);
-    // 'paid' is gone: every commercial park charges, so it says nothing and read
-    // like an amenity. Only 'free' (meaningful) and 'price unconfirmed' (a missing
-    // fee tag) appear; a plain paid park simply carries no price word.
-    const price = s.fee === 'no' ? 'free' : (s.fee === 'yes' ? null : 'price unconfirmed');
-    let line = `${s.name}, ${timePhrase(s)}`;
-    if (price) line += ` — ${price}`;
-    if (am.known.length) line += ` — ${am.known.join(', ')}`;
-    line += '.';
-    if (am.unknown.length) line += ` ${cap(am.unknown.join(', '))} unconfirmed — worth asking when you call.`;
-    return line;
-  });
-  // SPOKEN variant — CONFIRMED facts only. Unconfirmed items are NEVER listed
-  // aloud per site (the full detail stays in the text banner above). A data-poor
-  // site is one short honest line; gaps get ONE summary sentence at the end.
-  let anyGaps = false;
-  const spokenLines = sites.map(s => {
-    const am = campAmenities(s);
-    if (am.unknown.length) anyGaps = true;
-    const t = s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);   // TTS says the words in full
-    const price = s.fee === 'no' ? 'free' : null;            // 'paid' removed — noise; only 'free' is spoken
-    if (s.fee !== 'no' && s.fee !== 'yes') anyGaps = true;   // a MISSING fee is a gap; 'yes' (charges) is known, just unsaid
-    const facts = [...am.known];
-    if (price) facts.push(price);                            // price last, never "unconfirmed"
-    // Digits are NEVER spoken — presence of a number is handed to the Call button.
-    if (!facts.length)   // no confirmed extras — name + drive time (the number is on the card)
-      return `${s.name}, ${t}.`;
-    return `${s.name}, ${t} — ${facts.join(', ')}.`;
-  });
-  // PLUS FREE CAMPS — a distinct, clearly-marked-free group appended when none of the top
-  // sites is a free camp. Spoken shape stays name + drive time; each is introduced as
-  // "Plus <name>, a free camp/rest area, N minutes." The count-first head keeps counting the
-  // COMMERCIAL top set (n); the free group is presented separately so counts stay coherent.
-  const freeLabel = s => (s.type === 'rest area') ? 'a rest area' : 'a free camp';
-  const freeText = freeCamps.length
-    ? `Plus free ${freeCamps.length === 1 ? 'stop' : 'stops'}: ${freeCamps.map(s => `${s.name} (${timePhrase(s)})`).join(', ')}.`
-    : '';
-  const freeSpoken = freeCamps.map(s => {
-    const t = s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
-    return `Plus ${s.name}, ${freeLabel(s)}, ${t}.`;
-  }).join(' ');
-  // PHASE 3: the numbers now sit ON each card (visible, tap to call), so the spoken/text
-  // answer no longer offers number-fetching — it stays name + drive time per site (the
-  // TRUST RULE still holds: digits are never spoken). If the OSM (free-camp) source was
-  // down for THIS request, say so honestly — Places-only, free camps unchecked.
-  const spokenBits = [head, spokenLines.join(' ')];
-  if (anyGaps) spokenBits.push('The rest is unconfirmed — worth asking when you call.');
-  if (freeSpoken) spokenBits.push(freeSpoken);
-  if (res.osmDown) spokenBits.push("Couldn't check free camps just now — showing the caravan parks only.");
-  const textParts = [head, lines.join(' ')];
-  if (freeText) textParts.push(freeText);
-  if (res.osmDown) textParts.push("Couldn't check free camps just now — showing the caravan parks only.");
+  const wPrefix = res.widened ? 'Nothing inside the hour — ' : '';
+  const timeOf = s => s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
+  // ── SPOKEN — INFORMATION ONLY once the cards render. Shape: "<N> parks near <place>. Nearest:
+  // up to three names+times. Rest on screen. Plus <M> free." Nothing else — no amenity spiel, no
+  // "unconfirmed"/"worth asking", no closing offer. Digits/amenities are NEVER spoken. ──
+  let spoken;
+  if (!nP && nF) {
+    spoken = `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}. On screen.`;
+  } else {
+    const named = parks.slice(0, 3).map(s => `${s.name}, ${timeOf(s)}`);
+    spoken = `${wPrefix}${nP} ${nP === 1 ? 'park' : 'parks'} ${where}.`;
+    if (named.length) spoken += ` Nearest: ${named.join('; ')}.`;
+    if (nP > named.length) spoken += ' Rest on screen.';
+    if (nF) spoken += ` Plus ${nF} free.`;
+  }
+  if (res.osmDown) spoken += " Couldn't check free camps just now.";   // honest failure, trimmed
+  // ── BANNER text — a short header; the single-row cards below carry each site's detail ──
+  let text = (!nP && nF)
+    ? `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}:`
+    : `${wPrefix}${nP} ${nP === 1 ? 'park' : 'parks'} ${where}:`;
+  if (res.osmDown) text += " Couldn't check free camps just now.";
   return {
-    text: textParts.join(' '),
-    spoken: spokenBits.join(' '),
-    // Cards / ring-around / pins see the SAME combined list: the commercial top set FOLLOWED
-    // by the free-camps group. Free camps carry source:'osm' so campCardNote gives them the
-    // neutral no-bookings note (never the missing-number apology). Source/hours/type carried
-    // through for the cards and a debug/voice-log view.
-    sites: [...sites, ...freeCamps].map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', hours: s.hours || null, type: s.type || '' })),
+    text,
+    spoken,
+    // Cards / ring-around / pins see the SHOWN list (commercial + free, time-ordered, ≤10). Free
+    // camps carry source:'osm' so campCardNote gives them the neutral note (never the miss apology).
+    sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', hours: s.hours || null, type: s.type || '' })),
   };
 }
 // Per-card number/status decision (pure → benchable). A verified number → tap-to-call;
@@ -4360,35 +4326,36 @@ async function loadTripCampRound(scanText) {
 // campCardNote drives call/miss/free; isFreeGroupEligible drives the green FREE accent.
 function buildCampCard(s, n) {
   const free = isFreeGroupEligible(s);
-  const card = document.createElement('div'); card.className = 'camp-card' + (free ? ' free' : '');
-  const head = document.createElement('div'); head.className = 'camp-card-head';
-  const name = document.createElement('span'); name.className = 'camp-name';
-  name.textContent = n + '. ' + s.name;              // ellipsised so the header stays ONE line
-  head.appendChild(name);
-  // meta = drive time · hours, small, inline on the header (no full-width hours row)
-  const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
-  const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
-  const hrs = hv ? '🕐 ' + (hv.length > 1 ? 'hours vary' : hv[0]) : '';
-  const metaText = [t, hrs].filter(Boolean).join(' · ');
-  if (metaText) { const meta = document.createElement('span'); meta.className = 'camp-meta'; meta.textContent = metaText; head.appendChild(meta); }
-  if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; head.appendChild(tag); }
-  card.appendChild(head);
   const note = campCardNote(s);
-  const actions = document.createElement('div'); actions.className = 'camp-actions';
-  if (s.lat != null && s.lon != null) {
-    const pin = document.createElement('button'); pin.className = 'camp-btn pin';
-    pin.textContent = '📍 Navigate';                 // name is in the header; this is the compact control
-    pin.onclick = () => navigateTo(s.name, s.lat, s.lon);
-    actions.appendChild(pin);                        // flex:1 → full width alone, half width beside a call button
-  }
+  const card = document.createElement('div'); card.className = 'camp-card' + (free ? ' free' : '');
+  const row = document.createElement('div'); row.className = 'camp-row';
+  // The pin button IS the card: "📍 N. Name — time". No "Navigate" word anywhere. Name ellipsises;
+  // the time is pinned (never truncated). Commercial = amber, free = green.
+  const pin = document.createElement('button'); pin.className = 'camp-pin';
+  const nameSpan = document.createElement('span'); nameSpan.className = 'camp-pin-name';
+  nameSpan.textContent = '📍 ' + n + '. ' + s.name;
+  pin.appendChild(nameSpan);
+  const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
+  // hours hint only where it fits (a single short value); never a whole row, never the "vary" noise
+  const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
+  const hint = (hv && hv.length === 1 && String(hv[0]).length <= 7) ? ' · ' + hv[0] : '';
+  const timeSpan = document.createElement('span'); timeSpan.className = 'camp-pin-time';
+  timeSpan.textContent = (t ? '— ' + t : '') + hint;
+  pin.appendChild(timeSpan);
+  if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; pin.appendChild(tag); }
+  if (s.lat != null && s.lon != null) pin.onclick = () => navigateTo(s.name, s.lat, s.lon);
+  row.appendChild(pin);
+  // Commercial with a verified number → compact ICON-ONLY call button (no digits shown). Tap dials.
   if (note.kind === 'call') {
-    const call = document.createElement('a'); call.className = 'camp-btn call';
-    call.href = 'tel:' + note.phone.replace(/[^\d+]/g, ''); call.textContent = '📞 ' + localPhone(note.phone);   // one line: nowrap + tight font (verified vs the real numbers)
+    const call = document.createElement('a'); call.className = 'camp-call'; call.textContent = '📞';
+    call.href = 'tel:' + note.phone.replace(/[^\d+]/g, '');
+    call.setAttribute('aria-label', 'Call ' + s.name);
     call.addEventListener('click', () => noteCampCalled(s.name));   // feed the ring-around
-    actions.appendChild(call);
+    row.appendChild(call);
   }
-  card.appendChild(actions);
-  if (note.kind === 'miss' || note.kind === 'free') {   // honest miss wording, or the free-camp note — small, one line
+  card.appendChild(row);
+  // Free-camp note, or the honest commercial-miss note → small text UNDER the row (one line).
+  if (note.kind === 'miss' || note.kind === 'free') {
     const line = document.createElement('div'); line.className = 'camp-note'; line.textContent = note.text;
     card.appendChild(line);
   }
