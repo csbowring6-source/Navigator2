@@ -41,16 +41,15 @@ Worker `fetch(request, env)` dispatches by exact pathname (wrapped in try/catch 
 | `/weather` | GET | Weather for a position | — |
 | `/stations` | GET | Nearby fuel stations (OSM proximity, all brands) | — |
 | `/fuel` | GET | Live fuel prices by type (NSW & TAS) | — |
-| `/camps` | GET | OSM camps/caravan parks (Overpass) — **phase-3 merge fallback; do not remove** | `camps:` 7-day, stale-serve on Overpass error |
+| `/camps` | GET | OSM camps/caravan parks (Overpass) — **fallback-only (phase 4): the Places-down safety net; do not remove** | `camps:` 7-day, stale-serve on Overpass error |
 | `/camps2` | GET | Places-backed camps (Google Places searchText, exact field mask) — **phase 1** | `camps2:` 30-day |
 | `/camps2-osm` | GET | Filtered OSM **non-commercial** camps / rest areas — **phase 2** | `camps2-osm:` 7-day |
 | `/accom` | GET | Accommodation (hotels/motels/backpackers) | — |
 | `/poi` | GET | POIs by kind | — |
 | `/transcribe` | POST | Cloud speech-to-text for the cloud-ears capture path | — |
-| `/place-phone` | GET | One site's phone by OSM/Places id — **do not remove** | `place-phone:` 90-day (found) / 7-day (miss) |
 | `/geocode` | GET | Nominatim geocode via the Worker (proper UA + retry) | 30-day |
 | `/reverse-geocode` | GET | Nominatim reverse-geocode via the Worker | 7-day |
-| `/places-probe` | GET | TEMPORARY diagnostic — remove at phase 4 | — |
+| `/places-probe` | GET | TEMPORARY diagnostic — still slated for removal (left in place; not covered by the phase-4 ticket) | — |
 | `/log` · `/log/<id>` | POST · GET | Share a voice log: POST stores text under a short id, returns `{id}`; GET retrieves | `log:` 7-day |
 | `/version` | GET | Returns `WORKER_BUILD` | — |
 
@@ -68,7 +67,7 @@ The approved 26 Jul plan, additive and field-proven stage by stage:
 - **① `/camps2`** — Places (commercial). **LIVE.**
 - **② `/camps2-osm`** — OSM non-commercial (free camps, bush camps, rest areas); tag- + name-based classifier excludes commercial-named sites. **LIVE.**
 - **③ Frontend merge** — `fetchMergedCamps` fetches `/camps2` + `/camps2-osm` for the anchor, dedupes (Places wins within ~100 m + shared name token), orders by drive time, appends a **"plus free camps"** group when the top-3 are all commercial. Numbers render **on every card** (tap to call). Fallback: `/camps2` down → old `/camps`; `/camps2-osm` down → Places-only + an honest "couldn't check free camps" line. **LIVE.**
-- **④ Retirement — NOT DONE.** Do **not** remove `/camps`, `/place-phone`, or `/places-probe` yet — the phase-3 fallback and the on-request number lookup still depend on them.
+- **④ Retirement — DONE (05 Aug 2026).** `/place-phone` and its worker verification helpers are removed; the number-on-request voice flow now serves STORED numbers only (from the `/camps2` field mask) with the honest miss line when absent. **`/camps` is retained as the Places-down fallback ONLY** (`fetchMergedCamps`) — do not remove it. `/places-probe` remains (not covered by the phase-4 ticket; still slated for removal).
 
 **Data-coverage limit (free status):** a genuinely-free site that exists ONLY in Places under a commercial name (e.g. "Cowley Beach Caravan Park") with no OSM non-commercial twin has NO fee signal in any feed — it renders brown-with-call honestly; do NOT guess it green. (Free-by-nature is carried from an OSM twin via `freeByNature` when a dedupe drops it; a Places-only record has no such twin.)
 

@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 03:06 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 03:16 AM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=05Aug2026-0306AM"></script>
+<script src="speech.js?v=05Aug2026-0316AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3337,8 +3337,8 @@ function dedupeCampSites(sites) {
 // camps, bush camps, rest areas). Records keep their source tag. Display dedupe only —
 // never merge fields between records. FALLBACK: if /camps2 fails, fall back to the old
 // /camps so we're never worse than today; if only /camps2-osm fails, Places alone plus
-// an osmDown flag so the answer says free camps couldn't be checked. The old /camps and
-// /place-phone stay intact (retirement is phase 4).
+// an osmDown flag so the answer says free camps couldn't be checked. /camps is retained
+// as this fallback ONLY (phase 4 done — the per-site phone lookup is retired).
 function sharesNameToken(a, b) {
   // A DISTINCTIVE shared token: a word ≥4 chars that isn't a generic camp/road word.
   const GEN = /^(park|parks|caravan|van|camp|camps|camping|tourist|holiday|site|sites|free|powered|beach|creek|river|point|rest|area|reserve|road|highway|big4|discovery|top)$/;
@@ -4241,13 +4241,14 @@ function handleNavigateBooked(text) {
   return true;
 }
 
-// ── NUMBER-ON-REQUEST (/place-phone wiring) ──────────────────────────────────
+// ── NUMBER-ON-REQUEST (stored records only — the phone lookup is retired, phase 4) ──
 // The driver asks for a listed site's phone number by voice ("give me the
-// number for X"). We match the spoken name against the THREE ROUND RECORDS
-// ALREADY ON SCREEN — never re-parse a place name from speech — and call
-// /place-phone with THAT site's stored id/name/lat/lon. Found → a one-press dial
-// button (digits shown, never spoken), hooked into the ring-around. Not found →
-// say so plainly and offer the next site. No guessing, no substitutes.
+// number for X"). We match the spoken name against the ROUND RECORDS ALREADY ON
+// SCREEN — never re-parse a place name from speech — and serve THAT site's
+// STORED number (numbers arrive with the round via the /camps2 field mask).
+// Found → a one-press dial button (digits shown, never spoken), hooked into the
+// ring-around. No stored number → say so plainly (ours, honestly) and offer the
+// next site. No guessing, no substitutes, no back-fill lookup.
 
 // Is this a "number for <site>" request? Returns the spoken name portion, ''
 // (asked for a number but named no site → ask which), or null (not a request).
@@ -4293,17 +4294,6 @@ function askWhichSite() {
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   setPending({ type: 'number-which' });   // a bare "all three" / a site name answers this
 }
-// Ask the Worker for ONE site's number, bound to its stored id (never the name).
-async function fetchPlacePhone(site) {
-  const q = `${API_URL}place-phone?id=${encodeURIComponent(site.id || '')}&name=${encodeURIComponent(site.name)}&lat=${site.lat}&lon=${site.lon}`;
-  const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
-  try {
-    const r = await fetch(q, { signal: ctrl.signal });
-    clearTimeout(to);
-    const d = await r.json();
-    return (d && d.found && d.phone) ? String(d.phone) : null;
-  } catch (e) { clearTimeout(to); return null; }
-}
 // Show the number (VISIBLE, never spoken) and ASK before readying the dial. A
 // web app cannot place the call itself — iOS Safari and Android Chrome both
 // require a physical tap plus the OS's own call confirmation, and a code-fired
@@ -4339,17 +4329,13 @@ function denyNumber(site) {
   if (next) { msg += ` Want the number for ${next.name}?`; setPending({ type: 'number-offer', site: next.name }); }
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
-// Resolve a site's number: use its stored one if we already have it, else ask
-// the Worker; present or deny. Shared by the voice request and the "yes" offer.
+// Resolve a site's number from its STORED record (numbers arrive with the round —
+// /camps2 field mask); present or deny honestly. No back-fill lookup (retired,
+// phase 4). Shared by the voice request and the "yes" offer.
 async function getNumberFor(site) {
   if (!site) return;
   if (site.phone) { presentNumber(site, site.phone); return; }
-  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-  let phone = null;
-  try { phone = await fetchPlacePhone(site); } catch (e) {}
-  hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-  if (phone) { site.phone = phone; saveCampRound(); presentNumber(site, phone); }   // now callable in the loop
-  else denyNumber(site);
+  denyNumber(site);
 }
 // Plural request — fetch EVERY displayed site's number in one go (parallel), then
 // show each against its own site. A found site gets a one-press dial (which hooks
@@ -4357,16 +4343,10 @@ async function getNumberFor(site) {
 // NO "want to ring them?" — the ring offer only ever fires where found is true.
 async function getNumbersForAll() {
   const sites = campRound.sites.slice();
-  busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
-  const results = await Promise.all(sites.map(async s => {
-    if (s.phone) return { site: s, phone: s.phone };
-    let phone = null; try { phone = await fetchPlacePhone(s); } catch (e) {}
-    if (phone) s.phone = phone;                       // bind into the stored record
-    return { site: s, phone };
-  }));
-  saveCampRound();                                    // persist any newly-found numbers
-  hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-  const found = results.filter(r => r.phone);
+  // Numbers arrive with the round (/camps2 field mask) — serve the STORED records;
+  // no back-fill lookup (retired, phase 4). An unnumbered site is an
+  // honest miss on its own card, exactly as the round already renders it.
+  const found = sites.filter(s => s.phone);
   const head = !found.length ? `Couldn't find a number for any of the ${sites.length}. You could just drive in and ask at reception.`
              : found.length === sites.length ? `Here are the numbers — tap any to call.`
              : `Got a number for ${found.length} of the ${sites.length} — tap any to call.`;
@@ -5428,7 +5408,7 @@ async function sendMessage(silent){
   if (handleRingAroundVoice(text)) { inp.value=''; inp.style.height='auto'; return; }
   // "take me there" after a booking — navigate to the STORED booked site.
   if (handleNavigateBooked(text)) { inp.value=''; inp.style.height='auto'; return; }
-  // "give me the number for X" — /place-phone for a listed site (never re-parsed).
+  // "give me the number for X" — a listed site's STORED number (never re-parsed).
   if (await handleNumberRequest(text)) { inp.value=''; inp.style.height='auto'; return; }
 
   // A destination statement sets or updates the trip — no AI round-trip needed.
