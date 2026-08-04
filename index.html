@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 05:32 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 06:05 PM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-0532PM"></script>
+<script src="speech.js?v=04Aug2026-0605PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1779,30 +1779,33 @@ function applyProfile() {
 }
 
 function loadProfile() {
-  try {
-    const saved = localStorage.getItem('navigator_profile');
-    if (saved) {
-      const p = JSON.parse(saved);
-      // Migrate silently — old profiles carry name/vehicles/rego/van/fuel; the new
-      // fields default. A returning user must never be shown the interview again.
-      userName = p.name || 'there';
-      userVehicles = (p.vehicles && p.vehicles.length) ? p.vehicles : ['car'];
-      userRego = p.rego || '';
-      userVan = p.van || '';
-      if (p.fuel) selectedFuel = p.fuel;
-      userHeight = p.height || '';
-      userLength = p.length || '';
-      ownedApps = p.ownedApps || [];
-      soloContact = p.soloContact || null;
-      everUsedHandsFree = !!p.everUsedHandsFree;   // old profiles default false — the tip may still show
-      applyProfile();
-      showHome();                       // returning user → straight to home, no overlay
-    } else {
-      openSetup(false);                 // first run ever → the interview
-    }
-  } catch(e) {
-    openSetup(false);
-  }
+  // The first-run interview appears ONLY when NO profile exists in storage. Once a profile is saved,
+  // a returning driver ALWAYS lands on home — even if a later step fails to apply or render. The old
+  // single try/catch wrapped the field-load AND applyProfile()/showHome(), so ANY render throw
+  // (e.g. selectVehicle, or renderHomeTripCard on trip data) fell through to openSetup and dumped a
+  // returning driver into the first-run interview with blank name/fuel — despite the saved profile
+  // still sitting in localStorage (field 4 Aug). The decision is now on PRESENCE alone.
+  let saved = null;
+  try { saved = localStorage.getItem('navigator_profile'); } catch(e) {}
+  if (!saved) { openSetup(false); return; }   // genuine first run — the ONLY trigger for setup
+  // Parse best-effort — a present-but-unparseable profile is near-impossible (persistProfile always
+  // writes valid JSON) but is treated as "exists" too: fields default, and we still land on home
+  // (never setup, never wiping the stored value), so the driver can re-edit from the menu if needed.
+  let p = {};
+  try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === 'object') p = parsed; } catch(e) {}
+  // Migrate silently — old profiles carry name/vehicles/rego/van/fuel; the new fields default.
+  userName = p.name || 'there';
+  userVehicles = (p.vehicles && p.vehicles.length) ? p.vehicles : ['car'];
+  userRego = p.rego || '';
+  userVan = p.van || '';
+  if (p.fuel) selectedFuel = p.fuel;
+  userHeight = p.height || '';
+  userLength = p.length || '';
+  ownedApps = p.ownedApps || [];
+  soloContact = p.soloContact || null;
+  everUsedHandsFree = !!p.everUsedHandsFree;   // old profiles default false — the tip may still show
+  try { applyProfile(); } catch(e) {}   // apply is BEST-EFFORT — a failure must NEVER re-route to setup
+  try { showHome(); } catch(e) {}       // a profile EXISTS → home, always (never the first-run interview)
 }
 // ── FRONT-SCREEN VOICE (removed) — the dead startRec cluster (startVoiceStart,
 // stopStartMic, resetStartMic, routeStartSpeech + startRec state) was orphaned
