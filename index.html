@@ -146,6 +146,11 @@
      📞 call button (44×44, no digits). Free = green, full-width pin, FREE tag on the row, note under.
      Tap targets ~44px. Same shape for live answers and restored rounds. Up to 10 rows; scroll the tail. */
   .camp-card{margin-top:5px;}                                  /* container only — the button carries the visual */
+  /* A card carrying an EXCEPTIONAL note is FRAMED (tinted + bordered) so the note sits INSIDE its
+     coloured boundary — never floating grey text between cards (field 4 Aug). Note-less cards are
+     unchanged (bare button). Amber for commercial, green for free — the existing colour scheme. */
+  .camp-card.has-note{padding:5px;border-radius:11px;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.30);}
+  .camp-card.has-note.free{background:rgba(46,204,113,0.12);border-color:rgba(46,204,113,0.30);}
   .camp-row{display:flex;gap:6px;align-items:stretch;}
   .camp-pin{flex:1;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:none;border-radius:9px;background:var(--amber);color:var(--navy);font-family:'Inter',sans-serif;font-weight:700;cursor:pointer;text-align:left;overflow:hidden;}
   .camp-card.free .camp-pin{background:var(--green);}
@@ -3540,10 +3545,11 @@ function formatCampsAnswer(res) {
     if (nF) spoken += ` Plus ${nF} free below.`;
   }
   if (res.osmDown) spoken += " Couldn't check free camps just now.";   // honest failure, trimmed
-  // ── BANNER text — a short header; the single-row cards below carry each site's detail ──
-  let text = (!nP && nF)
-    ? `${wPrefix}${nF} free ${nF === 1 ? 'camp' : 'camps'} ${where}:`
-    : `${wPrefix}${nP} ${nP === 1 ? 'park' : 'parks'} ${where}:`;
+  // ── BANNER text — HONEST header: the REAL counts of what is shown, split by colour (field 4 Aug:
+  // "5 parks near Innisfail" above a 10-row list read as an undercount). "<N> parks + <M> free camps".
+  const parksStr = nP ? `${nP} ${nP === 1 ? 'park' : 'parks'}` : '';
+  const freeStr  = nF ? `${nF} free ${nF === 1 ? 'camp' : 'camps'}` : '';
+  let text = `${wPrefix}${[parksStr, freeStr].filter(Boolean).join(' + ') || 'nothing'} ${where}:`;
   if (res.osmDown) text += " Couldn't check free camps just now.";
   return {
     text,
@@ -3563,13 +3569,14 @@ function campCardNote(s) {
   // with no number is normal (never the apology). Same eligibility as the free group, so a
   // Places-only free camp (e.g. "RV Free Camp") is treated as free, not commercial.
   if (!isFreeGroupEligible(s)) return { kind: 'miss', text: phoneMiss(s.name, { noRing: true }) };
-  // A pub/showground-style free stop is booked/checked in person — say so honestly, rather
-  // than the bare "no bookings" note (field 30 Jul: Garradunga Hotel is a legitimate free
-  // camp, but at the bar, not a drive-in). Rest areas and plain free camps keep their note.
+  // EXCEPTIONAL free notes only (field 4 Aug): a pub/showground-style free stop is booked/checked
+  // in person — say so honestly (Garradunga Hotel is a legitimate free camp, but at the bar). A
+  // PLAIN free camp / rest area gets NO note — the green + FREE tag already says it (a floating
+  // grey note read as a section banner for the card below). No text renders between cards.
   const name = s.name || '';
   if (/\b(hotel|pub|tavern)\b/i.test(name)) return { kind: 'free', text: 'Free camping — check at the bar.' };
   if (/\bshow\s?grounds?\b/i.test(name)) return { kind: 'free', text: 'Free camping — check at the office.' };
-  return { kind: 'free', text: (s.type === 'rest area') ? 'Rest area — no bookings, just pull in.' : 'Free camp — no bookings needed.' };
+  return { kind: 'free' };   // plain free camp / rest area — no note
 }
 
 // Is this a camps/parks request? Match plurals and phrasings robustly — the old
@@ -4368,8 +4375,11 @@ function buildCampCard(s, n) {
     row.appendChild(call);
   }
   card.appendChild(row);
-  // Free-camp note, or the honest commercial-miss note → small text UNDER the row (one line).
-  if (note.kind === 'miss' || note.kind === 'free') {
+  // EXCEPTIONAL notes only (pub/showground "check at the bar", the commercial no-number honest line)
+  // render as a second small line INSIDE the card's coloured boundary — the card gains 'has-note' so
+  // it's a framed unit, never floating grey text between cards. Plain free camps carry no note.
+  if (note.text) {
+    card.className += ' has-note';
     const line = document.createElement('div'); line.className = 'camp-note'; line.textContent = note.text;
     card.appendChild(line);
   }

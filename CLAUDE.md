@@ -85,7 +85,7 @@ Match these exactly; treat drift as a regression.
 3. **Sat-nav handoff** — names the driver's own preferred sat-nav (Google/Apple Maps or Waze, per setup). Never hardcode "Google Maps."
 4. **Honest failure** — OUR lookup failing is stated as ours (*"couldn't find a number for X"*, *"couldn't check free camps just now"*), **never dressed as a fact about the world** (*never* "the park has no number"). SPEC §0.
 5. **Numbers on the card by default** — every park card shows a tap-to-call number under its directions control, on by default, never on request.
-6. **Free camps are normal, not a failure** — a free camp / rest area with no phone gets a neutral note (pub/showground → "check at the bar/office"), **never the missing-number apology**.
+6. **Free camps are normal, not a failure** — a PLAIN free camp / rest area gets **NO note** (the green + FREE tag says it; field 4 Aug: a floating grey note read as a banner for the card below). Only EXCEPTIONAL notes render, and INSIDE the card's coloured boundary (`has-note` frame): pub/showground → "check at the bar/office"; a commercial no-number → the honest miss line. **Never the missing-number apology for a free site**, and **no text renders between cards, ever**.
 
 ## How we work (ticket discipline)
 
