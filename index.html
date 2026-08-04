@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 02:42 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 05:32 PM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-0242PM"></script>
+<script src="speech.js?v=04Aug2026-0532PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4486,10 +4486,13 @@ function applyCampFilter(bub) {
 // filled the screen with the cards below the fold. Runs for live answers and the post-reload restore.
 function scrollFirstCardIntoView(bub) {
   const chat = document.getElementById('chatArea');
-  const card = bub && bub.querySelector('.camp-card');
-  if (!chat || !card) return false;
-  const cRect = chat.getBoundingClientRect(), kRect = card.getBoundingClientRect();
-  chat.scrollTop += (kRect.top - cRect.top) - 8;   // card 1 to the top, 8px breathing room above it
+  if (!chat || !bub || !bub.querySelector('.camp-card')) return false;
+  // Bring the RESULT BLOCK's TOP — the summary line + the filter chips — to the top of the chat
+  // viewport so they're FULLY VISIBLE on open (field 4 Aug: scrolling card 1 to the top pushed the
+  // summary and the interactive All|Parks|Free chips ABOVE the fold, invisible with no cue). The
+  // banner is now a single line, so nothing long scrolls past — supersedes the old "card 1 to top".
+  const cRect = chat.getBoundingClientRect(), bRect = bub.getBoundingClientRect();
+  chat.scrollTop += (bRect.top - cRect.top) - 8;   // result-block top to the viewport top, 8px breathing room
   return true;
 }
 async function answerCamps(scanText) {
