@@ -586,7 +586,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 11:27 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 04 Aug 2026, 11:53 AM AEST</div>
   </div>
 </div>
 
@@ -821,7 +821,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=04Aug2026-1127AM"></script>
+<script src="speech.js?v=04Aug2026-1153AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3335,13 +3335,17 @@ const CAMPS_POOL_MAX = 40;    // pre-cap crow-nearest slice — a city's parks a
 // A record belongs on a FREE-CAMP card (field 31 Jul). source:'osm' is the OSM
 // non-commercial feed. But a free camp can ALSO come only from Places (e.g. "Hughenden RV
 // Free Camp", phase-1 probe), so a Places record ALSO qualifies when its name/type clearly
-// marks it non-commercial AND it carries no number. Tight name list — never a generic
-// "camp" match — so a real caravan park is never mistaken for a free stop.
+// marks it non-commercial. Tight name list — never a generic "camp" match — so a real caravan
+// park is never mistaken for a free stop.
+// FREE MEANS GREEN, regardless of phone (field 4 Aug): this is a NATURE test ONLY — the presence
+// of a phone number plays NO part. It drives the green pin + FREE tag AND free-group membership.
+// The CALL control is decided separately by campCardNote on the phone alone, so a green site WITH
+// a number shows both the green pin and the 📞 icon.
 const FREE_CAMP_NAME = /\b(rest area|free camp|rv free camp)\b/i;
 function isFreeGroupEligible(s) {
   if (!s) return false;
   if (s.source === 'osm') return true;
-  return !verifiedPhone(s) && (FREE_CAMP_NAME.test(s.name || '') || FREE_CAMP_NAME.test(s.type || ''));
+  return FREE_CAMP_NAME.test(s.name || '') || FREE_CAMP_NAME.test(s.type || '');
 }
 function pickFreeCampGroup(top, pool) {
   if ((top || []).some(s => isFreeGroupEligible(s))) return [];   // a free camp already made the top set — no separate group
