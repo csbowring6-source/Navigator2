@@ -9,7 +9,11 @@ const clock = { now: 0 };
 let timers = [];
 const fakeSetTimeout = (fn, ms) => { const id = {}; timers.push({ id, fn, due: clock.now + (ms || 0) }); return id; };
 const fakeClearTimeout = (id) => { timers = timers.filter(t => t.id !== id); };
-const fakeRAF = () => 0;
+// rAF is queued (was a drop) so a CLOUD-RIG scenario can pump the VAD tick loop against a
+// scripted level-track. Nothing else ever pumps the queue, so every non-rig scenario sees
+// exactly the old behaviour (callbacks parked, never fired).
+const rafQueue = [];
+const fakeRAF = (fn) => { rafQueue.push(fn); return 0; };
 const RealDate = Date;
 const FakeDate = class extends RealDate { static now() { return clock.now; } };
 function advance(ms) {
@@ -46,9 +50,66 @@ function stubEl() {
     classList: { toggle() {}, add() {}, remove() {} },
     appendChild() {}, };
 }
-const MockAudioCtx = class { constructor(){ this.currentTime = 0; this.destination = {}; } createOscillator(){ return { type:"", frequency:{}, connect(){}, start(){}, stop(){} }; } createGain(){ return { gain:{ setValueAtTime(){}, exponentialRampToValueAtTime(){} }, connect(){} }; } };
+// Extended for the CLOUD RIG: resume/close/state + analyser + stream source, so the REAL
+// armRecordingSilence/finishCloudCapture verified-analyser logic runs against it. The analyser
+// reads the rig's scripted level at call time (RIG.level — 0 silence, e.g. 40 speech). All
+// additions are additive: the cue scenarios only ever used createOscillator/createGain.
+const MockAudioCtx = class {
+  constructor(){ this.currentTime = 0; this.destination = {}; this.state = "suspended"; }
+  resume(){ this.state = "running"; return Promise.resolve(); }
+  close(){ this.state = "closed"; }
+  createOscillator(){ return { type:"", frequency:{ setValueAtTime(){} }, connect(){}, start(){}, stop(){} }; }
+  createGain(){ return { gain:{ setValueAtTime(){}, exponentialRampToValueAtTime(){} }, connect(){} }; }
+  createMediaStreamSource(){ return { connect(){} }; }
+  createAnalyser(){ return { fftSize: 512, connect(){}, getByteTimeDomainData(buf){ buf.fill(128); buf[0] = 128 + (RIG.level || 0); } }; }
+};
 const mockWindow = { speechSynthesis: synth, SpeechRecognition: MockSR, webkitSpeechRecognition: MockSR, AudioContext: MockAudioCtx, webkitAudioContext: MockAudioCtx };
 const mockNavigator = { userAgent: "bench", mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) }, permissions: { query: async () => ({ state: "granted" }) } };
+
+// ── CLOUD-EARS RIG (BENCH-RIG ticket) ─────────────────────────────────────────
+// Fake MediaRecorder + a scripted analyser level-track + a scripted fetch('/transcribe'),
+// so the REAL cloud path (startCloudCapture → VAD → finishCloudCapture → transcribeBlob →
+// deliverTranscript) runs end-to-end with zero hardware and zero network. SCOPED on purpose:
+// RIG.enable() installs MediaRecorder on BOTH window and the bare global (speech.js checks
+// window.MediaRecorder but constructs a bare `new MediaRecorder`), flipping cloudEarsSupported()
+// true only inside a rig scenario; RIG.disable() restores the no-MediaRecorder world that
+// scenarios 15/17 (basic one-shot path) depend on. The fetch mock is global but THROWS when
+// nothing is scripted, so no other scenario can silently hit a network path.
+class MockMediaRecorder {
+  constructor(stream, opts) { this.stream = stream; this.mimeType = (opts && opts.mimeType) || "audio/webm"; this.state = "inactive"; this.ondataavailable = null; this.onstop = null; RIG.recorder = this; }
+  static isTypeSupported() { return true; }
+  start() { this.state = "recording"; RIG.starts++; }
+  stop() { this.state = "inactive"; RIG.stops++; if (this.ondataavailable) this.ondataavailable({ data: RIG.audio }); if (this.onstop) this.onstop(); }
+}
+const RIG = {
+  recorder: null, level: 0, starts: 0, stops: 0,
+  audio: new Blob(["x".repeat(4096)], { type: "audio/webm" }),   // a plausible utterance blob (> the 1024b floor)
+  transcripts: [],   // scripted /transcribe outcomes, consumed in order: a string resolves {text}; {fail:'…'} throws; {status:500} HTTP-fails
+  fetches: [],       // every fetch the module made: { url, opts }
+  enable()  { mockWindow.MediaRecorder = MockMediaRecorder; globalThis.MediaRecorder = MockMediaRecorder; },
+  disable() { delete mockWindow.MediaRecorder; delete globalThis.MediaRecorder; this.recorder = null; this.level = 0; },
+  reset()   { this.recorder = null; this.level = 0; this.starts = 0; this.stops = 0; this.transcripts.length = 0; this.fetches.length = 0; },
+  // Drive the VAD tick loop with a level-track: one entry per tick (0 = silence, ~40 = speech),
+  // e.g. [...Array(20).fill(0), ...Array(15).fill(40), ...Array(30).fill(0)]. Each tick fires the
+  // queued rAF callback(s) at the CURRENT clock, then advances tickMs and lets microtasks settle.
+  async pump(levels, tickMs = 100) {
+    for (const lvl of levels) {
+      this.level = lvl;
+      rafQueue.splice(0).forEach(fn => fn());
+      advance(tickMs);
+      await Promise.resolve();
+    }
+  },
+  settle() { return new Promise(r => setImmediate(r)); },   // drain ALL pending microtask chains (real macrotask)
+};
+globalThis.fetch = async (url, opts) => {
+  RIG.fetches.push({ url: String(url), opts });
+  const next = RIG.transcripts.shift();
+  if (next === undefined) throw new Error("bench fetch: nothing scripted for " + url);
+  if (next && next.fail) throw new Error(next.fail);
+  if (next && next.status) return { ok: false, status: next.status, json: async () => ({ error: "scripted " + next.status }) };
+  return { ok: true, status: 200, json: async () => ({ text: next }) };
+};
 // Persistent per-id elements so a test can read back what setMicState wrote (e.g. the
 // #wakeBtn label). Existing scenarios never read element state, so persistence is inert
 // for them; writes still land as before.
@@ -561,6 +622,51 @@ check("one-shot cancel delivered NOTHING", delivered === 0);
 check("the mic CLOSES after a one-shot cancel", Voice.state() === "off");
 check("the send arrow REVERTS to ➤ outside recording", el("sendBtn").textContent === "➤");
 check("sendOrCancel branches on a recording state (index.html)", /Voice\.state\(\) === 'recording'.*Voice\.cancelCapture\(\)/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
+
+// ── SCENARIO 18: CLOUD RIG (BENCH-RIG ticket) — the rig drives the REAL one-shot cloud
+// path end-to-end: tap → MediaRecorder → analyser level-track → VAD silence stop →
+// scripted /transcribe → deliverTranscript, events asserted in the ring buffer. This
+// proves the mocks against the EXISTING path BEFORE any session engine is built on them.
+console.log("\n--- 18. cloud rig: one-shot → VAD silence stop → transcribe → deliver ---");
+// (a) the happy path: speech, then quiet — VAD ends the turn, Whisper text delivers once
+fresh(); timers.length = 0; rafQueue.length = 0; RIG.reset(); RIG.enable();
+Voice.onTranscript(() => { delivered++; });
+RIG.transcripts.push("caravan parks in Cardwell");
+Voice.toggleCapture();                       // one-shot tap → startListening → the CLOUD path
+await RIG.settle();                          // permission gate + getUserMedia + recorder start + analyser resume
+check("rig recorder created and RECORDING on the real path", !!RIG.recorder && RIG.recorder.state === "recording" && RIG.starts === 1);
+check("mic state 'recording', ✕ showing, ONE open cue", Voice.state() === "recording" && el("sendBtn").textContent === "✕" && countCue("open") === 1);
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]);   // ~0.8s speech, then 3.2s quiet → the 2.8s VAD cut fires
+await RIG.settle();                          // onstop → finishCloudCapture → fetch → deliverTranscript
+check("VAD silence STOPPED the recorder (once)", RIG.recorder.state === "inactive" && RIG.stops === 1);
+check("exactly ONE upload went to /transcribe", RIG.fetches.length === 1 && /transcribe$/.test(RIG.fetches[0].url));
+check("ring buffer: deliver:cloud:silence logged", kinds().includes("deliver:cloud:silence"));
+check("state landed on thinking after the transcript", Voice.state() === "thinking");
+advance(700);                                // the 600ms deliver handoff
+check("delivered exactly ONCE to the app", delivered === 1);
+check("no close cue (one-shot — no session opened or closed)", countCue("close") === 0);
+// (b) a verified-silent window: analyser ran, no voice — discarded LOCALLY, nothing uploaded
+fresh(); timers.length = 0; rafQueue.length = 0; RIG.reset();
+Voice.onTranscript(() => { delivered++; });
+Voice.toggleCapture();
+await RIG.settle();
+await RIG.pump(Array(10).fill(0));           // a silent second — the VAD never arms (no speech yet)
+Voice.toggleCapture();                       // driver taps to send anyway
+await RIG.settle();
+check("a verified-silent capture is discarded locally — NOTHING uploaded", RIG.fetches.length === 0 && delivered === 0);
+check("the silent discard closed the mic", Voice.state() === "off");
+// (c) a scripted /transcribe FAILURE: the turn falls back to Web Speech, honestly
+fresh(); timers.length = 0; rafQueue.length = 0; RIG.reset(); H.started = 0;
+Voice.onTranscript(() => { delivered++; });
+RIG.transcripts.push({ fail: "network down" });
+Voice.toggleCapture();
+await RIG.settle();
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]);
+await RIG.settle();
+check("the scripted failure was consumed (one fetch attempt made)", RIG.fetches.length === 1);
+check("fallback: the BASIC recogniser took the turn, nothing false-delivered", H.started >= 1 && delivered === 0);
+Voice.cancelCapture();                       // tidy: bin the fallback capture, mic off
+RIG.disable(); timers.length = 0; rafQueue.length = 0;
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
