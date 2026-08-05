@@ -134,10 +134,10 @@ function openConversation() {
   // CS-SEAM (step 7) — THE ENGINE PICK. Android with the full cloud kit present
   // (MediaRecorder + getUserMedia + AudioContext) gets the CLOUD session; everything
   // else — including iOS, per the design report — keeps the Web-Speech session exactly
-  // as shipped. CS_ENABLED stays false until step 9 turns the seam on, so the shipped
-  // build always falls straight through to openWebSpeechSession.
+  // as shipped. CS_ENABLED is LIVE (step 9): Android + full kit sessions run cloud;
+  // every other device falls straight through to openWebSpeechSession.
   const cloudPick = CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
-  if (CS_ENABLED) logEvent('engine', cloudPick ? 'cloud' : 'webspeech');   // the PICK, first line of every session log (flag off → no event: byte-identical)
+  if (CS_ENABLED) logEvent('engine', cloudPick ? 'cloud' : 'webspeech');   // the PICK — the first line of every session in the field log
   if (cloudPick) { csOpen(); return; }
   openWebSpeechSession();
 }
@@ -470,7 +470,7 @@ function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().f
 
 function closeConversation(reason) {
   // CS-SKELETON (flag-gated): a cloud session closes on its own path. csActive can
-  // only ever be true when CS_ENABLED is — this branch is dead in the shipped build.
+  // only ever be true when the engine pick chose cloud (CS_ENABLED live since step 9).
   if (csActive) { csCloseSession(reason); return; }
   const wasActive = convoActive;
   logEvent('close', reason + (wasActive ? '' : ' (noop)'));
@@ -949,9 +949,9 @@ async function finishCloudCapture() {
 // Hands-free on the CLOUD engine: ONE held mic stream for the whole session, a
 // fresh MediaRecorder per turn WINDOW, vadMonitor segmentation, upload via
 // transcribeBlob, delivery through deliverTranscript — the same seam as every
-// other ears path. GATED OFF: CS_ENABLED is false in the shipped build, so
-// csActive can never become true and every gated branch is dead — behaviour is
-// byte-identical to today until the CS-SEAM ticket sets the engine policy.
+// other ears path. LIVE since step 9 (05 Aug 2026): CS_ENABLED is true, and the
+// engine pick in openConversation routes Android-with-full-kit sessions here;
+// everything else (iOS, no-kit, one-shot mics) keeps the shipped paths.
 // Status + cues are LIVE (step 4): states route through setMicState (single status
 // element, ✕ send-swap while recording) and the melodic cues fire through the SAME
 // once-guards as the Web-Speech session (openCued per driver-turn window, convoCued
@@ -969,7 +969,7 @@ async function finishCloudCapture() {
 // Web-Speech session — cue suppressed because the exchange continues; no fallback
 // available → honest close. Step 8 formalises the cs.* log kinds; step 9 flips
 // CS_ENABLED on for the Android field trial.
-const CS_ENABLED = false;   // the flag — flipped by CS-SEAM policy, never here
+const CS_ENABLED = true;    // LIVE (step 9, 05 Aug 2026): the Android field trial — the engine pick in openConversation gates everything
 let csActive = false;       // cloud session open?
 let csStream = null;        // the ONE held mic stream — the session owns it end to end
 let csCtx = null;           // AudioContext feeding the VAD
@@ -1510,7 +1510,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 02:59 PM AEST',
+    BUILD: '05 Aug 2026, 03:05 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -1525,7 +1525,7 @@ function _afterSpeak() {
     unlockAudio:  unlockAudio,
     // state (read-only getters — no external writes to internals)
     state:         function () { return micState; },
-    isSessionOpen: function () { return convoActive || csActive; },   // csActive is always false while CS_ENABLED is off
+    isSessionOpen: function () { return convoActive || csActive; },   // whichever engine holds the session
     isCapturing:   function () { return cloudActive || captureActive; },
     canHandsFree:  convoSupported,   // does this browser support a hands-free session? (gates the first-use tip)
     // couplings

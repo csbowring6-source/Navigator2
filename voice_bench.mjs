@@ -726,18 +726,18 @@ check("the stale '~1.5s' comment is gone from the silence-cut header", !/End the
 rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 20: CS-SKELETON — the cloud session, gated OFF in the shipped build ─
-// (a) flag OFF (the shipped file): even WITH MediaRecorder present, openSession still
-// runs the Web-Speech session — byte-identical behaviour. (b) flag ON (a second
-// instance loaded from the same source with only the flag flipped): held stream,
-// per-turn windows, VAD segmentation, idle discard, upload → deliver, close.
+// (a) the OTHER path untouched: a NON-Android device (the primary instance) with
+// MediaRecorder present still gets the Web-Speech session — the pick, not the flag,
+// routes it. (b) the ANDROID instance: held stream, per-turn windows, VAD
+// segmentation, upload → deliver, close.
 console.log("\n--- 20. CS-skeleton: flag-off byte-identical; flag-on session end-to-end ---");
-check("the shipped flag is OFF (const CS_ENABLED = false)", /const CS_ENABLED = false;/.test(SRC));
+check("the shipped flag is ON (const CS_ENABLED = true — step 9, the Android field trial)", /const CS_ENABLED = true;/.test(SRC));
 check("cs state is fully ISOLATED from the one-shot cloud globals", !/\bmediaRecorder\b|\brecChunks\b|\brecVoiced\b|\brecAnalyserOn\b|\bcloudActive = /.test(exFn("csStartWindow") + exFn("csEndWindow") + exFn("csCloseSession")));
 // (a) flag off: MediaRecorder available, yet openSession = the Web-Speech session
 fresh(); timers.length = 0; rafQueue.length = 0; RIG.reset(); RIG.enable();
 Voice.openSession();
-check("flag OFF: openSession runs the WEB-SPEECH session (open:session, a recogniser)", kinds().includes("open:session") && H.rec !== null);
-check("flag OFF: no cs.* event ever fires", !kinds().some(k => k.startsWith("cs.")));
+check("non-Android: openSession runs the WEB-SPEECH session (open:session, a recogniser)", kinds().includes("open:session") && H.rec !== null);
+check("non-Android: no cs.* event ever fires (engine:webspeech logged instead)", !kinds().some(k => k.startsWith("cs.")) && kinds().includes("engine:webspeech"));
 Voice.closeSession("tap");
 // (b) flag ON: a second instance from the SAME source, only the flag flipped
 let gumCalls = 0, trackStops = 0;
@@ -799,7 +799,7 @@ RIG.disable(); rafQueue.length = 0; timers.length = 0;
 // ── SCENARIO 21: CS-SPEAKING — TTS clash, tail reopen, multi-turn, offer, 45s close,
 // voiced-time artefact rule. All on the flag-ON instance; the shipped flag stays off.
 console.log("\n--- 21. CS-speaking: TTS discipline, reply-flow resume, offer + 45s close, voiced-time artefact ---");
-check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+check("the shipped flag is ON (field build)", /const CS_ENABLED = true;/.test(SRC));
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();
 // turn 1 delivers
@@ -857,7 +857,7 @@ RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 22: CS-CANCEL — ✕ + spoken "scratch that" on the cloud engine ─────
 console.log("\n--- 22. CS-cancel: ✕ discards + fresh window; spoken cancel routes nowhere; harmless no-ops; close clock untouched ---");
-check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+check("the shipped flag is ON (field build)", /const CS_ENABLED = true;/.test(SRC));
 // (a) ✕ mid-recording: discard, blip, fresh window, session open — and the 45s close is NOT reset
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();            // close armed at open (t0)
@@ -900,7 +900,7 @@ RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 23: CS-SEAM — engine pick, micTap close, honest swaps, no ping-pong ─
 console.log("\n--- 23. CS-seam: engine pick both ways, micTap, denied-swap, fail-streak swap, no ping-pong ---");
-check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+check("the shipped flag is ON (field build)", /const CS_ENABLED = true;/.test(SRC));
 check("no ping-pong is POSSIBLE: csOpen has exactly ONE call site (the engine pick)", (SRC.match(/\{ csOpen\(\); return; \}/g) || []).length === 1 && (SRC.match(/csOpen\(\)/g) || []).length === 2);
 // (a) engine pick both ways + (b) micTap
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
@@ -962,7 +962,7 @@ RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 24: CS-LOG — the full lifecycle vocabulary, in order; swap; privacy ─
 console.log("\n--- 24. CS-log: lifecycle event sequence in ORDER; swap sequence; privacy ---");
-check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+check("the shipped flag is ON (field build)", /const CS_ENABLED = true;/.test(SRC));
 const inOrder = (log, seq) => { let i = 0; for (const k of log) { if (i < seq.length && (typeof seq[i] === "string" ? k === seq[i] : seq[i].test(k))) i++; } return i === seq.length; };
 const SCRIPTS = ["caravan parks near port douglas", "cheapest diesel in tully"];
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
