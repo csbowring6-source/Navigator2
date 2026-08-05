@@ -131,9 +131,17 @@ function toggleConversation() {
 // The opening TAP (a real gesture): unlock audio + start the ONE recogniser here,
 // synchronously, before any await — this is what makes it hold on iOS.
 function openConversation() {
-  // CS-SKELETON (flag-gated, DEAD in the shipped build): the cloud-engine session.
-  // CS_ENABLED stays false until the CS-SEAM ticket sets the real engine policy.
-  if (CS_ENABLED && cloudEarsSupported()) { csOpen(); return; }
+  // CS-SEAM (step 7) — THE ENGINE PICK. Android with the full cloud kit present
+  // (MediaRecorder + getUserMedia + AudioContext) gets the CLOUD session; everything
+  // else — including iOS, per the design report — keeps the Web-Speech session exactly
+  // as shipped. CS_ENABLED stays false until step 9 turns the seam on, so the shipped
+  // build always falls straight through to openWebSpeechSession.
+  if (CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && (window.AudioContext || window.webkitAudioContext)) { csOpen(); return; }
+  openWebSpeechSession();
+}
+// The Web-Speech session open — the original body, unchanged. Also the SWAP TARGET
+// when the cloud engine can't open or fails mid-session (pathology guards live here).
+function openWebSpeechSession() {
   if (!convoSupported()) {
     const m = "This browser can't do hands-free listening — tap the mic for each question.";
     addMsg('nav', m); lastSpoken = m; speak(m); return;
@@ -547,7 +555,7 @@ function setMicState(state) {
 function micTap() {
   unlockAudio();
   if (cloudActive || captureActive) { stopCapture(true); return; }   // one-shot capture → send
-  if (convoActive) { closeConversation('tap'); return; }             // session → close
+  if (convoActive || csActive) { closeConversation('tap'); return; } // EITHER session → close (closeConversation routes cs)
   if (micState === 'thinking') return;                               // processing — ignore taps
   openConversation();                                                // idle → open a hands-free session
 }
@@ -952,9 +960,13 @@ async function finishCloudCapture() {
 // Cancel is LIVE (step 6): the ✕ and a trailing spoken "scratch/cancel/forget that"
 // both bin the current window/utterance (nothing uploads or routes), blip, and open
 // a fresh turn window — the session stays open; the 45s close is NOT reset by a
-// cancel. Remaining limits (the LAST ticket, step 7 CS-SEAM): no engine pick or
-// honest mid-session swap, and a mic-button tap does not yet close a cs session
-// (micTap only knows the convo session — wired at the seam).
+// cancel. The SEAM is LIVE (step 7): openConversation picks the engine (Android +
+// full cloud kit → cs; everything else, incl. iOS, → Web Speech); micTap closes a
+// cs session like any other; a denied mic at open or CS_FAIL_MAX consecutive
+// transcribe failures triggers the ONE honest swap (csSwapToWebSpeech) onto the
+// Web-Speech session — cue suppressed because the exchange continues; no fallback
+// available → honest close. Step 8 formalises the cs.* log kinds; step 9 flips
+// CS_ENABLED on for the Android field trial.
 const CS_ENABLED = false;   // the flag — flipped by CS-SEAM policy, never here
 let csActive = false;       // cloud session open?
 let csStream = null;        // the ONE held mic stream — the session owns it end to end
@@ -977,21 +989,49 @@ let csLastVoicedAt = 0;     // time, not blob duration — the leading wait infl
 const CS_WINDOW_MS = 45000; // no window grows past this (voiced → cutoff send; the 45s silence
                             // close beats a pure-idle window to the bound, so idle discard is
                             // now just the safety net for a close-less edge, e.g. VAD down)
+const CS_FAIL_MAX = 3;      // consecutive transcribe failures before the ONE honest engine swap
+let csFailStreak = 0;       // reset by any successful /transcribe round trip (and at open)
+
+// ONE honest engine swap, at most once per session — never silent, never a ping-pong
+// (csOpen has exactly ONE caller, the engine pick in openConversation; no failure path
+// re-enters it, and the Web-Speech session's own failures close honestly, not back to
+// cloud). The cs side shuts cleanly WITHOUT the close cue — the EXCHANGE continues,
+// only the engine changes (convoCued suppresses it; the convo open re-arms the guard).
+// No fallback engine at all → this IS an ending: honest close, cue, established line.
+function csSwapToWebSpeech(reason) {
+  logEvent('cs.swap', reason);
+  const noFallback = !convoSupported();
+  if (csActive) {
+    if (!noFallback) convoCued = true;                 // suppress the close cue only when the exchange continues
+    csCloseSession(noFallback ? 'honest' : 'swap');
+  }
+  if (noFallback) {
+    const m = "Hands-free listening won't hold on this browser — tap the mic for each question.";
+    addMsg('nav', m); lastSpoken = m; speak(m);
+    return;
+  }
+  const m = "Cloud listening isn't working right now — switching to the phone's own listening.";
+  addMsg('nav', m); lastSpoken = m;
+  openWebSpeechSession();                              // pathology guards live from here
+  speak(m);                                            // spoken INSIDE the session: pauses, plays, resumes with the cue
+}
 
 async function csOpen() {
   if (csActive || convoActive || cloudActive || captureActive) return false;   // one mic owner at a time
   try {
     csStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
+    // Mic denied for the cloud engine at open — the honest swap: say so and carry the
+    // exchange on the Web-Speech session (which asks for the mic its own way).
     logEvent('cs.open', 'denied');
-    setMicState('off');
+    csSwapToWebSpeech('denied');
     return false;
   }
   try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !csCtx) csCtx = new Ctx(); } catch (e) { csCtx = null; }
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
-  csSpeaking = false; csHadExchange = false; csOffered = false;
+  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0;
   logEvent('cs.open', 'session');
   setMicState('listening');
   csArmSilence();             // armed BEFORE the first window, so at a 45s tie the close beats the window bound
@@ -1114,12 +1154,15 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
   let text = '';
   try { text = await transcribeBlob(blob); }
   catch (e) {
-    // A failed upload is logged and the window binned; the session listens on.
-    // (The honest mid-session engine swap is the CS-SEAM ticket.)
-    logEvent('cs.fail', (e && e.message) || 'transcribe');
+    // A failed upload bins the window; the session listens on — until the streak hits
+    // CS_FAIL_MAX consecutive failures, then the ONE honest swap to Web Speech.
+    csFailStreak++;
+    logEvent('cs.fail', ((e && e.message) || 'transcribe') + ' x' + csFailStreak);
+    if (csFailStreak >= CS_FAIL_MAX) { csSwapToWebSpeech('transcribe'); return; }
     if (csActive && !csSpeaking) csStartWindow();
     return;
   }
+  csFailStreak = 0;           // a successful round trip proves the service — the streak resets
   if (!csActive) return;
   // Whisper's silence boilerplate is judged on VOICED time (step-3 forward note,
   // resolved): a window's blob duration includes the leading wait, so the old
@@ -1465,7 +1508,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 02:36 PM AEST',
+    BUILD: '05 Aug 2026, 02:47 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

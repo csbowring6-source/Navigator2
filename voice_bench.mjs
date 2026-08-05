@@ -746,7 +746,10 @@ const loader2 = new Function(
   "window", "document", "navigator", "SpeechSynthesisUtterance", "setTimeout", "clearTimeout", "requestAnimationFrame", "Date", "console",
   SRC.replace("const CS_ENABLED = false;", "const CS_ENABLED = true;") + "\nreturn window.Voice;"
 );
-const Voice2 = loader2(mockWindow, mockDocument, mockNavigator, MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+// The cs instance runs as ANDROID (the CS-SEAM engine pick gates on it); it SHARES
+// mockNavigator's mediaDevices object, so scenario-level getUserMedia swaps apply to both.
+const mockNavigatorAndroid = { userAgent: "Linux; Android 14; bench", mediaDevices: mockNavigator.mediaDevices, permissions: mockNavigator.permissions };
+const Voice2 = loader2(mockWindow, mockDocument, mockNavigatorAndroid, MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
 let delivered2 = 0;
 Voice2.onTranscript(() => { delivered2++; });
 Voice2.setBusyGetter(() => false);
@@ -893,6 +896,68 @@ Voice2.cancelCapture();                               // during the tail: csSpea
 advance(700); await RIG.settle();
 check("cancel during the post-TTS tail: no-op, then exactly ONE window opens (no doubles)", RIG.starts === startsBeforeTailCancel + 1 && Voice2.isSessionOpen() && Voice2.state() === "listening");
 Voice2.closeSession("tap");
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
+// ── SCENARIO 23: CS-SEAM — engine pick, micTap close, honest swaps, no ping-pong ─
+console.log("\n--- 23. CS-seam: engine pick both ways, micTap, denied-swap, fail-streak swap, no ping-pong ---");
+check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+check("no ping-pong is POSSIBLE: csOpen has exactly ONE call site (the engine pick)", (SRC.match(/\{ csOpen\(\); return; \}/g) || []).length === 1 && (SRC.match(/csOpen\(\)/g) || []).length === 2);
+// (a) engine pick both ways + (b) micTap
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+check("pick: Android + full cloud kit → the CLOUD session", kinds2().includes("cs.open:session") && Voice2.isSessionOpen());
+Voice2.micTap();
+check("micTap closes the cs session: cs.close:tap, ONE close cue, off", kinds2().includes("cs.close:tap") && cue2("close") === 1 && Voice2.state() === "off" && !Voice2.isSessionOpen());
+Voice2.clearLog(); RIG.reset(); RIG.disable();
+Voice2.openSession(); await RIG.settle();
+check("pick: Android WITHOUT MediaRecorder → the Web-Speech session, untouched", kinds2().includes("open:session") && !kinds2().some(k => k.startsWith("cs.")));
+Voice2.closeSession("tap");
+RIG.enable();
+const Voice3 = loader2(mockWindow, mockDocument, mockNavigator, MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+Voice3.onTranscript(() => {}); Voice3.setBusyGetter(() => false);
+const kinds3 = () => Voice3.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+Voice3.openSession(); await RIG.settle();
+check("pick: NON-Android with MediaRecorder present → still Web Speech (the Android gate)", kinds3().includes("open:session") && !kinds3().some(k => k.startsWith("cs.")));
+Voice3.closeSession("tap");
+Voice2.clearLog(); RIG.reset();
+Voice2.micTap(); await RIG.settle();
+check("micTap idle → OPENS the cloud session (arbitration stays exhaustive)", kinds2().includes("cs.open:session") && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+// (c) denied mic at open → honest line, the Web-Speech session carries the SAME exchange
+const seamMsgs = [];                                     // the bench addMsg is a no-op — record locally
+const _addMsg0 = globalThis.addMsg; globalThis.addMsg = (r, t) => { seamMsgs.push(t); };
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+mockNavigator.mediaDevices.getUserMedia = async () => { throw new Error("NotAllowedError"); };
+Voice2.openSession(); await RIG.settle();
+check("denied: cs.open:denied + cs.swap:denied, the honest line shown", kinds2().includes("cs.open:denied") && kinds2().includes("cs.swap:denied") && seamMsgs.some(m => /Cloud listening isn't working right now/.test(m)));
+check("denied: the Web-Speech session OPENED (recogniser live)", kinds2().includes("open:session") && Voice2.isSessionOpen() && H.rec !== null);
+tts.start(); tts.end(); advance(700);            // the honest line plays; tail; mic resumes
+rec.onstart(); rec.speech(); rec.final("how far to Tully"); advance(2800); advance(700);
+check("denied: the exchange CARRIES ON — a turn delivered on the fallback", delivered2 === 1);
+Voice2.closeSession("tap");
+mockNavigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });
+// (d) the fail streak: 2 fails + a success reset it (no swap)…
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push({ fail: "down" }, { fail: "down" }, "still with you");
+for (let i = 0; i < 3; i++) { await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); }
+advance(700);
+check("2 fails then a success: NO swap — the streak resets on a good round trip", !kinds2().some(k => k.startsWith("cs.swap")) && delivered2 === 1 && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+// …and 3 CONSECUTIVE fails swap exactly once, cue-less, exchange continuing on Web Speech
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push({ fail: "down" }, { fail: "down" }, { fail: "down" });
+for (let i = 0; i < 3; i++) { await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); }
+check("3 consecutive fails: EXACTLY one honest swap (cs.swap:transcribe + cs.close:swap)", kinds2().includes("cs.swap:transcribe") && kinds2().includes("cs.close:swap") && kinds2().filter(k => k.startsWith("cs.swap")).length === 1);
+check("the swap is CUE-LESS — the exchange continues, no false ending", cue2("close") === 0);
+check("the honest swap line + the Web-Speech session live", seamMsgs.some(m => /switching to the phone's own listening/.test(m)) && kinds2().includes("open:session") && Voice2.isSessionOpen());
+tts.start(); tts.end(); advance(700);
+rec.onstart(); rec.speech(); rec.final("any camps ahead"); advance(2800); advance(700);
+check("the exchange CONTINUES on the fallback (a turn delivered after the swap)", delivered2 === 1);
+Voice2.closeSession("tap");
+check("the post-swap close cues ONCE via the convo path (guard re-armed at the swap open)", cue2("close") === 1);
+globalThis.addMsg = _addMsg0;                             // restore the no-op mock
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
