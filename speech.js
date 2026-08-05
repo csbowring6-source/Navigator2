@@ -131,6 +131,9 @@ function toggleConversation() {
 // The opening TAP (a real gesture): unlock audio + start the ONE recogniser here,
 // synchronously, before any await — this is what makes it hold on iOS.
 function openConversation() {
+  // CS-SKELETON (flag-gated, DEAD in the shipped build): the cloud-engine session.
+  // CS_ENABLED stays false until the CS-SEAM ticket sets the real engine policy.
+  if (CS_ENABLED && cloudEarsSupported()) { csOpen(); return; }
   if (!convoSupported()) {
     const m = "This browser can't do hands-free listening — tap the mic for each question.";
     addMsg('nav', m); lastSpoken = m; speak(m); return;
@@ -441,6 +444,9 @@ function cancelBlip() {
 function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().forEach(t => t.stop()); } catch(e) {} convoStream = null; }
 
 function closeConversation(reason) {
+  // CS-SKELETON (flag-gated): a cloud session closes on its own path. csActive can
+  // only ever be true when CS_ENABLED is — this branch is dead in the shipped build.
+  if (csActive) { csCloseSession(reason); return; }
   const wasActive = convoActive;
   logEvent('close', reason + (wasActive ? '' : ' (noop)'));
   convoActive = false; convoSpeaking = false; convoRecRunning = false;
@@ -711,8 +717,60 @@ function releaseRecordingStream() {
   recAudioCtx = null;
 }
 
-// End the turn after ~1.5s of quiet, but only once they've actually spoken —
-// a driver still thinking keeps the mic until they tap.
+// ── VAD MONITOR (VAD-UNIT) — the ONE reusable level-watcher, for the one-shot path today
+// and the cloud session engine next. Wires an analyser onto `stream` via `ctx` and watches
+// the time-domain peak each animation frame:
+//   onSpeech()  — every tick at/above the effective ONSET threshold (first one = speech began)
+//   onQuiet(ms) — ONCE, when quiet has lasted `quietMs` since the last voiced tick; loop ends
+// Hysteresis: once speech has begun, `hold` (default = onset) is the level that still counts
+// as speaking — a lower hold keeps a trailing soft syllable inside the utterance instead of
+// starting the quiet clock (the truncation class of bug). Adaptive noise floor (default OFF —
+// the one-shot path keeps today's fixed thresholds exactly): a short calibration reads the
+// ambient level, then a slow tracker follows it, and both thresholds ride ON TOP of the floor
+// so cab drone can never read as speech. The loop stops when alive() goes false, when onQuiet
+// fires, or via the returned stop(). Throws only synchronously (analyser wiring) — the caller
+// treats that as "can't judge silence this turn".
+function vadMonitor(stream, ctx, opts) {
+  opts = opts || {};
+  const onset = (opts.onset != null) ? opts.onset : 6;      // today's fixed peak threshold (strictly >)
+  const hold = (opts.hold != null) ? opts.hold : onset;     // hysteresis hold level (default: no hysteresis)
+  const quietMs = opts.quietMs || REC_SILENCE_MS;
+  const adaptive = !!opts.adaptive;
+  const alive = opts.alive || (() => true);
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const buf = new Uint8Array(an.fftSize);
+  let spoke = false, quietSince = 0, stopped = false;
+  let floor = 0, calib = adaptive ? ((opts.calibrateTicks != null) ? opts.calibrateTicks : 5) : 0;
+  const tick = () => {
+    if (stopped || !alive()) return;
+    an.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128); if (v > peak) peak = v; }
+    if (calib > 0) {   // adaptive: the first few ticks only measure the ambient level
+      floor = floor ? floor * 0.7 + peak * 0.3 : peak;
+      calib--; requestAnimationFrame(tick); return;
+    }
+    if (adaptive && peak <= floor + onset) floor = floor * 0.98 + peak * 0.02;   // slow ambient drift
+    const now = Date.now();
+    if (peak > floor + (spoke ? hold : onset)) { spoke = true; quietSince = 0; if (opts.onSpeech) opts.onSpeech(); }
+    else if (spoke) {
+      if (!quietSince) quietSince = now;
+      else if (now - quietSince >= quietMs) { stopped = true; if (opts.onQuiet) opts.onQuiet(now - quietSince); return; }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return { stop() { stopped = true; } };
+}
+
+// End the turn after ~2.8s of quiet (REC_SILENCE_MS — the original 1.5s cut truncated
+// destination names), but only once they've actually spoken — a driver still thinking
+// keeps the mic until they tap. The level-watching itself lives in vadMonitor; this
+// wrapper owns the AudioContext + the one-shot state flags, configured for BYTE-IDENTICAL
+// behaviour to the old inline loop (fixed 6-peak threshold, no hysteresis, no floor).
 async function armRecordingSilence() {
   try {
     if (!recAudioCtx) {
@@ -728,27 +786,13 @@ async function armRecordingSilence() {
     try { await recAudioCtx.resume(); }
     catch (e) { console.warn('[cloud ears] AudioContext resume failed:', e && e.message); }
     if (!cloudActive) return;   // recording ended while we awaited the resume
-    const src = recAudioCtx.createMediaStreamSource(mediaStream);
-    const an = recAudioCtx.createAnalyser();
-    an.fftSize = 512;
-    src.connect(an);
-    const buf = new Uint8Array(an.fftSize);
-    recAnalyserOn = true;   // we CAN judge silence this turn
-    let spoke = false, quietSince = 0;
-    const tick = () => {
-      if (!cloudActive) return;
-      an.getByteTimeDomainData(buf);
-      let peak = 0;
-      for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128); if (v > peak) peak = v; }
-      const now = Date.now();
-      if (peak > 6) { spoke = true; recVoiced = true; heardSpeech = true; quietSince = 0; }
-      else if (spoke) {
-        if (!quietSince) quietSince = now;
-        else if (now - quietSince >= REC_SILENCE_MS) { cloudEndReason = 'silence'; stopCloudCapture(true); return; }
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    vadMonitor(mediaStream, recAudioCtx, {
+      quietMs: REC_SILENCE_MS,             // onset/hold/adaptive left at defaults — today's exact thresholds
+      alive: () => cloudActive,
+      onSpeech: () => { recVoiced = true; heardSpeech = true; },
+      onQuiet: () => { cloudEndReason = 'silence'; stopCloudCapture(true); },
+    });
+    recAnalyserOn = true;   // we CAN judge silence this turn — set ONLY after the wiring succeeded
   } catch (e) {
     console.warn('[cloud ears] silence detection unavailable:', e && e.message, '— tap to send');
   }
@@ -874,6 +918,144 @@ async function finishCloudCapture() {
   }
   if (('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window)) startWebSpeechCapture();
   else setMicState('off');
+}
+
+// ── CLOUD SESSION (CS-SKELETON, step 3 of the cloud-ears plan) ────────────────
+// Hands-free on the CLOUD engine: ONE held mic stream for the whole session, a
+// fresh MediaRecorder per turn WINDOW, vadMonitor segmentation, upload via
+// transcribeBlob, delivery through deliverTranscript — the same seam as every
+// other ears path. GATED OFF: CS_ENABLED is false in the shipped build, so
+// csActive can never become true and every gated branch is dead — behaviour is
+// byte-identical to today until the CS-SEAM ticket sets the engine policy.
+// Skeleton limits (each is a LATER ticket, by design): no open/close cues (step
+// 4); no TTS pause/offer/45s-close — a delivered turn ends its window and the
+// next window opens on reply-end wiring in step 5, so a skeleton session hears
+// ONE turn then waits; no cancel/✕ wiring (step 6); no engine pick or honest
+// mid-session swap (step 7). NOTE for step 5: the artefact filter's REC_SHORT_MS
+// duration heuristic is weaker here — a window's duration includes the leading
+// wait, not just speech — refine to voiced-time when the reply flow lands.
+const CS_ENABLED = false;   // the flag — flipped by CS-SEAM policy, never here
+let csActive = false;       // cloud session open?
+let csStream = null;        // the ONE held mic stream — the session owns it end to end
+let csCtx = null;           // AudioContext feeding the VAD
+let csRec = null;           // the CURRENT turn-window recorder (fresh per window)
+let csChunks = [];
+let csVad = null;           // running vadMonitor handle for the current window
+let csVoiced = false;       // did THIS window hear genuine speech?
+let csWindowStart = 0;
+let csWindowTimer = null;   // rolling window bound (idle discard / voiced cutoff)
+let csWinSeq = 0;           // window id — a stale VAD/timer callback can't end a newer window
+const CS_WINDOW_MS = 45000; // no window grows past this (idle → local discard; voiced → cutoff send)
+
+async function csOpen() {
+  if (csActive || convoActive || cloudActive || captureActive) return false;   // one mic owner at a time
+  try {
+    csStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    logEvent('cs.open', 'denied');
+    setMicState('off');
+    return false;
+  }
+  try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !csCtx) csCtx = new Ctx(); } catch (e) { csCtx = null; }
+  try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
+  csActive = true;
+  logEvent('cs.open', 'session');
+  setMicState('listening');
+  csStartWindow();
+  return true;
+}
+
+// One turn WINDOW: recorder + VAD live together; the whole window (leading wait
+// included) lands in one standalone blob, so a mistimed cut can never drop words.
+function csStartWindow() {
+  if (!csActive) return;
+  const win = ++csWinSeq;
+  csChunks = []; csVoiced = false; csWindowStart = Date.now();
+  const mime = pickRecordingMime();
+  try { csRec = mime ? new MediaRecorder(csStream, { mimeType: mime }) : new MediaRecorder(csStream); }
+  catch (e) { logEvent('cs.window', 'recorder-failed'); csCloseSession('honest'); return; }
+  csRec.ondataavailable = ev => { if (ev.data && ev.data.size) csChunks.push(ev.data); };
+  csRec.start();
+  logEvent('cs.window', win);
+  setMicState('listening');   // waiting for the driver; genuine speech flips to recording
+  try {
+    csVad = vadMonitor(csStream, csCtx, {
+      quietMs: REC_SILENCE_MS,
+      alive: () => csActive && csWinSeq === win,
+      onSpeech: () => { if (!csVoiced) { csVoiced = true; logEvent('cs.vad', 'speech'); setMicState('recording'); } },
+      onQuiet: () => csEndWindow(true, 'silence'),
+    });
+  } catch (e) { csVad = null; logEvent('cs.vad', 'unavailable'); }   // no VAD → the window bound still ends it
+  clearTimeout(csWindowTimer);
+  csWindowTimer = setTimeout(() => {
+    if (!csActive || csWinSeq !== win) return;
+    if (csVoiced) csEndWindow(true, 'cutoff');   // still talking at the bound — send what we have
+    else csEndWindow(false, 'idle');             // a silent window — discard locally, roll on
+  }, CS_WINDOW_MS);
+}
+
+function csEndWindow(send, endReason) {
+  if (!csActive) return;
+  csWinSeq++;                                    // orphan this window's VAD/timer at once
+  clearTimeout(csWindowTimer);
+  try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
+  const rec = csRec; csRec = null;
+  const voiced = csVoiced, startedAt = csWindowStart;
+  const finish = () => {
+    const chunks = csChunks; csChunks = [];
+    const type = (rec && rec.mimeType) || pickRecordingMime() || 'audio/webm';
+    csFinishWindow(chunks, type, voiced, Date.now() - startedAt, send, endReason);
+  };
+  try {
+    if (rec && rec.state !== 'inactive') { rec.onstop = finish; rec.stop(); }
+    else finish();
+  } catch (e) { finish(); }
+}
+
+async function csFinishWindow(chunks, type, voiced, durationMs, send, endReason) {
+  if (!csActive) return;
+  const blob = new Blob(chunks, { type });
+  // An idle / unvoiced / too-small window is discarded LOCALLY — never uploaded;
+  // the session rolls straight on to a fresh window.
+  if (!send || !voiced || blob.size < 1024 || durationMs < REC_MIN_MS) {
+    logEvent('cs.discard', endReason + ':' + durationMs + 'ms');
+    csStartWindow();
+    return;
+  }
+  setMicState('thinking');
+  logEvent('cs.upload', blob.size);
+  let text = '';
+  try { text = await transcribeBlob(blob); }
+  catch (e) {
+    // Skeleton: a failed upload is logged and the window binned; the session
+    // listens on. (The honest mid-session engine swap is the CS-SEAM ticket.)
+    logEvent('cs.fail', (e && e.message) || 'transcribe');
+    if (csActive) csStartWindow();
+    return;
+  }
+  if (!csActive) return;
+  if (!text || (isSilenceArtefact(text) && durationMs < REC_SHORT_MS)) {
+    logEvent('cs.discard', 'artefact');
+    csStartWindow();
+    return;
+  }
+  deliverTranscript(text, 'cloud', endReason);   // → thinking → the app; the same seam as every ears path
+  // NO auto-restart after a DELIVERED turn: the reply is about to play, and the
+  // resume-after-reply discipline (pause during TTS + tail) is step 5.
+}
+
+function csCloseSession(reason) {
+  const was = csActive;
+  csActive = false;
+  csWinSeq++;                                    // orphan any in-flight window callbacks
+  clearTimeout(csWindowTimer);
+  try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
+  try { if (csRec && csRec.state !== 'inactive') { csRec.onstop = null; csRec.stop(); } } catch (e) {}
+  csRec = null; csChunks = [];
+  try { if (csStream) csStream.getTracks().forEach(t => t.stop()); } catch (e) {} csStream = null;
+  try { if (csCtx) csCtx.close(); } catch (e) {} csCtx = null;
+  setMicState('off');
+  logEvent('cs.close', reason + (was ? '' : ' (noop)'));
 }
 
 // V2: RECORDING is the primary path — the phone's own recogniser is the weak
@@ -1163,7 +1345,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 10:12 AM AEST',
+    BUILD: '05 Aug 2026, 01:43 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
@@ -1178,7 +1360,7 @@ function _afterSpeak() {
     unlockAudio:  unlockAudio,
     // state (read-only getters — no external writes to internals)
     state:         function () { return micState; },
-    isSessionOpen: function () { return convoActive; },
+    isSessionOpen: function () { return convoActive || csActive; },   // csActive is always false while CS_ENABLED is off
     isCapturing:   function () { return cloudActive || captureActive; },
     canHandsFree:  convoSupported,   // does this browser support a hands-free session? (gates the first-use tip)
     // couplings

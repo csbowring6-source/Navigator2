@@ -668,5 +668,113 @@ check("fallback: the BASIC recogniser took the turn, nothing false-delivered", H
 Voice.cancelCapture();                       // tidy: bin the fallback capture, mic off
 RIG.disable(); timers.length = 0; rafQueue.length = 0;
 
+// ── SCENARIO 19: VAD-UNIT — vadMonitor extracted and unit-driven by the rig ────
+// The one reusable level-watcher: defaults byte-identical to the old inline loop
+// (fixed >6 peak, no hysteresis, no floor); hysteresis + adaptive floor prove out
+// for the session engine. Scenario 18 (above) already re-proves the REAL one-shot
+// path end-to-end THROUGH vadMonitor — this drives the unit directly.
+console.log("\n--- 19. VAD-unit: defaults byte-identical; hysteresis; adaptive floor; alive/stop ---");
+function exFn(n) { let a = SRC.indexOf("function " + n); if (a < 0) throw new Error("nf " + n); let d = 0, s = false; for (let j = SRC.indexOf("{", a); j < SRC.length; j++) { if (SRC[j] === "{") { d++; s = true; } else if (SRC[j] === "}") { d--; if (s && d === 0) return SRC.slice(a, j + 1); } } }
+const vadT = new Function("requestAnimationFrame", "Date", "REC_SILENCE_MS", "return " + exFn("vadMonitor"))(fakeRAF, FakeDate, 2800);
+const vctx = () => { const c = new MockAudioCtx(); c.state = "running"; return c; };
+const stream0 = {};
+async function runVad(opts, track, tickMs = 100) {
+  rafQueue.length = 0;
+  const got = { speech: 0, quiet: 0, quietMs: 0 };
+  const mon = vadT(stream0, vctx(), Object.assign({ onSpeech: () => got.speech++, onQuiet: (ms) => { got.quiet++; got.quietMs = ms; } }, opts));
+  await RIG.pump(track, tickMs);
+  return { got, mon };
+}
+// (a) defaults: strictly >6 — level 6 never counts as speech, level 7 does
+let r19 = await runVad({ quietMs: 2800 }, Array(10).fill(6));
+check("defaults: level 6 is NOT speech (strict >6, as before)", r19.got.speech === 0);
+r19 = await runVad({ quietMs: 2800 }, Array(3).fill(7));
+check("defaults: level 7 IS speech", r19.got.speech > 0);
+// (b) the 2.8s quiet cut fires ONCE after speech; shorter quiet never fires
+r19 = await runVad({ quietMs: 2800 }, [...Array(8).fill(40), ...Array(32).fill(0)]);
+check("speech then 3.2s quiet → onQuiet fires exactly ONCE at the 2.8s cut", r19.got.quiet === 1 && r19.got.quietMs >= 2800);
+r19 = await runVad({ quietMs: 2800 }, [...Array(8).fill(40), ...Array(20).fill(0)]);
+check("quiet shorter than the cut (2.0s) NEVER ends the turn", r19.got.quiet === 0);
+check("quiet before ANY speech never fires (driver still thinking)", (await runVad({ quietMs: 2800 }, Array(40).fill(0))).got.quiet === 0);
+// (c) hysteresis: hold below onset — a soft trailing level sustains the utterance it could never start
+r19 = await runVad({ quietMs: 2800, onset: 20, hold: 5 }, Array(15).fill(10));
+check("hysteresis: level 10 never STARTS speech when onset is 20", r19.got.speech === 0);
+r19 = await runVad({ quietMs: 2800, onset: 20, hold: 5 }, [...Array(5).fill(40), ...Array(35).fill(10)]);
+check("hysteresis: after onset, a soft 10 SUSTAINS the utterance (no quiet cut in 3.5s)", r19.got.quiet === 0 && r19.got.speech >= 5);
+r19 = await runVad({ quietMs: 2800, onset: 20, hold: 5 }, [...Array(5).fill(40), ...Array(10).fill(10), ...Array(32).fill(0)]);
+check("hysteresis: real quiet after the soft tail still ends the turn once", r19.got.quiet === 1);
+// (d) adaptive floor: steady cab drone never reads as speech; a real burst above it does
+r19 = await runVad({ quietMs: 2800, adaptive: true }, Array(20).fill(10));
+check("adaptive: steady ambient 10 never triggers speech (floor absorbed it)", r19.got.speech === 0);
+r19 = await runVad({ quietMs: 2800, adaptive: true }, [...Array(8).fill(10), ...Array(5).fill(40)]);
+check("adaptive: a genuine burst OVER the floor still triggers speech", r19.got.speech > 0);
+// (e) alive() false stops the loop; (f) stop() halts callbacks
+let aliveFlag = true;
+r19 = await runVad({ quietMs: 2800, alive: () => aliveFlag }, Array(3).fill(40));
+aliveFlag = false;
+await RIG.pump(Array(5).fill(40));
+check("alive() false stops the loop (no further speech callbacks)", r19.got.speech === 3);
+r19 = await runVad({ quietMs: 2800 }, Array(3).fill(40));
+r19.mon.stop();
+await RIG.pump(Array(5).fill(40));
+check("stop() halts the monitor (no further callbacks)", r19.got.speech === 3);
+// (g) the one-shot wrapper delegates with today's exact config; the stale 1.5s comment is gone
+check("armRecordingSilence delegates to vadMonitor (quietMs: REC_SILENCE_MS, onQuiet → stopCloudCapture)", /vadMonitor\(mediaStream, recAudioCtx, \{[\s\S]{0,400}quietMs: REC_SILENCE_MS[\s\S]{0,400}onQuiet: \(\) => \{ cloudEndReason = 'silence'; stopCloudCapture\(true\); \}/.test(SRC));
+check("one-shot config passes NO onset/hold/adaptive (defaults = the old fixed thresholds)", !/vadMonitor\(mediaStream, recAudioCtx, \{[\s\S]{0,400}(onset|hold|adaptive):/.test(SRC));
+check("recAnalyserOn is set only AFTER the wiring succeeded (verified-silent discard stays safe)", /\}\);\n    recAnalyserOn = true;/.test(SRC));
+check("the stale '~1.5s' comment is gone from the silence-cut header", !/End the turn after ~1\.5s/.test(SRC) && /End the turn after ~2\.8s of quiet \(REC_SILENCE_MS/.test(SRC));
+rafQueue.length = 0; timers.length = 0;
+
+// ── SCENARIO 20: CS-SKELETON — the cloud session, gated OFF in the shipped build ─
+// (a) flag OFF (the shipped file): even WITH MediaRecorder present, openSession still
+// runs the Web-Speech session — byte-identical behaviour. (b) flag ON (a second
+// instance loaded from the same source with only the flag flipped): held stream,
+// per-turn windows, VAD segmentation, idle discard, upload → deliver, close.
+console.log("\n--- 20. CS-skeleton: flag-off byte-identical; flag-on session end-to-end ---");
+check("the shipped flag is OFF (const CS_ENABLED = false)", /const CS_ENABLED = false;/.test(SRC));
+check("cs state is fully ISOLATED from the one-shot cloud globals", !/\bmediaRecorder\b|\brecChunks\b|\brecVoiced\b|\brecAnalyserOn\b|\bcloudActive = /.test(exFn("csStartWindow") + exFn("csEndWindow") + exFn("csCloseSession")));
+// (a) flag off: MediaRecorder available, yet openSession = the Web-Speech session
+fresh(); timers.length = 0; rafQueue.length = 0; RIG.reset(); RIG.enable();
+Voice.openSession();
+check("flag OFF: openSession runs the WEB-SPEECH session (open:session, a recogniser)", kinds().includes("open:session") && H.rec !== null);
+check("flag OFF: no cs.* event ever fires", !kinds().some(k => k.startsWith("cs.")));
+Voice.closeSession("tap");
+// (b) flag ON: a second instance from the SAME source, only the flag flipped
+let gumCalls = 0, trackStops = 0;
+mockNavigator.mediaDevices.getUserMedia = async () => { gumCalls++; return { getTracks: () => [{ stop() { trackStops++; } }] }; };
+const loader2 = new Function(
+  "window", "document", "navigator", "SpeechSynthesisUtterance", "setTimeout", "clearTimeout", "requestAnimationFrame", "Date", "console",
+  SRC.replace("const CS_ENABLED = false;", "const CS_ENABLED = true;") + "\nreturn window.Voice;"
+);
+const Voice2 = loader2(mockWindow, mockDocument, mockNavigator, MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+let delivered2 = 0;
+Voice2.onTranscript(() => { delivered2++; });
+Voice2.setBusyGetter(() => false);
+const kinds2 = () => Voice2.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+Voice2.clearLog(); rafQueue.length = 0; RIG.reset();
+Voice2.openSession();
+await RIG.settle();
+check("flag ON: cs.open + held stream (ONE getUserMedia) + first window recording", kinds2().includes("cs.open:session") && gumCalls === 1 && !!RIG.recorder && RIG.recorder.state === "recording" && RIG.starts === 1);
+check("flag ON: session open, state listening", Voice2.isSessionOpen() === true && Voice2.state() === "listening");
+// idle window: no speech for the whole 45s bound → discarded locally, session rolls on
+advance(45100); await RIG.settle();
+check("idle window rolled over: discarded LOCALLY (no upload), a fresh window recording", RIG.fetches.length === 0 && RIG.starts === 2 && kinds2().some(k => k.startsWith("cs.discard:idle")) && Voice2.isSessionOpen());
+// a transcribe FAILURE: window binned, session listens on
+RIG.transcripts.push({ fail: "network down" });
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+check("failed upload: cs.fail logged, session still open, fresh window (no delivery)", kinds2().some(k => k.startsWith("cs.fail")) && Voice2.isSessionOpen() && RIG.starts === 3 && delivered2 === 0);
+// the driver's turn: speech → VAD quiet cut → upload → deliver — exactly once
+RIG.transcripts.push("fuel prices in Tully");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+check("speech flipped the state to recording (cs.vad:speech logged once this window)", kinds2().includes("cs.vad:speech"));
+check("VAD quiet ended the window: ONE upload, deliver:cloud:silence in the ring buffer", RIG.fetches.length === 2 && kinds2().includes("deliver:cloud:silence"));
+advance(700);
+check("delivered exactly ONCE to the app; NO auto-restart after a delivered turn (step 5 wires the reply flow)", delivered2 === 1 && RIG.starts === 3);
+// close: stream released, state off, session shut
+Voice2.closeSession("tap");
+check("close: cs.close logged, the held stream's tracks stopped, state off, session closed", kinds2().includes("cs.close:tap") && trackStops >= 1 && Voice2.state() === "off" && Voice2.isSessionOpen() === false);
+mockNavigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });   // restore
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
