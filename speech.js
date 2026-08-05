@@ -136,7 +136,9 @@ function openConversation() {
   // else — including iOS, per the design report — keeps the Web-Speech session exactly
   // as shipped. CS_ENABLED stays false until step 9 turns the seam on, so the shipped
   // build always falls straight through to openWebSpeechSession.
-  if (CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && (window.AudioContext || window.webkitAudioContext)) { csOpen(); return; }
+  const cloudPick = CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
+  if (CS_ENABLED) logEvent('engine', cloudPick ? 'cloud' : 'webspeech');   // the PICK, first line of every session log (flag off → no event: byte-identical)
+  if (cloudPick) { csOpen(); return; }
   openWebSpeechSession();
 }
 // The Web-Speech session open — the original body, unchanged. Also the SWAP TARGET
@@ -1150,7 +1152,7 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
     return;
   }
   setMicState('thinking');
-  logEvent('cs.upload', blob.size);
+  logEvent('cs.upload', blob.size + 'b ' + voicedMs + 'ms');   // size + VOICED time — the field signal for cut quality
   let text = '';
   try { text = await transcribeBlob(blob); }
   catch (e) {
@@ -1169,7 +1171,7 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
   // duration heuristic let a 0.2s "thank you" through inside a 4s window. A stock
   // phrase with real speech time behind it still delivers.
   if (!text || (isSilenceArtefact(text) && voicedMs < REC_SHORT_MS)) {
-    logEvent('cs.discard', 'artefact');
+    logEvent('cs.discard', text ? 'artefact' : 'empty');   // an empty transcript is a different fact from a binned stock phrase
     if (!csSpeaking) csStartWindow();
     return;
   }
@@ -1508,7 +1510,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 02:47 PM AEST',
+    BUILD: '05 Aug 2026, 02:59 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

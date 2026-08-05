@@ -960,5 +960,54 @@ check("the post-swap close cues ONCE via the convo path (guard re-armed at the s
 globalThis.addMsg = _addMsg0;                             // restore the no-op mock
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
+// ── SCENARIO 24: CS-LOG — the full lifecycle vocabulary, in order; swap; privacy ─
+console.log("\n--- 24. CS-log: lifecycle event sequence in ORDER; swap sequence; privacy ---");
+check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+const inOrder = (log, seq) => { let i = 0; for (const k of log) { if (i < seq.length && (typeof seq[i] === "string" ? k === seq[i] : seq[i].test(k))) i++; } return i === seq.length; };
+const SCRIPTS = ["caravan parks near port douglas", "cheapest diesel in tully"];
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push(SCRIPTS[0]);                               // turn 1 → deliver
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+Voice2.speak("Three parks near Port Douglas."); tts.start(); tts.end(); advance(700); await RIG.settle();   // reply 1 → reopen
+await RIG.pump(Array(5).fill(40));                              // cancel mid-window
+Voice2.cancelCapture();
+RIG.transcripts.push({ fail: "down" });                         // a failed upload
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+RIG.audio = new Blob(["x".repeat(500)], { type: "audio/webm" });   // a sub-minimum window → the LOCAL-discard path
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+RIG.audio = new Blob(["x".repeat(4096)], { type: "audio/webm" });
+advance(20100); await RIG.settle();                             // the offer fires for this quiet spell
+tts.end(); advance(700); await RIG.settle();                    // offer spoken → answer window
+RIG.transcripts.push(SCRIPTS[1]);                               // the driver's answer
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+Voice2.micTap();                                                // close
+const L24 = kinds2();
+check("lifecycle IN ORDER: pick→open→window→cue→speech→upload→deliver→tts→reopen→cancel→fail→local-discard→offer→answer→close", inOrder(L24, [
+  "engine:cloud", "cs.open:session", /^cs\.window:\d+$/, "cue:open",
+  "cs.vad:speech", /^cs\.upload:/, "deliver:cloud:silence",
+  "tts.start", "tts.end", /^cs\.window:/, "cue:open",
+  "cancel:tap-session", "cs.discard:cancel", /^cs\.window:/,
+  /^cs\.fail:/, /^cs\.window:/,
+  /^cs\.discard:silence:\d+ms$/, /^cs\.window:/,
+  "offer:anything-else", "cs.discard:offer", /^cs\.window:/,
+  /^cs\.upload:/, "deliver:cloud:silence",
+  "cue:close", "cs.close:tap",
+]), L24.join(" | "));
+check("the upload event carries size + VOICED time", L24.some(k => /^cs\.upload:\d+b \d+ms$/.test(k)));
+check("every window outcome is readable from the log alone", L24.includes("cs.discard:cancel") && L24.includes("cs.discard:offer") && L24.some(k => /^cs\.fail:/.test(k)) && L24.some(k => /^cs\.discard:silence:/.test(k)));
+const flat24 = Voice2.getLog().map(e => e.kind + " " + e.detail).join("\n").toLowerCase();
+check("PRIVACY: no logged string contains any scripted transcript text", SCRIPTS.every(t => !flat24.includes(t)) && !flat24.includes("port douglas") && !flat24.includes("diesel"));
+// the swap session's sequence
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push({ fail: "down" }, { fail: "down" }, { fail: "down" });
+for (let i = 0; i < 3; i++) { await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); }
+check("swap sequence IN ORDER: pick → open → fail x1..x3 → swap → cs.close:swap → Web-Speech open", inOrder(kinds2(), [
+  "engine:cloud", "cs.open:session", /^cs\.fail:.* x1$/, /^cs\.fail:.* x2$/, /^cs\.fail:.* x3$/, "cs.swap:transcribe", "cs.close:swap", "open:session",
+]), kinds2().join(" | "));
+Voice2.closeSession("tap");
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
