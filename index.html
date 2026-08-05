@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 03:50 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 05 Aug 2026, 10:12 AM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=05Aug2026-0350AM"></script>
+<script src="speech.js?v=05Aug2026-1012AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2028,11 +2028,16 @@ function resumeTrip() {
     if (raw.passengers && raw.passengers.includes('Solo')) document.getElementById('soloChip').classList.add('active');
     // ONE restore path (field 31 Jul: the resume button used to bypass the boot restore and land
     // on a bare pin). A committed trip WITH a matching persisted round re-renders the camp cards
-    // EXACTLY as the boot restore does — same function, not a second copy. Otherwise fall through
-    // to the trip-only opener; the stale-trip confirm still fires on the first query.
+    // EXACTLY as the boot restore does — same function, not a second copy (it logs its own path).
     loadCommittedDest();
     if (!campRound) loadCampRound();
-    if (resumeMode() === 'round') { resumeCampRoundIfPersisted(); return; }
+    const rm = resumeMode();
+    if (rm === 'round') { resumeCampRoundIfPersisted(); return; }
+    logResume(rm === 'trip-only' ? 'trip' : 'none');
+    // The resume control IS the confirmation (field 5 Aug): announcing "Resuming your trip"
+    // and then asking "still on that — yes or no?" is asking twice. The stale-trip confirm
+    // is for cold spoken starts only — never after the driver already pressed resume.
+    firstQueryAfterOpen = false;
     openAppView();
     drawCommittedRoute(currentRunDest);
     addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
@@ -3908,7 +3913,7 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
     if (rnt && !sameTownName(rnt.dest, pending.dest))
       return { action: 'restate', dest: rnt.dest, origin: rnt.origin || null, orig: text };
     if (/\b(?:yes|yeah|yep|yup|still|keep|same|carry on|resume|stay on|on it|leave it|that one|correct|still on it)\b/.test(t) && !isTopicChange(t))
-      return { action: 'trip-keep', dest: pending.dest };
+      return { action: 'trip-keep', dest: pending.dest, ask: pending.ask || '' };   // carry the request that triggered the confirm
     return { action: 'trip-fresh' };
   }
   if (pending.type === 'trip-scale-confirm') {
@@ -3992,7 +3997,7 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
 // or alters the search/results logic — only the widen action re-invokes the
 // existing search (with a bigger area via campWidenScale, default 1 = no change).
 const CAMP_ROUND_KEY = 'navigator_camp_round';
-const CAMP_ROUND_MAX_AGE = 6 * 60 * 60 * 1000;   // one night's ring-around, not forever
+const CAMP_ROUND_MAX_AGE = 24 * 60 * 60 * 1000;   // survives an overnight stop (field 5 Aug: the 6 h cap expired an evening round before morning) — a day, not forever
 let campRound = null;            // {place, query, sites:[{name,lat,lon,km,mins,phone}], tried:[names], calledSite, ts}
 let campOutcomePending = null;   // the site we've already shown an outcome prompt for (dedupe focus events)
 // RESULTS FILTER (field 4 Aug): All | Parks | Free. Default ALL; lasts the SESSION; reset to ALL on a
@@ -4057,13 +4062,18 @@ function resumeMode() {
   if (!hasTrip) return 'fresh';          // (3) genuinely fresh open — nothing changes
   return tripRoundMatch() ? 'round' : 'trip-only';
 }
+// One-glance field diagnosis: which restore path ran — resume:round / resume:trip /
+// resume:none in the voice log (long-press the mic).
+function logResume(path) { try { if (window.Voice && Voice.log) Voice.log('resume', path); } catch (e) {} }
 function resumeCampRoundIfPersisted() {
   // Bring back the mode + committed coords that restoreSession() doesn't carry, so the
   // committed mode is REUSED (never re-interviewed) on either path.
   try { const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); if (raw.mode) tripMode = raw.mode; if (!currentRunDest && raw.dest) currentRunDest = raw.dest; } catch (e) {}
   loadCommittedDest();
   if (!campRound) loadCampRound();
-  if (resumeMode() !== 'round') return;   // trip-only → the confirm opener fires on the first query; fresh → nothing
+  const rm = resumeMode();
+  logResume(rm === 'round' ? 'round' : rm === 'trip-only' ? 'trip' : 'none');
+  if (rm !== 'round') return;   // trip-only → the confirm opener fires on the first query; fresh → nothing
   // (1) Silent restore: OWN the camps display cleanly. State (messages, run) already came
   // back from restoreSession; we replace only the visual it couldn't rebuild. No questions.
   firstQueryAfterOpen = false;            // the trip is confirmed by the restore itself
@@ -5152,7 +5162,9 @@ async function sendMessage(silent){
       inp.value = ''; inp.style.height = 'auto';
       addMsg('user', text);
       const m = `You've still got a trip to ${staleDest} set from earlier. Still on that — yes or no?`;
-      setPending({ type: 'trip-resume-confirm', dest: staleDest });
+      // CARRY the triggering request (field 5 Aug): "Campsites" → confirm → "yes" must run
+      // the camps pull at once, never discard it for a "What do you need?".
+      setPending({ type: 'trip-resume-confirm', dest: staleDest, ask: text });
       addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       return;
     }
@@ -5268,8 +5280,12 @@ async function sendMessage(silent){
           } catch(e) {}
         }
         const dk = currentRunDest || pa.dest;
-        const m = `Righto — still on the trip to ${dk}. What do you need?`;
-        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        // CARRY (field 5 Aug): the request that TRIGGERED the confirm ("Campsites") runs NOW —
+        // re-entered silently through the normal routing (no double user echo; the confirm
+        // cannot re-fire, firstQueryAfterOpen is already false). No ask → the old open question.
+        const ack = pa.ask ? `Righto — still on the trip to ${dk}.` : `Righto — still on the trip to ${dk}. What do you need?`;
+        addMsg('nav', ack); lastNavReply = ack; lastSpoken = ack; speak(ack);
+        if (pa.ask) { inp.value = pa.ask; await sendMessage(true); }
       } else if (pa.action === 'trip-fresh') {
         // Drop the leftover trip. If this same answer named a NEW destination, start
         // it; otherwise ask where to. (Never carries the stale trip forward.)
