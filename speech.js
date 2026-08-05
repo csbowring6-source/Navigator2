@@ -927,11 +927,14 @@ async function finishCloudCapture() {
 // other ears path. GATED OFF: CS_ENABLED is false in the shipped build, so
 // csActive can never become true and every gated branch is dead — behaviour is
 // byte-identical to today until the CS-SEAM ticket sets the engine policy.
-// Skeleton limits (each is a LATER ticket, by design): no open/close cues (step
-// 4); no TTS pause/offer/45s-close — a delivered turn ends its window and the
-// next window opens on reply-end wiring in step 5, so a skeleton session hears
-// ONE turn then waits; no cancel/✕ wiring (step 6); no engine pick or honest
-// mid-session swap (step 7). NOTE for step 5: the artefact filter's REC_SHORT_MS
+// Status + cues are LIVE (step 4): states route through setMicState (single status
+// element, ✕ send-swap while recording) and the melodic cues fire through the SAME
+// once-guards as the Web-Speech session (openCued per driver-turn window, convoCued
+// per session). Remaining limits (each a LATER ticket, by design): no TTS
+// pause/offer/45s-close — a delivered turn ends its window and the next window
+// opens on reply-end wiring in step 5, so a skeleton session hears ONE turn then
+// waits; the ✕ shows but the cancel ACTION wiring is step 6; no engine pick or
+// honest mid-session swap (step 7). NOTE for step 5: the artefact filter's REC_SHORT_MS
 // duration heuristic is weaker here — a window's duration includes the leading
 // wait, not just speech — refine to voiced-time when the reply flow lands.
 const CS_ENABLED = false;   // the flag — flipped by CS-SEAM policy, never here
@@ -959,9 +962,10 @@ async function csOpen() {
   try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !csCtx) csCtx = new Ctx(); } catch (e) { csCtx = null; }
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
+  convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
   logEvent('cs.open', 'session');
   setMicState('listening');
-  csStartWindow();
+  csStartWindow();            // the first window fires the rising open cue
   return true;
 }
 
@@ -978,6 +982,11 @@ function csStartWindow() {
   csRec.start();
   logEvent('cs.window', win);
   setMicState('listening');   // waiting for the driver; genuine speech flips to recording
+  // The SAME rising cue through the SAME guard as every other path: openCued is cleared
+  // only when the mic leaves listening/recording (setMicState boundary), so an idle-window
+  // rollover (state never left 'listening') stays silent, while a genuine reopen after a
+  // thinking spell (upload/fail/artefact) earns exactly one cue. No new sounds.
+  convoOpenCue();
   try {
     csVad = vadMonitor(csStream, csCtx, {
       quietMs: REC_SILENCE_MS,
@@ -1055,6 +1064,7 @@ function csCloseSession(reason) {
   try { if (csStream) csStream.getTracks().forEach(t => t.stop()); } catch (e) {} csStream = null;
   try { if (csCtx) csCtx.close(); } catch (e) {} csCtx = null;
   setMicState('off');
+  if (was) convoCloseCue();   // the same falling cue, once per session (convoCued guard), any close reason
   logEvent('cs.close', reason + (was ? '' : ' (noop)'));
 }
 
@@ -1345,7 +1355,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 01:43 PM AEST',
+    BUILD: '05 Aug 2026, 02:10 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

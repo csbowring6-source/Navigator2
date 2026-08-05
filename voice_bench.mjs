@@ -751,18 +751,25 @@ let delivered2 = 0;
 Voice2.onTranscript(() => { delivered2++; });
 Voice2.setBusyGetter(() => false);
 const kinds2 = () => Voice2.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+const cue2 = (w) => Voice2.getLog().filter(e => e.kind === "cue" && e.detail === w).length;   // cloud-engine cue counts (CS-STATUS-CUES)
 Voice2.clearLog(); rafQueue.length = 0; RIG.reset();
 Voice2.openSession();
 await RIG.settle();
 check("flag ON: cs.open + held stream (ONE getUserMedia) + first window recording", kinds2().includes("cs.open:session") && gumCalls === 1 && !!RIG.recorder && RIG.recorder.state === "recording" && RIG.starts === 1);
 check("flag ON: session open, state listening", Voice2.isSessionOpen() === true && Voice2.state() === "listening");
+check("CUES: ONE rising open cue on session open", cue2("open") === 1);
 // idle window: no speech for the whole 45s bound → discarded locally, session rolls on
 advance(45100); await RIG.settle();
 check("idle window rolled over: discarded LOCALLY (no upload), a fresh window recording", RIG.fetches.length === 0 && RIG.starts === 2 && kinds2().some(k => k.startsWith("cs.discard:idle")) && Voice2.isSessionOpen());
+check("CUES: NO cue on a discarded idle window (state never left listening)", cue2("open") === 1);
 // a transcribe FAILURE: window binned, session listens on
 RIG.transcripts.push({ fail: "network down" });
-await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+await RIG.pump(Array(8).fill(40));                             // the driver speaks —
+check("mid-window: state recording + the ✕ send-swap on the CLOUD engine", Voice2.state() === "recording" && el("sendBtn").textContent === "✕");
+check("CUES: a listening→recording flip WITHIN a window never doubles the cue", cue2("open") === 1);
+await RIG.pump(Array(32).fill(0)); await RIG.settle();         // — then quiet: cut → upload fails
 check("failed upload: cs.fail logged, session still open, fresh window (no delivery)", kinds2().some(k => k.startsWith("cs.fail")) && Voice2.isSessionOpen() && RIG.starts === 3 && delivered2 === 0);
+check("CUES: reopening AFTER the thinking spell earns exactly one new open cue", cue2("open") === 2);
 // the driver's turn: speech → VAD quiet cut → upload → deliver — exactly once
 RIG.transcripts.push("fuel prices in Tully");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
@@ -770,9 +777,18 @@ check("speech flipped the state to recording (cs.vad:speech logged once this win
 check("VAD quiet ended the window: ONE upload, deliver:cloud:silence in the ring buffer", RIG.fetches.length === 2 && kinds2().includes("deliver:cloud:silence"));
 advance(700);
 check("delivered exactly ONCE to the app; NO auto-restart after a delivered turn (step 5 wires the reply flow)", delivered2 === 1 && RIG.starts === 3);
-// close: stream released, state off, session shut
+check("CUES: still no extra open cue after the delivered turn (no reopen yet)", cue2("open") === 2);
+// close: stream released, state off, session shut, ONE falling cue
 Voice2.closeSession("tap");
 check("close: cs.close logged, the held stream's tracks stopped, state off, session closed", kinds2().includes("cs.close:tap") && trackStops >= 1 && Voice2.state() === "off" && Voice2.isSessionOpen() === false);
+check("CUES: close cue EXACTLY once for the tap close", cue2("close") === 1);
+Voice2.closeSession("tap");                                    // a second close is a no-op
+check("CUES: a repeat close never re-fires the cue (once per session)", cue2("close") === 1);
+// a SECOND session: the guards re-arm — one fresh open cue, one close cue for a DIFFERENT reason
+Voice2.openSession(); await RIG.settle();
+check("CUES: a fresh session earns a fresh open cue (guard re-armed)", cue2("open") === 3 && Voice2.isSessionOpen());
+Voice2.closeSession("phrase");
+check("CUES: close cue once for the phrase close too (cs.close:phrase logged)", cue2("close") === 2 && kinds2().includes("cs.close:phrase"));
 mockNavigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });   // restore
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
