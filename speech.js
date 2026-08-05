@@ -328,6 +328,21 @@ function isCancelPhrase(text) {
 // cue as normal). A session rebuilds a fresh recogniser so the muddled cumulative results can't
 // re-deliver as the next turn.
 function cancelCapture() {
+  // CLOUD session cancel (CS-CANCEL, flag-gated — csActive needs CS_ENABLED): bin the open
+  // window outright (nothing uploads), blip, and open a FRESH turn window — session stays
+  // open. Sane no-ops: during TTS/tail/offer, or with no window running, there is NOTHING
+  // to discard — no blip spam, no double windows (the pending resume owns the reopen). The
+  // 45s close is deliberately NOT re-armed — only voiced speech resets the clocks. One-shot
+  // state (cloudActive/captureActive/recognition) is never touched: the cs isolation rule.
+  if (csActive) {
+    if (csSpeaking || !csRec) return;
+    logEvent('cancel', 'tap-session');
+    cancelBlip();
+    csDiscardWindow('cancel');
+    openCued = false;                    // the fresh turn earns a new open cue, exactly as convo's cancel does
+    csStartWindow();
+    return;
+  }
   const wasSession = convoActive;
   if (!(cloudActive || captureActive || wasSession)) return;   // nothing recording → no-op
   logEvent('cancel', wasSession ? 'tap-session' : 'tap-oneshot');
@@ -930,13 +945,16 @@ async function finishCloudCapture() {
 // Status + cues are LIVE (step 4): states route through setMicState (single status
 // element, ✕ send-swap while recording) and the melodic cues fire through the SAME
 // once-guards as the Web-Speech session (openCued per driver-turn window, convoCued
-// per session). Remaining limits (each a LATER ticket, by design): no TTS
-// pause/offer/45s-close — a delivered turn ends its window and the next window
-// opens on reply-end wiring in step 5, so a skeleton session hears ONE turn then
-// waits; the ✕ shows but the cancel ACTION wiring is step 6; no engine pick or
-// honest mid-session swap (step 7). NOTE for step 5: the artefact filter's REC_SHORT_MS
-// duration heuristic is weaker here — a window's duration includes the leading
-// wait, not just speech — refine to voiced-time when the reply flow lands.
+// per session). Speaking + rhythm are LIVE (step 5): speak() discards the open
+// window and freezes the clocks; _afterSpeak's 600ms tail reopens a fresh window
+// (multi-turn); the 20s "Anything else?" offer and 45s silence close run with the
+// convo constants; the artefact filter judges VOICED time, not blob duration.
+// Cancel is LIVE (step 6): the ✕ and a trailing spoken "scratch/cancel/forget that"
+// both bin the current window/utterance (nothing uploads or routes), blip, and open
+// a fresh turn window — the session stays open; the 45s close is NOT reset by a
+// cancel. Remaining limits (the LAST ticket, step 7 CS-SEAM): no engine pick or
+// honest mid-session swap, and a mic-button tap does not yet close a cs session
+// (micTap only knows the convo session — wired at the seam).
 const CS_ENABLED = false;   // the flag — flipped by CS-SEAM policy, never here
 let csActive = false;       // cloud session open?
 let csStream = null;        // the ONE held mic stream — the session owns it end to end
@@ -948,7 +966,17 @@ let csVoiced = false;       // did THIS window hear genuine speech?
 let csWindowStart = 0;
 let csWindowTimer = null;   // rolling window bound (idle discard / voiced cutoff)
 let csWinSeq = 0;           // window id — a stale VAD/timer callback can't end a newer window
-const CS_WINDOW_MS = 45000; // no window grows past this (idle → local discard; voiced → cutoff send)
+let csSpeaking = false;     // app is speaking — the session must not hear (or upload!) itself
+let csHadExchange = false;  // at least one reply this session (gates the offer, as convo does)
+let csOffered = false;      // "anything else?" already made this quiet spell
+let csSilenceTimer = null;  // 45s hard close (CONVO_CLOSE_MS — shared rhythm)
+let csOfferTimer = null;    // 20s offer nudge (CONVO_OFFER_MS)
+let csResumeTimer = null;   // deferred window reopen after TTS ends (CONVO_TTS_TAIL_MS)
+let csFirstVoicedAt = 0;    // voiced-time bounds for THIS window (artefact rule uses SPEECH
+let csLastVoicedAt = 0;     // time, not blob duration — the leading wait inflates duration)
+const CS_WINDOW_MS = 45000; // no window grows past this (voiced → cutoff send; the 45s silence
+                            // close beats a pure-idle window to the bound, so idle discard is
+                            // now just the safety net for a close-less edge, e.g. VAD down)
 
 async function csOpen() {
   if (csActive || convoActive || cloudActive || captureActive) return false;   // one mic owner at a time
@@ -963,18 +991,62 @@ async function csOpen() {
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
+  csSpeaking = false; csHadExchange = false; csOffered = false;
   logEvent('cs.open', 'session');
   setMicState('listening');
+  csArmSilence();             // armed BEFORE the first window, so at a 45s tie the close beats the window bound
   csStartWindow();            // the first window fires the rising open cue
   return true;
+}
+
+// Session rhythm — the SAME numbers and wording as the Web-Speech session: nudge at
+// 20s ("Anything else?", only once an exchange has happened), hard close at 45s.
+// Reset on driver speech and on reply-end resume; FROZEN while the app speaks.
+function csArmSilence() {
+  clearTimeout(csSilenceTimer); clearTimeout(csOfferTimer);
+  csOffered = false;
+  if (csHadExchange) csOfferTimer = setTimeout(csOffer, CONVO_OFFER_MS);
+  csSilenceTimer = setTimeout(() => csCloseSession('silence'), CONVO_CLOSE_MS);
+}
+// The OFFER — not a close: answering it is a normal turn; the 45s close keeps
+// running underneath (deliberately NOT re-armed by the offer, exactly as convo).
+function csOffer() {
+  if (!csActive || csOffered) return;
+  csOffered = true;
+  logEvent('offer', 'anything-else');   // same event kind as the Web-Speech session
+  csSpeaking = true;
+  csDiscardWindow('offer');             // whatever window was open is binned, never uploaded
+  setMicState('speaking');
+  const resume = () => { clearTimeout(csResumeTimer); csResumeTimer = setTimeout(() => { csSpeaking = false; if (csActive) csStartWindow(); }, CONVO_TTS_TAIL_MS); };
+  try {
+    synth && synth.cancel();
+    const u = new SpeechSynthesisUtterance('Anything else?');
+    u.lang = 'en-AU'; u.rate = 0.95;
+    u.onend = resume;
+    u.onerror = resume;
+    synth ? synth.speak(u) : resume();
+  } catch (e) { resume(); }
+}
+
+// Bin the CURRENT window outright — no finish, no upload, no restart. Used when the
+// app starts speaking (never transcribe ourselves) and by the offer; the caller
+// decides when a fresh window opens (reply-end tail / offer resume).
+function csDiscardWindow(reason) {
+  csWinSeq++;                                    // orphan this window's VAD + bound timer
+  clearTimeout(csWindowTimer);
+  try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
+  try { if (csRec && csRec.state !== 'inactive') { csRec.onstop = null; csRec.stop(); } } catch (e) {}
+  csRec = null; csChunks = [];
+  if (reason) logEvent('cs.discard', reason);
 }
 
 // One turn WINDOW: recorder + VAD live together; the whole window (leading wait
 // included) lands in one standalone blob, so a mistimed cut can never drop words.
 function csStartWindow() {
-  if (!csActive) return;
+  if (!csActive || csSpeaking) return;   // never open the mic while the app is talking
   const win = ++csWinSeq;
   csChunks = []; csVoiced = false; csWindowStart = Date.now();
+  csFirstVoicedAt = 0; csLastVoicedAt = 0;
   const mime = pickRecordingMime();
   try { csRec = mime ? new MediaRecorder(csStream, { mimeType: mime }) : new MediaRecorder(csStream); }
   catch (e) { logEvent('cs.window', 'recorder-failed'); csCloseSession('honest'); return; }
@@ -991,7 +1063,12 @@ function csStartWindow() {
     csVad = vadMonitor(csStream, csCtx, {
       quietMs: REC_SILENCE_MS,
       alive: () => csActive && csWinSeq === win,
-      onSpeech: () => { if (!csVoiced) { csVoiced = true; logEvent('cs.vad', 'speech'); setMicState('recording'); } },
+      onSpeech: () => {
+        csLastVoicedAt = Date.now();                       // voiced-time bounds for the artefact rule
+        if (!csFirstVoicedAt) csFirstVoicedAt = csLastVoicedAt;
+        csArmSilence();                                    // driver speech resets the 20s/45s clocks (as convo's onresult does)
+        if (!csVoiced) { csVoiced = true; logEvent('cs.vad', 'speech'); setMicState('recording'); }
+      },
       onQuiet: () => csEndWindow(true, 'silence'),
     });
   } catch (e) { csVad = null; logEvent('cs.vad', 'unavailable'); }   // no VAD → the window bound still ends it
@@ -1010,10 +1087,11 @@ function csEndWindow(send, endReason) {
   try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
   const rec = csRec; csRec = null;
   const voiced = csVoiced, startedAt = csWindowStart;
+  const voicedMs = csFirstVoicedAt ? (csLastVoicedAt - csFirstVoicedAt) : 0;   // SPEECH time, not blob duration
   const finish = () => {
     const chunks = csChunks; csChunks = [];
     const type = (rec && rec.mimeType) || pickRecordingMime() || 'audio/webm';
-    csFinishWindow(chunks, type, voiced, Date.now() - startedAt, send, endReason);
+    csFinishWindow(chunks, type, voiced, Date.now() - startedAt, voicedMs, send, endReason);
   };
   try {
     if (rec && rec.state !== 'inactive') { rec.onstop = finish; rec.stop(); }
@@ -1021,14 +1099,14 @@ function csEndWindow(send, endReason) {
   } catch (e) { finish(); }
 }
 
-async function csFinishWindow(chunks, type, voiced, durationMs, send, endReason) {
+async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, endReason) {
   if (!csActive) return;
   const blob = new Blob(chunks, { type });
   // An idle / unvoiced / too-small window is discarded LOCALLY — never uploaded;
   // the session rolls straight on to a fresh window.
   if (!send || !voiced || blob.size < 1024 || durationMs < REC_MIN_MS) {
     logEvent('cs.discard', endReason + ':' + durationMs + 'ms');
-    csStartWindow();
+    if (!csSpeaking) csStartWindow();
     return;
   }
   setMicState('thinking');
@@ -1036,28 +1114,32 @@ async function csFinishWindow(chunks, type, voiced, durationMs, send, endReason)
   let text = '';
   try { text = await transcribeBlob(blob); }
   catch (e) {
-    // Skeleton: a failed upload is logged and the window binned; the session
-    // listens on. (The honest mid-session engine swap is the CS-SEAM ticket.)
+    // A failed upload is logged and the window binned; the session listens on.
+    // (The honest mid-session engine swap is the CS-SEAM ticket.)
     logEvent('cs.fail', (e && e.message) || 'transcribe');
-    if (csActive) csStartWindow();
+    if (csActive && !csSpeaking) csStartWindow();
     return;
   }
   if (!csActive) return;
-  if (!text || (isSilenceArtefact(text) && durationMs < REC_SHORT_MS)) {
+  // Whisper's silence boilerplate is judged on VOICED time (step-3 forward note,
+  // resolved): a window's blob duration includes the leading wait, so the old
+  // duration heuristic let a 0.2s "thank you" through inside a 4s window. A stock
+  // phrase with real speech time behind it still delivers.
+  if (!text || (isSilenceArtefact(text) && voicedMs < REC_SHORT_MS)) {
     logEvent('cs.discard', 'artefact');
-    csStartWindow();
+    if (!csSpeaking) csStartWindow();
     return;
   }
   deliverTranscript(text, 'cloud', endReason);   // → thinking → the app; the same seam as every ears path
-  // NO auto-restart after a DELIVERED turn: the reply is about to play, and the
-  // resume-after-reply discipline (pause during TTS + tail) is step 5.
+  // NO restart here: the reply is about to play — speak() freezes the session and
+  // _afterSpeak's tail reopens the next window (the step-5 reply-flow resume).
 }
 
 function csCloseSession(reason) {
   const was = csActive;
-  csActive = false;
+  csActive = false; csSpeaking = false; csHadExchange = false; csOffered = false;
   csWinSeq++;                                    // orphan any in-flight window callbacks
-  clearTimeout(csWindowTimer);
+  clearTimeout(csWindowTimer); clearTimeout(csSilenceTimer); clearTimeout(csOfferTimer); clearTimeout(csResumeTimer);
   try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
   try { if (csRec && csRec.state !== 'inactive') { csRec.onstop = null; csRec.stop(); } } catch (e) {}
   csRec = null; csChunks = [];
@@ -1214,7 +1296,12 @@ function deliverTranscript(text, source, endReason) {
   if (isCancelPhrase(text)) {
     logEvent('cancel', 'spoken');
     showCaptured('');
-    if (convoActive) { openCued = false; convoReplyPending = false; convoSetState('listening'); convoOpenCue(); convoArmSilence(); }
+    // CLOUD session (flag-gated): the utterance is already binned by returning here — it
+    // never reaches _onTranscript. Blip (per the CS-CANCEL spec; convo's spoken cancel
+    // stays blip-less as shipped), then a fresh turn window with its cue. The 45s close
+    // is NOT re-armed — the utterance's own voiced ticks just reset it moments ago.
+    if (csActive) { cancelBlip(); openCued = false; if (!csSpeaking) csStartWindow(); }
+    else if (convoActive) { openCued = false; convoReplyPending = false; convoSetState('listening'); convoOpenCue(); convoArmSilence(); }
     else setMicState('off');
     return;
   }
@@ -1274,6 +1361,16 @@ function speak(text) {
   if (!synth) return;
   // App-sequential reply while something is already playing → wait our turn.
   if (_queueReplies && _ttsActive) { _ttsQueue.push(text); return; }
+  if (csActive) {
+    // CLOUD session: never hear — or worse, UPLOAD — our own reply. The open turn
+    // window is DISCARDED outright (binned locally), and the session silence clocks
+    // freeze while we speak (the same V9ZUTAZ discipline as the convo branch below).
+    // _afterSpeak's tail reopens a fresh window when it's genuinely the driver's turn.
+    csSpeaking = true;
+    clearTimeout(csResumeTimer);
+    csDiscardWindow(csRec ? 'tts' : '');
+    clearTimeout(csSilenceTimer); clearTimeout(csOfferTimer);
+  }
   if (convoActive) {
     convoSpeaking = true; convoStopRecogniser();   // don't hear our own reply
     // Pause the SESSION silence clock (hard-close AND the offer nudge) while WE speak.
@@ -1319,7 +1416,20 @@ function _afterSpeak() {
   _ttsActive = false;
   if (_ttsQueue.length) {   // more of our own to say — keep the mic shut, play next after the tail
     clearTimeout(_ttsNextTimer);
-    _ttsNextTimer = setTimeout(() => { if (convoActive) { convoSpeaking = true; convoStopRecogniser(); } _speakNow(_ttsQueue.shift()); }, CONVO_TTS_TAIL_MS);
+    _ttsNextTimer = setTimeout(() => { if (convoActive) { convoSpeaking = true; convoStopRecogniser(); } if (csActive) csSpeaking = true; _speakNow(_ttsQueue.shift()); }, CONVO_TTS_TAIL_MS);
+    return;
+  }
+  if (csActive) {
+    // CLOUD session reply finished: stay shut for the tail (speaker decay + room echo),
+    // THEN it's genuinely the driver's turn — fresh window (rising cue via the step-4
+    // guards) and the silence clocks re-armed from zero. This is the reply-flow resume
+    // that lifts the skeleton's one-turn limit.
+    csHadExchange = true;
+    clearTimeout(csResumeTimer);
+    csResumeTimer = setTimeout(() => {
+      csSpeaking = false;
+      if (csActive) { csStartWindow(); csArmSilence(); }
+    }, CONVO_TTS_TAIL_MS);
     return;
   }
   if (!convoActive) { setMicState('off'); return; }
@@ -1355,7 +1465,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 02:10 PM AEST',
+    BUILD: '05 Aug 2026, 02:30 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

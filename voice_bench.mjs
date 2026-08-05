@@ -758,17 +758,18 @@ await RIG.settle();
 check("flag ON: cs.open + held stream (ONE getUserMedia) + first window recording", kinds2().includes("cs.open:session") && gumCalls === 1 && !!RIG.recorder && RIG.recorder.state === "recording" && RIG.starts === 1);
 check("flag ON: session open, state listening", Voice2.isSessionOpen() === true && Voice2.state() === "listening");
 check("CUES: ONE rising open cue on session open", cue2("open") === 1);
-// idle window: no speech for the whole 45s bound → discarded locally, session rolls on
-advance(45100); await RIG.settle();
-check("idle window rolled over: discarded LOCALLY (no upload), a fresh window recording", RIG.fetches.length === 0 && RIG.starts === 2 && kinds2().some(k => k.startsWith("cs.discard:idle")) && Voice2.isSessionOpen());
-check("CUES: NO cue on a discarded idle window (state never left listening)", cue2("open") === 1);
+// pre-close idle: 30s of nothing — no rollover, no upload, still listening on the first
+// window (step 5: the 45s silence close now owns pure idle — proven in scenario 21)
+advance(30000); await RIG.settle();
+check("30s idle: still listening on the FIRST window, nothing uploaded", RIG.fetches.length === 0 && RIG.starts === 1 && Voice2.isSessionOpen());
+check("CUES: no cue from idling (state never left listening)", cue2("open") === 1);
 // a transcribe FAILURE: window binned, session listens on
 RIG.transcripts.push({ fail: "network down" });
 await RIG.pump(Array(8).fill(40));                             // the driver speaks —
 check("mid-window: state recording + the ✕ send-swap on the CLOUD engine", Voice2.state() === "recording" && el("sendBtn").textContent === "✕");
 check("CUES: a listening→recording flip WITHIN a window never doubles the cue", cue2("open") === 1);
 await RIG.pump(Array(32).fill(0)); await RIG.settle();         // — then quiet: cut → upload fails
-check("failed upload: cs.fail logged, session still open, fresh window (no delivery)", kinds2().some(k => k.startsWith("cs.fail")) && Voice2.isSessionOpen() && RIG.starts === 3 && delivered2 === 0);
+check("failed upload: cs.fail logged, session still open, fresh window (no delivery)", kinds2().some(k => k.startsWith("cs.fail")) && Voice2.isSessionOpen() && RIG.starts === 2 && delivered2 === 0);
 check("CUES: reopening AFTER the thinking spell earns exactly one new open cue", cue2("open") === 2);
 // the driver's turn: speech → VAD quiet cut → upload → deliver — exactly once
 RIG.transcripts.push("fuel prices in Tully");
@@ -776,7 +777,7 @@ await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle()
 check("speech flipped the state to recording (cs.vad:speech logged once this window)", kinds2().includes("cs.vad:speech"));
 check("VAD quiet ended the window: ONE upload, deliver:cloud:silence in the ring buffer", RIG.fetches.length === 2 && kinds2().includes("deliver:cloud:silence"));
 advance(700);
-check("delivered exactly ONCE to the app; NO auto-restart after a delivered turn (step 5 wires the reply flow)", delivered2 === 1 && RIG.starts === 3);
+check("delivered exactly ONCE to the app; NO restart until the reply-flow resume (speak owns it now)", delivered2 === 1 && RIG.starts === 2);
 check("CUES: still no extra open cue after the delivered turn (no reopen yet)", cue2("open") === 2);
 // close: stream released, state off, session shut, ONE falling cue
 Voice2.closeSession("tap");
@@ -790,6 +791,108 @@ check("CUES: a fresh session earns a fresh open cue (guard re-armed)", cue2("ope
 Voice2.closeSession("phrase");
 check("CUES: close cue once for the phrase close too (cs.close:phrase logged)", cue2("close") === 2 && kinds2().includes("cs.close:phrase"));
 mockNavigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });   // restore
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
+// ── SCENARIO 21: CS-SPEAKING — TTS clash, tail reopen, multi-turn, offer, 45s close,
+// voiced-time artefact rule. All on the flag-ON instance; the shipped flag stays off.
+console.log("\n--- 21. CS-speaking: TTS discipline, reply-flow resume, offer + 45s close, voiced-time artefact ---");
+check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+// turn 1 delivers
+RIG.transcripts.push("first question");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+advance(700);
+check("turn 1 delivered", delivered2 === 1 && RIG.fetches.length === 1);
+const startsAfterT1 = RIG.starts;
+// the app replies — the session must NOT hear (or upload) itself
+Voice2.speak("Here is the answer.");
+tts.start();
+check("state speaking during the reply", Voice2.state() === "speaking");
+await RIG.pump(Array(10).fill(40));       // the app's own voice hits the mic
+check("NO capture while TTS plays: no new window, nothing of our own speech can upload", RIG.starts === startsAfterT1 && RIG.fetches.length === 1);
+const openCuesBeforeResume = cue2("open");
+tts.end(); advance(700); await RIG.settle();   // the 600ms tail → fresh window
+check("after the tail: a fresh window, state listening", RIG.starts === startsAfterT1 + 1 && Voice2.state() === "listening");
+check("CUES: exactly ONE reopen cue after the tail", cue2("open") === openCuesBeforeResume + 1);
+// turn 2 + reply 2 — a genuine multi-turn session
+RIG.transcripts.push("second question");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+advance(700);
+check("turn 2 delivered — the one-turn skeleton limit is LIFTED (two turns, one session)", delivered2 === 2 && RIG.fetches.length === 2 && Voice2.isSessionOpen());
+Voice2.speak("Second answer."); tts.start(); tts.end(); advance(700); await RIG.settle();
+check("after reply 2 the session listens again", Voice2.state() === "listening" && Voice2.isSessionOpen());
+// the 20s offer — then the driver's answer is a NORMAL turn
+advance(20100); await RIG.settle();
+check("the offer fired at 20s idle (offer:anything-else) and binned the open window (cs.discard:offer)", kinds2().includes("offer:anything-else") && kinds2().includes("cs.discard:offer"));
+tts.end(); advance(700); await RIG.settle();   // 'Anything else?' done → tail → answer window
+RIG.transcripts.push("yes cheapest diesel");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+advance(700);
+check("the driver's answer to the offer was captured as a normal turn", delivered2 === 3 && RIG.fetches.length === 3);
+// genuine driver silence: the offer fires once more for this quiet spell, then the 45s close
+const closeCuesBefore = cue2("close");
+advance(21000); await RIG.settle();            // the offer nudges again …
+tts.end(); advance(700); await RIG.settle();   // … finishes + tail
+advance(30000); await RIG.settle();            // … and the 45s (from the last speech) runs out
+check("45s of driver silence closed the session with its reason (cs.close:silence)", kinds2().includes("cs.close:silence") && Voice2.isSessionOpen() === false && Voice2.state() === "off");
+check("CUES: exactly one close cue for the silence close", cue2("close") === closeCuesBefore + 1);
+// voiced-time artefact rule — both ways (a fresh session)
+Voice2.clearLog(); RIG.reset(); delivered2 = 0; rafQueue.length = 0; timers.length = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("Thank you.");
+await RIG.pump([...Array(3).fill(40), ...Array(32).fill(0)]); await RIG.settle();   // ~0.2s of actual speech in a ~3.5s window
+advance(700);
+check("artefact phrase + SHORT voiced time (~0.2s) → binned on VOICED time (blob duration would have passed it)", kinds2().includes("cs.discard:artefact") && delivered2 === 0);
+check("…and the session rolled to a fresh window", Voice2.isSessionOpen() && RIG.starts === 2);
+RIG.transcripts.push("thank you very much");
+await RIG.pump([...Array(20).fill(40), ...Array(32).fill(0)]); await RIG.settle();  // ~1.9s of real speech
+advance(700);
+check("the same stock phrase with REAL voiced time (~1.9s) DELIVERS", delivered2 === 1);
+Voice2.closeSession("tap");
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
+// ── SCENARIO 22: CS-CANCEL — ✕ + spoken "scratch that" on the cloud engine ─────
+console.log("\n--- 22. CS-cancel: ✕ discards + fresh window; spoken cancel routes nowhere; harmless no-ops; close clock untouched ---");
+check("the shipped flag is still OFF", /const CS_ENABLED = false;/.test(SRC));
+// (a) ✕ mid-recording: discard, blip, fresh window, session open — and the 45s close is NOT reset
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();            // close armed at open (t0)
+await RIG.pump(Array(8).fill(40));                    // driver speaking — last voiced tick re-arms the close
+check("mid-recording: state recording, ✕ showing", Voice2.state() === "recording" && el("sendBtn").textContent === "✕");
+const cancelsBefore = kinds2().filter(k => k === "cancel:tap-session").length;
+advance(2000);                                        // a beat later (under the 2.8s cut) the driver hits ✕
+Voice2.cancelCapture();
+check("✕ on cs: cancel:tap-session + cs.discard:cancel logged, ZERO uploads", kinds2().filter(k => k === "cancel:tap-session").length === cancelsBefore + 1 && kinds2().includes("cs.discard:cancel") && RIG.fetches.length === 0);
+check("✕ on cs: a FRESH window opened, session still open, state listening", RIG.starts === 2 && Voice2.isSessionOpen() && Voice2.state() === "listening");
+check("CUES: the fresh post-cancel turn earned a new open cue", cue2("open") === 2);
+check("one-shot state untouched by a cs cancel (isolation holds in source)", /if \(csActive\) \{\n    if \(csSpeaking \|\| !csRec\) return;\n    logEvent\('cancel', 'tap-session'\);\n    cancelBlip\(\);\n    csDiscardWindow\('cancel'\);/.test(SRC));
+// the 45s close was armed by the SPEECH (t_speech+45000), not the cancel: at t_speech+45.5s it must be CLOSED
+advance(43500); await RIG.settle();                   // t_cancel+43.5s ≈ t_speech+45.5s < t_cancel+45s
+check("the 45s close fired on the SPEECH clock — the cancel did NOT reset it", kinds2().includes("cs.close:silence") && Voice2.isSessionOpen() === false);
+// (b) spoken "scratch that": binned before _onTranscript, blip, fresh window, session open
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("find fuel scratch that");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+advance(700);
+check("spoken cancel: cancel:spoken logged and the utterance NEVER reached _onTranscript", kinds2().includes("cancel:spoken") && delivered2 === 0);
+check("spoken cancel: fresh window, session open, state listening", RIG.starts === 2 && Voice2.isSessionOpen() && Voice2.state() === "listening");
+check("spoken cancel on cs blips + reopens (source: cancelBlip in the cs spoken branch)", /if \(csActive\) \{ cancelBlip\(\); openCued = false; if \(!csSpeaking\) csStartWindow\(\); \}/.test(SRC));
+// (c) harmless no-ops: nothing recording (post-deliver / during the TTS tail) → no blip spam, no double windows
+RIG.transcripts.push("real question");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
+advance(700);
+check("setup: a real turn delivered", delivered2 === 1);
+const logLenAfterDeliver = Voice2.getLog().length;
+Voice2.cancelCapture();                               // post-deliver: NO window running → no-op
+check("cancel with nothing recording is a silent no-op (no log entries, no discard)", Voice2.getLog().length === logLenAfterDeliver);
+Voice2.speak("The answer."); tts.start(); tts.end();  // reply done — the 600ms tail is pending
+const startsBeforeTailCancel = RIG.starts;
+Voice2.cancelCapture();                               // during the tail: csSpeaking → no-op
+advance(700); await RIG.settle();
+check("cancel during the post-TTS tail: no-op, then exactly ONE window opens (no doubles)", RIG.starts === startsBeforeTailCancel + 1 && Voice2.isSessionOpen() && Voice2.state() === "listening");
+Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
