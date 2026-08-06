@@ -1057,5 +1057,21 @@ check("convo: 'no' to the offer CLOSES (close:offer-no + offer:no), one cue, sig
 check("convo: the negative never delivered (one turn total)", delivered === 1);
 timers.length = 0; rafQueue.length = 0;
 
+// ── SCENARIO 26: WORDING — cs phrase/silence closes sign off like convo; tap stays line-less ─
+console.log("\n--- 26. wording: cs phrase + silence closes speak the sign-off (cue once); tap line-less ---");
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+Voice2.closeSession("phrase");
+check("cs PHRASE close: cs.close:phrase + ONE cue + the sign-off spoken", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+Voice2.clearLog(); RIG.reset(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+advance(45100); await RIG.settle();                       // genuine 45s driver silence
+check("cs SILENCE close: cs.close:silence + ONE cue + the sign-off spoken", kinds2().includes("cs.close:silence") && cue2("close") === 1 && H.utt && /Righto — tap the mic/.test(H.utt.text));
+Voice2.clearLog(); RIG.reset(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+Voice2.closeSession("tap");
+check("cs TAP close stays LINE-LESS (a deliberate close — cue only)", kinds2().includes("cs.close:tap") && !(H.utt && /Righto/.test(H.utt.text)));
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
