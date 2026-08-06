@@ -1073,5 +1073,44 @@ Voice2.closeSession("tap");
 check("cs TAP close stays LINE-LESS (a deliberate close — cue only)", kinds2().includes("cs.close:tap") && !(H.utt && /Righto/.test(H.utt.text)));
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
+// ── SCENARIO 27: CS-CLOSE-WORDS — the close vocabulary, full-match, both engines ─
+console.log("\n--- 27. close-words: every phrase closes (both engines); prefixes never do ---");
+// matcher unit sweep — every ticket phrase full-matches; prefixes/embeddings never do
+const closeFn = new Function("cleanTranscript", "return " + exFn("isClosePhrase"))(globalThis.cleanTranscript);
+const CLOSERS = ["close", "end chat", "end the chat", "end conversation", "finish", "finished", "we're finished", "stop", "stop listening", "shut down", "goodbye", "bye", "over and out", "that's all", "done", "Close.", "stop listening, thanks"];
+const NON_CLOSERS = ["which is the closest caravan park", "should I stop at Ingham", "close the chat and find fuel", "stop at the next servo", "finish the route to Tully", "goodbye then take me to Cairns"];
+check("matcher: EVERY close phrase full-matches", CLOSERS.every(t => closeFn(t)), CLOSERS.filter(t => !closeFn(t)).join(", "));
+check("matcher: NO prefix/embedded use ever matches ('closest', 'stop at Ingham', …)", NON_CLOSERS.every(t => !closeFn(t)), NON_CLOSERS.filter(t => closeFn(t)).join(", "));
+// CLOUD: "end chat" closes with sign-off + one cue; the negative delivers as a turn
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("end chat");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: 'end chat' CLOSES mid-session (cs.close:phrase, one cue, sign-off, not delivered)", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && !Voice2.isSessionOpen() && delivered2 === 0 && H.utt && /Righto — tap the mic/.test(H.utt.text));
+Voice2.clearLog(); RIG.reset(); delivered2 = 0; H.utt = null;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("close");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: bare 'close' CLOSES (the field word)", kinds2().includes("cs.close:phrase") && !Voice2.isSessionOpen() && delivered2 === 0);
+Voice2.clearLog(); RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("which is the closest caravan park");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: 'which is the closest caravan park' DELIVERS as an ordinary turn", delivered2 === 1 && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+RIG.disable();
+// CONVO: same seam — "end chat" closes; "should I stop at Ingham" delivers
+Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0;
+Voice.onTranscript(() => { delivered++; });
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("end chat"); advance(2800); advance(700);
+check("convo: 'end chat' CLOSES (close:phrase, one cue, sign-off)", kinds().includes("close:phrase") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text) && delivered === 0);
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("should I stop at Ingham"); advance(2800); advance(700);
+check("convo: 'should I stop at Ingham' DELIVERS as an ordinary turn", delivered === 1 && Voice.isSessionOpen());
+Voice.closeSession("tap");
+timers.length = 0; rafQueue.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

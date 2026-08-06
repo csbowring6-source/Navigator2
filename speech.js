@@ -318,7 +318,7 @@ function convoDeliverTurn() {
   convoHandleUtterance(pending, 'silence');            // a session turn always ends on a pause
 }
 function convoHandleUtterance(text, endReason) {
-  if (isConvoClosePhrase(text)) { closeConversation('phrase'); return; }
+  if (isClosePhrase(text)) { closeConversation('phrase'); return; }   // pre-busy early check (convo)
   deliverTranscript(text, 'basic', endReason || 'silence');   // normal pipeline; the reply's speak() pauses us
 }
 // ── OFFER-NO (field GHR8TSM): a NEGATIVE answer to "Anything else?" ends the session ─
@@ -332,9 +332,14 @@ function isOfferNo(text) {
   const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '').trim();
   return t.length <= 30 && /^(?:no|nope|nah|no thanks?|no thank you|that'?s (?:all|it)|nothing(?: else)?|i'?m good|all good)(?:[\s,]+(?:mate|thanks?|thank you|cheers))?$/.test(t);
 }
-function isConvoClosePhrase(text) {
-  const t = cleanTranscript(text).toLowerCase();
-  return t.length <= 25 && /^(that'?s it|that'?s all|that is all|thanks|thank you|cheers|done|all done|i'?m done|no that'?s it|that will do|bye|goodbye|close|stop( listening)?)\b/.test(t);
+// CS-CLOSE-WORDS (field 2WYPVSZ): the close vocabulary is the plain words a driver
+// reaches for, FULL-MATCH only — anchored ^…$ with a bounded courtesy tail and a 30-char
+// cap, so "close" inside "closest caravan park" or "stop" inside "should I stop at
+// Ingham" can never end a session. Serves BOTH engines (the shared deliverTranscript
+// seam) plus convo's early pre-busy check.
+function isClosePhrase(text) {
+  const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '').trim();
+  return t.length <= 30 && /^(?:that'?s (?:it|all)|that is all|thanks|thank you|cheers|done|all done|i'?m (?:all )?(?:done|finished)|no that'?s it|that will do|bye|goodbye|close|end (?:the )?chat|end (?:the )?conversation|finish(?:ed)?|we'?re finished|stop(?: listening)?|shut down|over and out)(?:[\s,]+(?:mate|thanks?|thank you|cheers|now|please))?$/.test(t);
 }
 // A TRAILING "cancel that" / "scratch that" / "forget that" bins the whole utterance — no reply,
 // no routing. Trailing only (the phrase must END the transcript), so a mid-sentence mention
@@ -1384,6 +1389,15 @@ function deliverTranscript(text, source, endReason) {
       return;
     }
   }
+  // CS-CLOSE-WORDS (field 2WYPVSZ): a close phrase ends the session at ANY point — both
+  // engines share this seam (the cloud engine had NO engine-side close check at all, so
+  // "close" and "end chat" were answered by the model). Full-match only; the sign-off and
+  // the single close cue come from the close paths. No session open → ordinary delivery.
+  if ((convoActive || csActive) && isClosePhrase(text)) {
+    showCaptured('');
+    closeConversation('phrase');
+    return;
+  }
   // How the turn ended ('silence' natural · 'cutoff' force-ended · 'tap' driver
   // chose to send). sendMessage consumes it once to guard destination resolution
   // against fragments left by a hard cutoff. Not a second route — just metadata.
@@ -1544,7 +1558,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '06 Aug 2026, 11:14 AM AEST',
+    BUILD: '07 Aug 2026, 09:03 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
