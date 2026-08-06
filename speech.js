@@ -152,7 +152,7 @@ function openWebSpeechSession() {
   unlockAudio();
   try { if (captureActive) stopCapture(false); } catch(e) {}   // don't let two mics fight
   logEvent('open', 'session');
-  convoActive = true; convoOffered = false; convoHadExchange = false;
+  convoActive = true; convoOffered = false; convoHadExchange = false; offerAnswerPending = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
   convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoCycleHadSpeech = false; convoReplyPending = false; clearTimeout(convoResumeTimer);    // fresh oscillation guards
@@ -321,6 +321,17 @@ function convoHandleUtterance(text, endReason) {
   if (isConvoClosePhrase(text)) { closeConversation('phrase'); return; }
   deliverTranscript(text, 'basic', endReason || 'silence');   // normal pipeline; the reply's speak() pauses us
 }
+// ── OFFER-NO (field GHR8TSM): a NEGATIVE answer to "Anything else?" ends the session ─
+// The offer context can't ride csOffered/convoOffered — the answer's own speech resets
+// those via the arm-silence calls before delivery — so this flag is set when either
+// engine's offer speaks and CONSUMED by the first delivered turn (or any close/open).
+// Scoped to that one turn: a "no" answering the APP's question mid-exchange is an
+// ordinary turn, never a close.
+let offerAnswerPending = false;
+function isOfferNo(text) {
+  const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '').trim();
+  return t.length <= 30 && /^(?:no|nope|nah|no thanks?|no thank you|that'?s (?:all|it)|nothing(?: else)?|i'?m good|all good)(?:[\s,]+(?:mate|thanks?|thank you|cheers))?$/.test(t);
+}
 function isConvoClosePhrase(text) {
   const t = cleanTranscript(text).toLowerCase();
   return t.length <= 25 && /^(that'?s it|that'?s all|that is all|thanks|thank you|cheers|done|all done|i'?m done|no that'?s it|that will do|bye|goodbye|close|stop( listening)?)\b/.test(t);
@@ -381,6 +392,7 @@ function convoArmSilence() {
 function convoOffer() {
   if (!convoActive || convoOffered) return;
   convoOffered = true;
+  offerAnswerPending = true;   // the NEXT delivered turn answers the offer (a negative closes)
   logEvent('offer', 'anything-else');
   convoSpeaking = true; convoStopRecogniser(); setMicState('speaking');
   // Same echo discipline as speak(): stay shut through a tail, THEN reopen.
@@ -474,7 +486,7 @@ function closeConversation(reason) {
   if (csActive) { csCloseSession(reason); return; }
   const wasActive = convoActive;
   logEvent('close', reason + (wasActive ? '' : ' (noop)'));
-  convoActive = false; convoSpeaking = false; convoRecRunning = false;
+  convoActive = false; convoSpeaking = false; convoRecRunning = false; offerAnswerPending = false;
   clearTimeout(convoSilenceTimer); clearTimeout(convoOfferTimer); clearTimeout(convoDeliverTimer); clearTimeout(convoResumeTimer);
   convoTurn = ''; convoDelivered = ''; convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoReplyPending = false;   // drop any half-heard turn / oscillation state
   if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch(e) {} }
@@ -498,7 +510,7 @@ function closeConversation(reason) {
       const bub = bubbles[bubbles.length - 1];
       if (bub) { const d = document.createElement('div'); d.textContent = diag; d.style.cssText = 'font-size:11px;opacity:0.6;margin-top:4px;'; bub.appendChild(d); }
     }
-  } else if (reason === 'phrase' || reason === 'silence') {
+  } else if (reason === 'phrase' || reason === 'silence' || reason === 'offer-no') {
     const m = 'Righto — tap the mic when you need me.';
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
@@ -1033,7 +1045,7 @@ async function csOpen() {
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
-  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0;
+  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false;
   logEvent('cs.open', 'session');
   setMicState('listening');
   csArmSilence();             // armed BEFORE the first window, so at a 45s tie the close beats the window bound
@@ -1055,6 +1067,7 @@ function csArmSilence() {
 function csOffer() {
   if (!csActive || csOffered) return;
   csOffered = true;
+  offerAnswerPending = true;   // the NEXT delivered turn answers the offer (a negative closes)
   logEvent('offer', 'anything-else');   // same event kind as the Web-Speech session
   csSpeaking = true;
   csDiscardWindow('offer');             // whatever window was open is binned, never uploaded
@@ -1182,7 +1195,7 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
 
 function csCloseSession(reason) {
   const was = csActive;
-  csActive = false; csSpeaking = false; csHadExchange = false; csOffered = false;
+  csActive = false; csSpeaking = false; csHadExchange = false; csOffered = false; offerAnswerPending = false;
   csWinSeq++;                                    // orphan any in-flight window callbacks
   clearTimeout(csWindowTimer); clearTimeout(csSilenceTimer); clearTimeout(csOfferTimer); clearTimeout(csResumeTimer);
   try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
@@ -1193,6 +1206,12 @@ function csCloseSession(reason) {
   setMicState('off');
   if (was) convoCloseCue();   // the same falling cue, once per session (convoCued guard), any close reason
   logEvent('cs.close', reason + (was ? '' : ' (noop)'));
+  if (was && reason === 'offer-no') {
+    // The driver said "no" to the offer — the exchange is done. Sign off in the
+    // established voice (convo's phrase/silence closes use the same line).
+    const m = 'Righto — tap the mic when you need me.';
+    addMsg('nav', m); lastSpoken = m; speak(m);
+  }
 }
 
 // V2: RECORDING is the primary path — the phone's own recogniser is the weak
@@ -1349,6 +1368,20 @@ function deliverTranscript(text, source, endReason) {
     else if (convoActive) { openCued = false; convoReplyPending = false; convoSetState('listening'); convoOpenCue(); convoArmSilence(); }
     else setMicState('off');
     return;
+  }
+  // OFFER-NO (field GHR8TSM): the first delivered turn after "Anything else?" answers the
+  // offer. A plain negative ENDS the session — sign-off, one close cue, its own reason —
+  // instead of routing to the model and re-offering forever. Anything else (a positive or
+  // a substantive ask) consumes the context and continues as the ordinary turn it is.
+  // (A cancel above returns first, so a binned answer keeps the offer context alive.)
+  if (offerAnswerPending) {
+    offerAnswerPending = false;
+    if (isOfferNo(text)) {
+      logEvent('offer', 'no');
+      showCaptured('');
+      closeConversation('offer-no');   // routes to whichever engine holds the session
+      return;
+    }
   }
   // How the turn ended ('silence' natural · 'cutoff' force-ended · 'tap' driver
   // chose to send). sendMessage consumes it once to guard destination resolution
@@ -1510,7 +1543,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '05 Aug 2026, 03:05 PM AEST',
+    BUILD: '06 Aug 2026, 11:01 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

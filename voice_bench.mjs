@@ -1009,5 +1009,53 @@ check("swap sequence IN ORDER: pick → open → fail x1..x3 → swap → cs.clo
 Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
+// ── SCENARIO 25: CS-OFFER-NO — a "no" to the offer ends the session (field GHR8TSM) ─
+console.log("\n--- 25. offer-no: a negative to 'Anything else?' closes (both engines); scoped to the offer only ---");
+// (a) CLOUD: offer → "No thanks." → close with sign-off, one cue, its own reason
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("where's the nearest dump point");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);   // turn 1
+Voice2.speak("Two hundred metres up on the left."); tts.start(); tts.end(); advance(700); await RIG.settle();   // reply → exchange exists
+advance(20100); await RIG.settle();                       // the offer fires
+tts.end(); advance(700); await RIG.settle();              // "Anything else?" done → answer window
+RIG.transcripts.push("No thanks.");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: 'No thanks.' to the offer CLOSES the session (cs.close:offer-no, offer:no logged)", kinds2().includes("offer:no") && kinds2().includes("cs.close:offer-no") && !Voice2.isSessionOpen() && Voice2.state() === "off");
+check("cloud: the negative never reached _onTranscript (one delivered turn total)", delivered2 === 1);
+check("cloud: exactly ONE close cue", cue2("close") === 1);
+check("cloud: the sign-off spoken in the established voice", H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+// (b) CLOUD: a SUBSTANTIVE answer to the offer stays a normal turn (the field-good path)
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("first ask");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();
+advance(20100); await RIG.settle(); tts.end(); advance(700); await RIG.settle();   // offer → answer window
+RIG.transcripts.push("yes cheapest diesel please");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: a substantive offer answer DELIVERS as a normal turn, session open", delivered2 === 2 && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+// (c) CLOUD: a mid-exchange "no" (no offer pending) is an ORDINARY turn — never a close
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("No.");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("cloud: a mid-exchange 'No.' answering the APP delivers normally, session stays open", delivered2 === 1 && Voice2.isSessionOpen() && !kinds2().includes("offer:no"));
+Voice2.closeSession("tap");
+RIG.disable();
+// (d) CONVO fallback — the seam is SHARED: the same "no" closes the Web-Speech session
+Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0;
+Voice.onTranscript(() => { delivered++; });
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("find fuel"); advance(2800); advance(700);   // a turn delivers
+Voice.speak("Cheapest is BP Tully."); tts.start(); tts.end(); advance(700);   // reply → exchange exists
+advance(20100);                                            // the offer fires
+tts.end(); advance(700);                                   // "Anything else?" done → mic resumes
+rec.onstart(); rec.speech(); rec.final("no"); advance(2800); advance(700);
+check("convo: 'no' to the offer CLOSES (close:offer-no + offer:no), one cue, sign-off", kinds().includes("offer:no") && kinds().includes("close:offer-no") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text));
+check("convo: the negative never delivered (one turn total)", delivered === 1);
+timers.length = 0; rafQueue.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
