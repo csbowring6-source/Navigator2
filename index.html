@@ -594,7 +594,7 @@
     <div class="home-guide-lead" id="homeGuideLead"><b>Navigator thinks — your sat-nav steers.</b> Ask out loud for what's ahead; I find it, then hand the driving to your sat-nav.</div>
     <div class="home-eg-row">“Find me a campsite within the next hour along my route.”</div>
     <div class="home-eg-row">“Cheapest diesel ahead I can get the van into.”</div>
-    <div class="home-rhythm"><b>Drive → Stop → Brief.</b> I can't watch the road while your sat-nav steers — pull in and I'll size up what's next.</div>
+    <div class="home-rhythm"><b>Drive → Stop → Brief.</b> I can't watch the road while your sat-nav steers — when you pull in, I'll size up the next stretch.</div>
   </div>
   <div class="home-mic-wrap">
     <button class="home-mic" id="homeMic" onclick="homeMic()" aria-label="Tap and talk">🎙</button>
@@ -2040,7 +2040,7 @@ function resumeTrip() {
     firstQueryAfterOpen = false;
     openAppView();
     drawCommittedRoute(currentRunDest);
-    addMsg('nav', `Resuming your ${raw.dest} trip. What do you need?`);
+    addMsg('nav', `Back to your ${raw.dest} trip.`);   // the trip name is plenty (WORDING, 06 Aug)
     // The Navigate offer comes from TRIP STATE — never scraped from chat text. Bare place name,
     // no "Navigate to" verb — consistent with every other pin.
     if (currentRunDest) {
@@ -4079,7 +4079,7 @@ function resumeCampRoundIfPersisted() {
   firstQueryAfterOpen = false;            // the trip is confirmed by the restore itself
   openAppView();
   const dest = currentRunDest || campRound.place || 'your trip';
-  const line = `Back to your ${dest} trip — parks are still up.`;
+  const line = `Back to your ${dest} trip.`;   // the trip name is plenty — no trailing clause (WORDING, 06 Aug)
   const chat = document.getElementById('chatArea'); if (chat) chat.innerHTML = '';   // avoid duplicating the (card-less) restored bubble
   addMsg('nav', line); lastNavReply = line; lastSpoken = line;
   const bubbles = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');

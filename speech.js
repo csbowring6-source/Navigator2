@@ -1206,9 +1206,10 @@ function csCloseSession(reason) {
   setMicState('off');
   if (was) convoCloseCue();   // the same falling cue, once per session (convoCued guard), any close reason
   logEvent('cs.close', reason + (was ? '' : ' (noop)'));
-  if (was && reason === 'offer-no') {
-    // The driver said "no" to the offer — the exchange is done. Sign off in the
-    // established voice (convo's phrase/silence closes use the same line).
+  if (was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no')) {
+    // A session ends with a short sign-off, never silently (settled design) — the SAME
+    // reasons and line as the convo session. Tap stays line-less (a deliberate close);
+    // swap/honest speak their own honest lines.
     const m = 'Righto — tap the mic when you need me.';
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
