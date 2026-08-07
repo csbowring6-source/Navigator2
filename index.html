@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 10:00 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 12:41 PM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-1000AM"></script>
+<script src="speech.js?v=07Aug2026-1241PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4126,12 +4126,28 @@ function noteCampCalled(name) {
   saveCampRound();
 }
 function lastNavBubble() { const b = document.querySelectorAll('#chatArea .msg.nav .msg-bubble'); return b[b.length - 1] || null; }
+// DIAL-IN-VIEW (field EBQFG6V): a control appended to a bubble AFTER addMsg's bottom-scroll
+// (the green tel: button, a ring-around number line) can land below the fold — the app then
+// tells the driver to tap a button they can't see. Scroll the ELEMENT fully into view after
+// layout (rAF, so the browser has sized the new node), bottom-anchored with breathing room.
+// Complements scrollFirstCardIntoView (which TOP-anchors the camps block) — never replaces it.
+function scrollControlIntoView(el) {
+  if (!el) return;
+  const go = () => {
+    const chat = document.getElementById('chatArea');
+    if (!chat || !el.getBoundingClientRect) return;
+    const cRect = chat.getBoundingClientRect(), eRect = el.getBoundingClientRect();
+    if (eRect.bottom > cRect.bottom - 8) chat.scrollTop += (eRect.bottom - cRect.bottom) + 8;
+  };
+  if (window.requestAnimationFrame) requestAnimationFrame(go); else setTimeout(go, 0);
+}
 function roundCallButton(bub, s) {
   const call = document.createElement('a'); call.className = 'nav-btn';
   call.style.cssText = 'margin-top:6px;background:transparent;border:1px solid var(--green);color:var(--green);text-decoration:none;';
   call.href = 'tel:' + s.phone.replace(/[^\d+]/g, ''); call.textContent = `📞 Call ${s.name}`;
   call.addEventListener('click', () => noteCampCalled(s.name));
   bub.appendChild(call);
+  scrollControlIntoView(call);   // the dial button must be ON SCREEN when it's offered
 }
 
 // The three-option prompt shown when we regain focus after a Call (part 2).
@@ -4318,6 +4334,7 @@ function presentNumber(site, phone) {
     line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
     line.textContent = `${site.name}: ${localPhone(phone)}`;
     bub.appendChild(line);
+    scrollControlIntoView(line);   // ring-around presentations stay ON SCREEN too (DIAL-IN-VIEW)
   }
   setPending({ type: 'dial-offer', site: site.name });
 }
