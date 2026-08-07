@@ -622,7 +622,17 @@ function micTap() {
   selfOpenArmed = true;   // any driver tap re-arms (STAYS-SHUT-2)
   try { if (window._onDriverTap) window._onDriverTap(); } catch (e) {}
   if (cloudActive || captureActive) { stopCapture(true); return; }   // one-shot capture → send
-  if (convoActive || csActive) { closeConversation('tap'); return; } // EITHER session → close (closeConversation routes cs)
+  if (csActive) {
+    // TAP-SEMANTICS (field TYPN9Z4, amended): THINKING (an upload/answer in flight) —
+    // never bin a reply the driver already paid for: deliver it, THEN close (the latch;
+    // that close logs 'tap-deferred'). EVERY other live state — listening, recording,
+    // speaking — the tap is the off-switch: instant close, falling cue, no sign-off,
+    // audio killed mid-word when something is playing (STAYS-SHUT-2).
+    if (micState === 'thinking') { csCloseAfterDeliver = true; logEvent('cs.tap', 'deliver-then-close'); return; }
+    closeConversation('tap');
+    return;
+  }
+  if (convoActive) { closeConversation('tap'); return; }             // fallback engine: tap = close (unchanged)
   if (micState === 'thinking') return;                               // processing — ignore taps
   openConversation();                                                // idle → open a hands-free session
 }
@@ -1061,6 +1071,7 @@ const CS_WINDOW_MS = 45000; // no window grows past this (voiced → cutoff send
 const CS_FAIL_MAX = 3;      // consecutive transcribe failures before the ONE honest engine swap
 let csDeliveredWin = 0;     // CS-DELIVER-ONCE: the last window id that DELIVERED — a duplicate finish for the same window can never deliver twice
 let csFailStreak = 0;       // reset by any successful /transcribe round trip (and at open)
+let csCloseAfterDeliver = false;   // TAP-SEMANTICS: a tap during thinking DEFERS the close until the answer has been given
 
 // ONE honest engine swap, at most once per session — never silent, never a ping-pong
 // (csOpen has exactly ONE caller, the engine pick in openConversation; no failure path
@@ -1101,7 +1112,7 @@ async function csOpen() {
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
-  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false; lastSessionCancelAt = 0;
+  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false; lastSessionCancelAt = 0; csCloseAfterDeliver = false;
   logEvent('cs.open', 'session');
   setMicState('listening');
   csArmSilence();             // armed BEFORE the first window, so at a 45s tie the close beats the window bound
@@ -1155,6 +1166,7 @@ function csDiscardWindow(reason) {
 // included) lands in one standalone blob, so a mistimed cut can never drop words.
 function csStartWindow() {
   if (!csActive || csSpeaking) return;   // never open the mic while the app is talking
+  if (csCloseAfterDeliver) { csCloseAfterDeliver = false; csCloseSession('tap-deferred'); return; }   // TAP-SEMANTICS: the answer's moment passed (fail/discard) — close as promised
   const win = ++csWinSeq;
   csChunks = []; csVoiced = false; csWindowStart = Date.now();
   csFirstVoicedAt = 0; csLastVoicedAt = 0;
@@ -1257,7 +1269,7 @@ async function csFinishWindow(win, chunks, type, voiced, durationMs, voicedMs, s
 
 function csCloseSession(reason) {
   const was = csActive;
-  csActive = false; csSpeaking = false; csHadExchange = false; csOffered = false; offerAnswerPending = false;
+  csActive = false; csSpeaking = false; csHadExchange = false; csOffered = false; offerAnswerPending = false; csCloseAfterDeliver = false;
   csWinSeq++;                                    // orphan any in-flight window callbacks
   clearTimeout(csWindowTimer); clearTimeout(csSilenceTimer); clearTimeout(csOfferTimer); clearTimeout(csResumeTimer);
   try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
@@ -1584,6 +1596,14 @@ function _afterSpeak() {
     // that lifts the skeleton's one-turn limit.
     csHadExchange = true;
     clearTimeout(csResumeTimer);
+    if (csCloseAfterDeliver) {
+      // TAP-SEMANTICS: the driver tapped during thinking; the answer has now been given.
+      // Close as promised — after the tail so the last word breathes. 'tap-deferred'
+      // bypasses the shut-up (nothing here is a late reply — it was the point).
+      csCloseAfterDeliver = false;
+      csResumeTimer = setTimeout(() => { csSpeaking = false; csCloseSession('tap-deferred'); }, CONVO_TTS_TAIL_MS);
+      return;
+    }
     csResumeTimer = setTimeout(() => {
       csSpeaking = false;
       if (csActive) { csStartWindow(); csArmSilence(); }
@@ -1631,7 +1651,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '07 Aug 2026, 04:50 PM AEST',
+    BUILD: '07 Aug 2026, 05:22 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

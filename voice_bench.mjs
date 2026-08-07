@@ -914,7 +914,7 @@ check("no ping-pong is POSSIBLE: csOpen has exactly ONE call site (the engine pi
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();
 check("pick: Android + full cloud kit → the CLOUD session", kinds2().includes("cs.open:session") && Voice2.isSessionOpen());
-Voice2.micTap();
+Voice2.micTap();   // AMENDED: a listening-state tap closes like any other
 check("micTap closes the cs session: cs.close:tap, ONE close cue, off", kinds2().includes("cs.close:tap") && cue2("close") === 1 && Voice2.state() === "off" && !Voice2.isSessionOpen());
 Voice2.clearLog(); RIG.reset(); RIG.disable();
 Voice2.openSession(); await RIG.settle();
@@ -989,7 +989,7 @@ advance(20100); await RIG.settle();                             // the offer fir
 tts.end(); advance(700); await RIG.settle();                    // offer spoken → answer window
 RIG.transcripts.push(SCRIPTS[1]);                               // the driver's answer
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
-Voice2.micTap();                                                // close
+Voice2.closeSession("tap");                                     // close (a thinking-state TAP now defers — scenario 32)
 const L24 = kinds2();
 check("lifecycle IN ORDER: pick→open→window→cue→speech→upload→deliver→tts→reopen→cancel→fail→local-discard→offer→answer→close", inOrder(L24, [
   "engine:cloud", "cs.open:session", /^cs\.window:\d+$/, "cue:open",
@@ -1308,7 +1308,8 @@ check("the driver's own tap still opens instantly (re-armed)", Voice2.isSessionO
 Voice2.closeSession("phrase");                             // NOT a shut-up close — sign-off allowed
 check("a phrase close still speaks its sign-off (the acknowledgment bypass)", H.utt && /Righto — tap the mic/.test(H.utt.text));
 // (e) the self-opener NEVER fires while speech is playing (armed or not)
-Voice2.micTap(); await RIG.settle(); Voice2.micTap();      // open + tap-close → stood down again
+Voice2.micTap(); await RIG.settle();
+Voice2.speak("x"); tts.start(); Voice2.micTap();           // open + a SPEAKING-state tap-close → stood down again
 Voice2.micTap(); await RIG.settle();                       // driver re-opens (armed)
 Voice2.closeSession("silence");                            // a quiet close (no stand-down)
 Voice2.speak("A normal one-shot style reply."); tts.start();
@@ -1316,6 +1317,44 @@ check("requestSession is refused while ANY audio plays", Voice2.requestSession()
 tts.end(); advance(700);
 const rq31 = Voice2.requestSession(); await RIG.settle();   // the gated open is async (getUserMedia)
 check("…and works again once the air is clear (armed, silent, sessionless)", rq31 === true && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
+// ── SCENARIO 32: TAP-SEMANTICS (field TYPN9Z4) — the tap means what the driver means ─
+console.log("\n--- 32. tap-semantics (amended): thinking-tap keeps the answer; every other tap is the off-switch ---");
+// (a) EVIDENCE A replay: upload in flight (thinking), tap 0.23s later → answer DELIVERED, then close
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+let resolveUpload; globalThis.fetch = async (url) => { RIG.fetches.push({ url }); await new Promise(r => { resolveUpload = r; }); return { ok: true, status: 200, json: async () => ({ text: "any free camps up ahead" }) }; };
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]);   // VAD cut → upload w? in flight (thinking)
+check("setup: the upload is in flight, state thinking", Voice2.state() === "thinking" && RIG.fetches.length === 1);
+Voice2.micTap();                                                 // the field tap at 3216.86s
+check("tap during thinking: logged deliver-then-close, session STILL open, upload not binned", kinds2().includes("cs.tap:deliver-then-close") && Voice2.isSessionOpen() && !kinds2().includes("cs.close:tap"));
+resolveUpload(); await RIG.settle(); advance(700);               // the answer arrives + delivers
+check("the ANSWER was delivered (never thrown away)", delivered2 === 1 && kinds2().some(k => k.startsWith("deliver:cloud:silence")));
+Voice2.speak("Two free camps ahead: Rifle Creek and Fred Drew."); tts.start(); tts.end(); advance(700); await RIG.settle();
+check("after the answer played: the session closed as promised (cs.close:tap-deferred), ONE falling cue, no reopen", kinds2().includes("cs.close:tap-deferred") && !Voice2.isSessionOpen() && cue2("close") === 1 && Voice2.state() === "off");
+// (b) the deferred close also lands if the upload FAILS (no restart limbo)
+Voice2.clearLog(); RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+let rejectUpload; globalThis.fetch = async (url) => { RIG.fetches.push({ url }); await new Promise((r, j) => { rejectUpload = j; }); };
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]);   // upload in flight (thinking)
+Voice2.micTap();                                                 // tap while the upload is STILL in flight…
+check("setup: the tap deferred while in flight", kinds2().includes("cs.tap:deliver-then-close") && Voice2.isSessionOpen());
+rejectUpload(new Error("down")); await RIG.settle();             // …then the upload FAILS
+check("thinking-tap + a FAILED upload: closes (tap-deferred), never restarts into limbo", kinds2().includes("cs.close:tap-deferred") && !Voice2.isSessionOpen());
+globalThis.fetch = async (url, opts) => { RIG.fetches.push({ url: String(url), opts }); const next = RIG.transcripts.shift(); if (next === undefined) throw new Error("bench fetch: nothing scripted for " + url); if (next && next.fail) throw new Error(next.fail); if (next && next.status) return { ok: false, status: next.status, json: async () => ({ error: "scripted " + next.status }) }; return { ok: true, status: 200, json: async () => ({ text: next }) };
+};
+// (c) EVIDENCE B replay: auto-reopened listening → tap = a FRESH START, never a kill
+Voice2.clearLog(); RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("first ask");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();   // auto-reopen → listening
+Voice2.micTap();                                                 // AMENDED: the off-switch, like every other tap
+check("tap in auto-opened listening CLOSES cleanly: cs.close:tap, ONE falling cue, no sign-off", kinds2().includes("cs.close:tap") && !Voice2.isSessionOpen() && cue2("close") === 1 && !(H.utt && /Righto/.test(H.utt.text)));
+Voice2.micTap(); await RIG.settle();
+check("the next tap opens a FRESH session normally", Voice2.isSessionOpen() && kinds2().filter(k => k === "cs.open:session").length === 2);
 Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
