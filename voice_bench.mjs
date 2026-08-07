@@ -45,10 +45,17 @@ const synth = {
   getVoices() { return []; },
   onvoiceschanged: null,
 };
+// classList is REAL (className-backed) so GREEN-SIGNAL class stamps are assertable.
+// Additive: no pre-existing scenario reads element classes, only labels.
 function stubEl() {
-  return { style: {}, className: "", textContent: "", value: "",
-    classList: { toggle() {}, add() {}, remove() {} },
-    appendChild() {}, };
+  const el = { style: {}, className: "", textContent: "", value: "", appendChild() {} };
+  el.classList = {
+    add: (...cs) => { const set = new Set(el.className.split(" ").filter(Boolean)); cs.forEach(c => set.add(c)); el.className = [...set].join(" "); },
+    remove: (...cs) => { el.className = el.className.split(" ").filter(c => c && !cs.includes(c)).join(" "); },
+    toggle: (c, on) => { const has = el.className.split(" ").includes(c); const want = on === undefined ? !has : !!on; if (want) el.classList.add(c); else el.classList.remove(c); },
+    contains: (c) => el.className.split(" ").includes(c),
+  };
+  return el;
 }
 // Extended for the CLOUD RIG: resume/close/state + analyser + stream source, so the REAL
 // armRecordingSilence/finishCloudCapture verified-analyser logic runs against it. The analyser
@@ -1226,6 +1233,51 @@ check("convo: first ✕ cancels normally (session open)", kinds().includes("canc
 advance(700);
 Voice.cancelCapture();                                    // second, 0.7s later
 check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
+// ── SCENARIO 30: GREEN-SIGNAL — one binary on every mic surface, both engines ───
+console.log("\n--- 30. green-signal: state→class table on both engines; no red while hearing ---");
+const binOf = (el2) => ["mic-hearing", "mic-busy", "mic-closed"].filter(c => el2.classList.contains(c));
+const surfacesBin = () => {
+  const w = el("wakeBtn").className.split(" ").filter(c => c.startsWith("mic-"));
+  const h = binOf(el("homeMic")), r = binOf(el("inputRow"));
+  return { w: w.join(","), h: h.join(","), r: r.join(","), agree: w.length === 1 && h.length === 1 && r.length === 1 && w[0] === h[0] && h[0] === r[0] };
+};
+// CLOUD engine: walk every state through a real turn
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+check("cloud LISTENING → mic-hearing on ALL surfaces, and they AGREE", surfacesBin().agree && surfacesBin().w === "mic-hearing", JSON.stringify(surfacesBin()));
+await RIG.pump(Array(5).fill(40));
+check("cloud RECORDING → still mic-hearing (the collapse: one green state)", surfacesBin().agree && surfacesBin().w === "mic-hearing");
+RIG.transcripts.push("any camps ahead");
+await RIG.pump(Array(32).fill(0)); await RIG.settle();
+check("cloud THINKING → mic-busy everywhere (honestly deaf)", surfacesBin().agree && surfacesBin().w === "mic-busy", JSON.stringify(surfacesBin()));
+advance(700);
+Voice2.speak("Three camps ahead."); tts.start();
+check("cloud SPEAKING → mic-busy everywhere", surfacesBin().agree && surfacesBin().w === "mic-busy");
+tts.end();   // the 600ms tail: mic still shut — must stay honestly NOT green
+check("the post-TTS tail stays NOT-green (busy) until the window actually reopens", surfacesBin().w !== "mic-hearing");
+advance(700); await RIG.settle();
+check("after the tail: green again (the rising cue marked the flip — timing untouched)", surfacesBin().agree && surfacesBin().w === "mic-hearing");
+Voice2.closeSession("tap");
+check("cloud OFF → mic-closed everywhere", surfacesBin().agree && surfacesBin().w === "mic-closed");
+// CONVO engine: the same table
+fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+check("convo LISTENING → mic-hearing on ALL surfaces", surfacesBin().agree && surfacesBin().w === "mic-hearing");
+rec.speech();
+check("convo RECORDING → mic-hearing (collapsed)", surfacesBin().w === "mic-hearing");
+rec.final("find fuel"); advance(2800);
+check("convo THINKING → mic-busy", surfacesBin().w === "mic-busy");
+advance(700); Voice.speak("Cheapest is BP."); tts.start();
+check("convo SPEAKING → mic-busy", surfacesBin().w === "mic-busy");
+Voice.closeSession("tap");
+check("convo OFF → mic-closed", surfacesBin().w === "mic-closed");
+// the contradiction is DEAD at the source level
+const IDX30 = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+check("no red .listening rules remain (home mic / input row)", !/\.home-mic\.listening\{/.test(IDX30) && !/\.input-row\.listening\{border-color:var\(--red\)/.test(IDX30));
+check("the red micPulse keyframe is gone; the green twin exists", !/@keyframes micPulse\{/.test(IDX30) && /@keyframes micPulseGreen\{[^}]*46,204,113/.test(IDX30));
+check("mic-hearing styles are GREEN with the pulse (motion as the second channel)", /\.home-mic\.mic-hearing\{background:#2ECC71[^}]*micPulseGreen/.test(IDX30) && /\.input-row\.mic-hearing\{border-color:#2ECC71[^}]*convoPulse/.test(IDX30));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));

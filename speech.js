@@ -574,17 +574,31 @@ function setMicState(state) {
   else if (state === 'thinking') label = '🎙 Thinking';
   else /* speaking */ label = '🎙 Speaking';
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
+  // GREEN-SIGNAL (MIC-SIMPLE step 1): ONE rule — GREEN MEANS IT CAN HEAR YOU. The binary
+  // (mic-hearing = listening+recording collapsed · mic-busy = thinking/speaking ·
+  // mic-closed = off) is stamped on EVERY mic surface from this one place, so no two
+  // surfaces can ever disagree again (field 7 Aug: the wake button glowed green while
+  // the home mic glowed RED for the same state). Classes + CSS only — zero behaviour.
+  const bin = (state === 'listening' || state === 'recording') ? 'mic-hearing'
+            : (state === 'thinking' || state === 'speaking') ? 'mic-busy' : 'mic-closed';
   const b = document.getElementById('wakeBtn');
-  if (b) { b.textContent = label; b.className = 'wake-word-btn ' + cls; }
+  if (b) { b.textContent = label; b.className = 'wake-word-btn ' + cls + ' ' + bin; }
   // The SEND arrow doubles as a CANCEL control WHILE a capture is recording: a red ✕ during
   // 'recording' (one-shot or a session turn), back to the send arrow ➤ otherwise. The tap action
   // branches in the app's sendOrCancel (Voice.state()==='recording' → cancelCapture, else send).
   const sendEl = document.getElementById('sendBtn');
   if (sendEl) { const rec = (state === 'recording'); sendEl.textContent = rec ? '✕' : '➤'; sendEl.classList.toggle('cancel', rec); }
-  // Cosmetic ring on the mic entry points — driven from HERE (not independent).
+  // Cosmetic ring on the mic entry points — driven from HERE (not independent). The
+  // legacy 'listening' hook stays toggled (its red CSS is retired); the binary rides
+  // alongside on both surfaces.
   const live = (state === 'listening' || state === 'recording');
-  document.getElementById('homeMic')?.classList.toggle('listening', live);
-  document.getElementById('inputRow')?.classList.toggle('listening', live);
+  ['homeMic', 'inputRow'].forEach(id => {
+    const s2 = document.getElementById(id);
+    if (!s2 || !s2.classList) return;
+    s2.classList.remove('mic-hearing', 'mic-busy', 'mic-closed');
+    s2.classList.add(bin);
+    s2.classList.toggle('listening', live);
+  });
 }
 // The one mic button (#wakeBtn). A tap does the right thing for whatever is live:
 // send a one-shot capture, close a session, or (idle) open a session.
@@ -1583,7 +1597,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '07 Aug 2026, 01:01 PM AEST',
+    BUILD: '07 Aug 2026, 02:20 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

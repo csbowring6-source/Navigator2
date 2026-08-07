@@ -203,7 +203,11 @@
   /* INPUT */
   .input-area{background:var(--navy2);border-top:1px solid rgba(255,255,255,0.06);padding:7px 14px;flex-shrink:0;}  /* ONE-row dock: [🎙 Hands-free] · type box · ↺ · mic · send (status word rides on the Hands-free button) */
   .input-row{display:flex;gap:8px;align-items:center;background:var(--navy3);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:6px 12px;transition:border-color 0.2s;}
-  .input-row.listening{border-color:var(--red);}
+  /* GREEN-SIGNAL (MIC-SIMPLE step 1): ONE rule — green means it can HEAR you. The binary
+     (mic-hearing / mic-busy / mic-closed) is stamped by setMicState on every mic surface;
+     nothing may show red while the app can hear (the old red .listening rules are dead). */
+  .input-row.mic-hearing{border-color:#2ECC71;box-shadow:0 0 0 1px rgba(46,204,113,0.35);animation:convoPulse 2s infinite;}
+  .input-row.mic-busy{border-color:var(--amber);}
   #userInput{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--white);font-family:'Inter',sans-serif;font-size:14px;resize:none;line-height:1.4;max-height:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}  /* single line: placeholder never wraps, so the row height can't grow */
   #userInput::placeholder{color:var(--gray3);}
   /* One-shot mic — grouped with the Hands-free control on the left; tap = Voice.toggleCapture,
@@ -311,8 +315,10 @@
   .home-mic-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;margin:2px 0 0;}
   .home-mic{width:96px;height:96px;border-radius:50%;border:3px solid var(--amber);background:rgba(245,166,35,0.12);color:var(--amber);font-size:38px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform 0.12s;box-shadow:0 0 0 0 rgba(245,166,35,0.4);}
   .home-mic:active{transform:scale(0.96);}
-  .home-mic.listening{background:var(--red);border-color:var(--red);color:#fff;animation:micPulse 1.4s infinite;}
-  @keyframes micPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,32,42,0.45);}50%{box-shadow:0 0 0 14px rgba(231,32,42,0);}}
+  .home-mic.mic-hearing{background:#2ECC71;border-color:#2ECC71;color:#fff;animation:micPulseGreen 1.4s infinite;}
+  .home-mic.mic-busy{border-color:var(--amber);background:rgba(245,166,35,0.25);}
+  /* mic-closed keeps the default amber circle — the app's established tap-to-talk look. */
+  @keyframes micPulseGreen{0%,100%{box-shadow:0 0 0 0 rgba(46,204,113,0.45);}50%{box-shadow:0 0 0 14px rgba(46,204,113,0);}}
   .home-mic-label{font-size:13px;font-weight:600;color:var(--amber);}
   .home-mic-hint{font-size:11px;color:var(--gray2);min-height:14px;text-align:center;line-height:1.3;}
   .home-type-link{font-size:12px;color:var(--gray2);background:none;border:none;text-decoration:underline;cursor:pointer;font-family:inherit;padding:2px;}
@@ -610,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 01:01 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 02:20 PM AEST</div>
   </div>
 </div>
 
@@ -839,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0101PM"></script>
+<script src="speech.js?v=07Aug2026-0220PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
