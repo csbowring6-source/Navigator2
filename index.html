@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 06:13 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 07:13 AM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0613PM"></script>
+<script src="speech.js?v=08Aug2026-0713AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2205,9 +2205,10 @@ function showOptionPins(places) {
     const priceTxt = p.price ? `$${(p.price/100).toFixed(2)} a litre` : 'price unconfirmed';
     const kmTxt = (p.km != null) ? ((p.km < 1 ? `${Math.round(p.km*1000)}m` : `${p.km.toFixed(0)}km`) + (p.mins ? ` \u00b7 ${hrsMins(p.mins)}` : '')) : '';
     const safeName = p.name.replace(/'/g, "").replace(/"/g, '');
+    const endTxt = p.endLabel ? `<span style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">${p.endLabel}</span><br>` : '';
     const popupHtml = `<div style="font-family:system-ui,sans-serif;min-width:155px;">
         <b>${i+1}. ${p.name}</b><br>
-        <span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
+        ${endTxt}<span style="color:#B8860B;font-weight:700;">${priceTxt}</span><br>
         <span style="color:#555;">${kmTxt}</span>
         <button onclick="navigateTo('${safeName}', ${p.lat}, ${p.lon})"
           style="margin-top:8px;width:100%;background:#F5A623;color:#0A1628;border:none;
@@ -2964,7 +2965,7 @@ SOLO MODE (when flagged in context):
 - When the driver is stopping for the night, replace the navigation sentence with a short reminder to let someone know where they are.
 - If fatigue and solo mode combine, treat the rest recommendation as urgent, not optional.`;
 
-// ── LIVE FUEL PRICES (via Worker /fuel route — NSW & TAS coverage) ───────────
+// ── LIVE FUEL PRICES (via Worker /fuel route — NSW/QLD/SA/WA by position) ────
 const FUEL_CODE = {'Unleaded 91':'U91','Premium 95':'P95','Premium 98':'P98','Diesel':'DL','E10':'E10'};
 
 
@@ -3138,6 +3139,10 @@ async function fetchFuelPrices() {
   try {
     const code = FUEL_CODE[selectedFuel] || 'U91';
     const onJourney = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
+    // FUEL-FAR-END: a committed journey ask also asks at the DESTINATION end — the
+    // GPS query's 100km cap can never reach a far corridor end (field 07 Aug:
+    // Cairns→Mission Beach is ~112km crow; six priced servos sat at that end unfetched).
+    const destCC = onJourney ? committedCoordsFor(currentRunDest) : null;
 
     // ═══ ONE LIST, ONE TRUTH ═══════════════════════════════════════════════
     // 1. Every servo around us (OSM) — this is the ground truth of what EXISTS.
@@ -3146,9 +3151,12 @@ async function fetchFuelPrices() {
     // No separate paths, no thresholds — the map and the words cannot disagree.
 
     const radius = onJourney ? 100 : 25;
-    const [stationsRes, pricesRes] = await Promise.all([
+    const [stationsRes, pricesRes, farRes] = await Promise.all([
       fetch(`${API_URL}stations?lat=${gps.lat}&lon=${gps.lon}&radius=${Math.min(radius, 60)}`).then(r => r.json()).catch(() => ({})),
       fetch(`${API_URL}fuel?lat=${gps.lat}&lon=${gps.lon}&type=${code}&radius=${radius}`).then(r => r.json()).catch(() => ({})),
+      // The far-end price check. null (not {}) on failure so the outage is
+      // distinguishable from an honest zero — the per-end wording differs.
+      destCC ? fetch(`${API_URL}fuel?lat=${destCC.lat}&lon=${destCC.lon}&type=${code}&radius=25`).then(r => r.json()).catch(() => null) : Promise.resolve(null),
     ]);
 
     // Confirmed prices, freshness-filtered (a week-old price is a rumour)
@@ -3170,6 +3178,15 @@ async function fetchFuelPrices() {
         seen.set(k, { name: s.name, address: '', price: null, lat: +s.lat, lon: +s.lon });
       }
     });
+    // Destination-end priced servos join the one pool (fresh-filtered like the rest);
+    // overlap on a short run just dedupes to the near record.
+    const farPriced = destCC ? freshPrices((farRes && farRes.results) || []).filter(s => s.lat && s.lon) : [];
+    farPriced.forEach(s => {
+      const k = key(s.lat, s.lon);
+      if (!seen.has(k)) {
+        seen.set(k, { name: s.name, address: s.address || '', price: s.price, lat: +s.lat, lon: +s.lon });
+      }
+    });
 
     let all = Array.from(seen.values());
     if (!all.length) return '';
@@ -3178,7 +3195,17 @@ async function fetchFuelPrices() {
     // road distance and time for those. One routing call.
     all.forEach(s => { s.crow = distKm(gps.lat, gps.lon, s.lat, s.lon); });
     all.sort((a, b) => a.crow - b.crow);
-    all = all.slice(0, 10);
+    if (onJourney) {
+      // JOURNEY: the nearest-10 keeps the local picture, and every PRICED servo ALSO
+      // survives (≤8 per corridor end by the Worker cap, so ≤26 points total). The cut
+      // only exists to bound the single OSRM road-distance call below — so it's RAISED,
+      // not removed (field 07 Aug: this cut was discarding Innisfail's priced servos
+      // before the ahead-filter ever saw them).
+      const near10 = new Set(all.slice(0, 10));
+      all = all.filter(s => near10.has(s) || s.price != null);
+    } else {
+      all = all.slice(0, 10);
+    }
 
     const roads = await roadDistances(gps.lat, gps.lon, all);
     all.forEach((s, i) => {
@@ -3193,19 +3220,39 @@ async function fetchFuelPrices() {
       all.forEach(s => {
         s.detour = distToRoute(s.lat, s.lon, path);
         s.prog   = progressAlongRoute(s.lat, s.lon, path);
+        // Corridor END label — destination-end beats near-end when the run is short.
+        s.end = (destCC && distKm(s.lat, s.lon, destCC.lat, destCC.lon) <= 30) ? 'far'
+              : (((s.km != null) ? s.km : s.crow) <= 30) ? 'near' : 'mid';
       });
-      const ahead = all.filter(s => s.prog > myProg + 0.01 && s.detour <= 10);
+      // Destination-end servos were selected by "within 25km of the destination" —
+      // that IS their corridor criterion; the ahead/detour prune is for the
+      // GPS-anchored pool (Tully serves Mission Beach from ~17km off the final leg).
+      const ahead = all.filter(s => s.end === 'far' || (s.prog > myProg + 0.01 && s.detour <= 10));
       if (ahead.length) all = ahead;   // if nothing ahead, fall back to all nearby
     }
 
     all.sort((a, b) => a.km - b.km);   // nearest by road, always
 
+    // The six shown: on a journey every corridor END is represented — up to 2 near,
+    // 2 along, 2 destination-end (nearest first by road within each), backfilled to 6
+    // — so the far end can never be squeezed out by six nearer servos again.
+    let shown = all.slice(0, 6);
+    if (onJourney) {
+      const byEnd = e => all.filter(s => s.end === e);
+      const pick = [...byEnd('near').slice(0, 2), ...byEnd('mid').slice(0, 2), ...byEnd('far').slice(0, 2)];
+      all.forEach(s => { if (pick.length < 6 && !pick.includes(s)) pick.push(s); });
+      pick.sort((a, b) => a.km - b.km);
+      shown = pick;
+    }
+    const endLabel = { near: 'Near end', mid: 'Along the way', far: `${currentRunDest} end` };
+
     // ═══ THE MAP IS THE PRIMARY OUTPUT ═════════════════════════════════════
     // Pin everything we found. Solid = price confirmed. Hollow = no price.
-    addPendingPins(all.slice(0, 6).map(s => ({
+    addPendingPins(shown.map(s => ({
       name: s.name, price: s.price, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon,
+      endLabel: onJourney ? endLabel[s.end] : undefined,   // corridor-end tag on the pin popup
     })));
-    notePlaces(all.slice(0, 6).map(s => s.name));
+    notePlaces(shown.map(s => s.name));
 
     // The 👎 dial walks the priced ones, cheapest → nearest
     const withPrice = all.filter(s => s.price != null);
@@ -3223,17 +3270,30 @@ async function fetchFuelPrices() {
     const fmt = s => {
       const dist = distTime(s);
       const price = (s.price != null) ? `$${(s.price / 100).toFixed(2)} a litre` : 'price unconfirmed';
-      const detour = (onJourney && s.detour != null && s.detour > 1) ? `, ${s.detour.toFixed(0)} km off route` : '';
+      // No off-route note on destination-end entries — "17 km off route" reads wrong
+      // for a servo chosen because it serves the destination.
+      const detour = (onJourney && s.end !== 'far' && s.detour != null && s.detour > 1) ? `, ${s.detour.toFixed(0)} km off route` : '';
       return `${s.name} — ${dist}${detour} — ${price}`;
     };
-    const list = all.slice(0, 6).map(fmt).join('; ');
+    let list;
+    if (onJourney) {
+      // Grouped by corridor end, each group labelled — the labels ARE the spoken shape.
+      const groupName = { near: 'NEAR END (around the driver now)', mid: 'ALONG THE WAY', far: `DESTINATION END (around ${currentRunDest})` };
+      list = ['near', 'mid', 'far']
+        .map(e => ({ e, rows: shown.filter(s => s.end === e) }))
+        .filter(g => g.rows.length)
+        .map(g => `${groupName[g.e]}: ${g.rows.map(fmt).join('; ')}`)
+        .join('. ');
+    } else {
+      list = shown.map(fmt).join('; ');
+    }
 
     const atOne = all[0] && all[0].km <= 0.15;
     const cheapestConfirmed = withPrice.length
       ? withPrice.slice().sort((a, b) => a.price - b.price)[0] : null;
 
     const header = onJourney
-      ? `SERVOS AHEAD ON ROUTE to ${currentRunDest} (all real, nearest first by road; every one is pinned on the driver's map)`
+      ? `SERVOS FOR THE RUN to ${currentRunDest} (grouped by corridor end; all real, nearest first by road; every one is pinned on the driver's map)`
       : `SERVOS AROUND THE DRIVER (all real, nearest first by road; every one is pinned on the driver's map)`;
 
     let guide = ' Lead with the cheapest CONFIRMED price and its driving time.';
@@ -3242,6 +3302,22 @@ async function fetchFuelPrices() {
     }
     if (atOne) guide = ` The driver is right AT ${all[0].name} now — say so first. ` + guide;
     if (!cheapestConfirmed) guide = ' No confirmed prices here — name the nearest servo, say prices are patchy in this area, and suggest asking again further along.';
+
+    // Per-end honesty (SPEC §0): a quiet or unreachable END is stated about THAT end
+    // only — never dressed as a fact about the whole ask or the world.
+    if (onJourney && destCC) {
+      const farShown = shown.filter(s => s.end === 'far' && s.price != null);
+      if (farShown.length) {
+        guide += ` ALWAYS cover the destination end too: name its cheapest confirmed (${farShown.slice().sort((a, b) => a.price - b.price)[0].name}) so the driver can plan the far leg.`;
+      } else if (farRes && farRes.results) {
+        guide += ` HONEST PER-END: no confirmed prices around ${currentRunDest} right now — say that about the ${currentRunDest} end only, not the whole ask.`;
+      } else {
+        guide += ` HONEST PER-END: OUR price check at the ${currentRunDest} end didn't come back — say WE couldn't check that end just now (never that there's no fuel there); the rest of the list still stands.`;
+      }
+      if (cheapestConfirmed && !shown.some(s => s.end !== 'far' && s.price != null)) {
+        guide += ` HONEST PER-END: no confirmed prices at the near end — the confirmed ones are toward ${currentRunDest}; say which end each price belongs to.`;
+      }
+    }
 
     return `${header}: ${list}.${guide}`;
   } catch(e) {
