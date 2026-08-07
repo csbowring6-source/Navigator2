@@ -587,7 +587,7 @@ function closeConversation(reason) {
       if (bub) { const d = document.createElement('div'); d.textContent = diag; d.style.cssText = 'font-size:11px;opacity:0.6;margin-top:4px;'; bub.appendChild(d); }
     }
   } else if (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape') {
-    const m = 'Righto — tap the mic when you need me.';
+    const m = 'Tap to talk.';
     _allowSignOff = true;   // the close acknowledgment bypasses the shut-up drop-guard once
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
@@ -1332,7 +1332,7 @@ function csCloseSession(reason) {
     // reasons and line as the convo session. Tap stays line-less (a deliberate close);
     // swap/honest speak their own honest lines. The sign-off is a close ACKNOWLEDGMENT,
     // so it bypasses the shut-up drop-guard exactly once.
-    const m = 'Righto — tap the mic when you need me.';
+    const m = 'Tap to talk.';
     _allowSignOff = true;
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
@@ -1607,6 +1607,11 @@ function _speakNow(text) {
   _ttsActive = true;
   parkedAnswer = null;   // a NEW utterance supersedes any parked one (CARRY-ON release rule)
   let clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
+  // TTS PUNCTUATION HYGIENE (SIGN-OFF ticket): em/en dashes make engines stumble in
+  // playback (field 8 Aug: the sign-off hiccuped at its dash). At THIS seam only —
+  // every spoken reply funnels through here — they become a comma-pause. Screen text
+  // is untouched (addMsg renders the original); plain hyphens ("check-in") are kept.
+  clean = clean.replace(/\s*[—–]\s*/g, ', ');
   // Speak abbreviations as words — "300m" must not be read as "three hundred em"
   clean = clean
     .replace(/(\d)\s*km\b/gi, '$1 kilometres')
@@ -1701,7 +1706,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 07:13 AM AEST',
+    BUILD: '08 Aug 2026, 08:43 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

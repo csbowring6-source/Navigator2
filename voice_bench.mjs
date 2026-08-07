@@ -1032,7 +1032,7 @@ await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle()
 check("cloud: 'No thanks.' to the offer CLOSES the session (cs.close:offer-no, offer:no logged)", kinds2().includes("offer:no") && kinds2().includes("cs.close:offer-no") && !Voice2.isSessionOpen() && Voice2.state() === "off");
 check("cloud: the negative never reached _onTranscript (one delivered turn total)", delivered2 === 1);
 check("cloud: exactly ONE close cue", cue2("close") === 1);
-check("cloud: the sign-off spoken in the established voice", H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+check("cloud: the sign-off spoken in the established voice", H.utt && /^Tap to talk\.$/.test(H.utt.text));
 // (b) CLOUD: a SUBSTANTIVE answer to the offer stays a normal turn (the field-good path)
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();
@@ -1061,7 +1061,7 @@ Voice.speak("Cheapest is BP Tully."); tts.start(); tts.end(); advance(700);   //
 advance(20100);                                            // the offer fires
 tts.end(); advance(700);                                   // "Anything else?" done → mic resumes
 rec.onstart(); rec.speech(); rec.final("no"); advance(2800); advance(700);
-check("convo: 'no' to the offer CLOSES (close:offer-no + offer:no), one cue, sign-off", kinds().includes("offer:no") && kinds().includes("close:offer-no") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text));
+check("convo: 'no' to the offer CLOSES (close:offer-no + offer:no), one cue, sign-off", kinds().includes("offer:no") && kinds().includes("close:offer-no") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text));
 check("convo: the negative never delivered (one turn total)", delivered === 1);
 timers.length = 0; rafQueue.length = 0;
 
@@ -1070,15 +1070,15 @@ console.log("\n--- 26. wording: cs phrase + silence closes speak the sign-off (c
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
 Voice2.closeSession("phrase");
-check("cs PHRASE close: cs.close:phrase + ONE cue + the sign-off spoken", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+check("cs PHRASE close: cs.close:phrase + ONE cue + the sign-off spoken", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
 advance(45100); await RIG.settle();                       // genuine 45s driver silence
-check("cs SILENCE close: cs.close:silence + ONE cue + the sign-off spoken", kinds2().includes("cs.close:silence") && cue2("close") === 1 && H.utt && /Righto — tap the mic/.test(H.utt.text));
+check("cs SILENCE close: cs.close:silence + ONE cue + the sign-off spoken", kinds2().includes("cs.close:silence") && cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
 Voice2.closeSession("tap");
-check("cs TAP close stays LINE-LESS (a deliberate close — cue only)", kinds2().includes("cs.close:tap") && !(H.utt && /Righto/.test(H.utt.text)));
+check("cs TAP close stays LINE-LESS (a deliberate close — cue only)", kinds2().includes("cs.close:tap") && !(H.utt && /Tap to talk\./.test(H.utt.text)));
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 27: CS-CLOSE-WORDS — the close vocabulary, full-match, both engines ─
@@ -1094,7 +1094,7 @@ Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enab
 Voice2.openSession(); await RIG.settle();
 RIG.transcripts.push("end chat");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
-check("cloud: 'end chat' CLOSES mid-session (cs.close:phrase, one cue, sign-off, not delivered)", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && !Voice2.isSessionOpen() && delivered2 === 0 && H.utt && /Righto — tap the mic/.test(H.utt.text));
+check("cloud: 'end chat' CLOSES mid-session (cs.close:phrase, one cue, sign-off, not delivered)", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && !Voice2.isSessionOpen() && delivered2 === 0 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); delivered2 = 0; H.utt = null;
 Voice2.openSession(); await RIG.settle();
 RIG.transcripts.push("close");
@@ -1112,7 +1112,7 @@ Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0;
 Voice.onTranscript(() => { delivered++; });
 Voice.openSession(); rec.onstart();
 rec.speech(); rec.final("end chat"); advance(2800); advance(700);
-check("convo: 'end chat' CLOSES (close:phrase, one cue, sign-off)", kinds().includes("close:phrase") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text) && delivered === 0);
+check("convo: 'end chat' CLOSES (close:phrase, one cue, sign-off)", kinds().includes("close:phrase") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text) && delivered === 0);
 fresh(); timers.length = 0;
 Voice.openSession(); rec.onstart();
 rec.speech(); rec.final("should I stop at Ingham"); advance(2800); advance(700);
@@ -1198,7 +1198,7 @@ check("first ✕ still cancels normally (fresh window, session open)", kinds2().
 advance(700); await RIG.settle();
 Voice2.cancelCapture();                                   // second ✕, 0.7s later → OUT
 check("second quick ✕ CLOSES with its own reason (cs.close:x-escape)", kinds2().includes("cs.close:x-escape") && !Voice2.isSessionOpen() && Voice2.state() === "off");
-check("x-escape: ONE close cue + the sign-off", cue2("close") === 1 && H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+check("x-escape: ONE close cue + the sign-off", cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 check("x-escape: only the FIRST press logged a cancel (no blip spam on the second)", kinds2().filter(k => k === "cancel:tap-session").length === 1);
 // (b) a DELIVERED turn resets the pattern: ✕ → turn delivers → ✕ 2.5s after the first → normal cancel
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
@@ -1233,7 +1233,7 @@ Voice.cancelCapture();                                    // first: normal sessi
 check("convo: first ✕ cancels normally (session open)", kinds().includes("cancel:tap-session") && Voice.isSessionOpen());
 advance(700);
 Voice.cancelCapture();                                    // second, 0.7s later
-check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text));
+check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 // ── SCENARIO 30: GREEN-SIGNAL — one binary on every mic surface, both engines ───
@@ -1306,7 +1306,7 @@ check("…again and again (the 1777/1786 pattern): still refused, still shut", V
 Voice2.micTap(); await RIG.settle();                       // driver opens — always works, re-arms
 check("the driver's own tap still opens instantly (re-armed)", Voice2.isSessionOpen() && kinds2().filter(k => k === "cs.open:session").length === 2);
 Voice2.closeSession("phrase");                             // NOT a shut-up close — sign-off allowed
-check("a phrase close still speaks its sign-off (the acknowledgment bypass)", H.utt && /Righto — tap the mic/.test(H.utt.text));
+check("a phrase close still speaks its sign-off (the acknowledgment bypass)", H.utt && /^Tap to talk\.$/.test(H.utt.text));
 // (e) the self-opener NEVER fires while speech is playing (armed or not)
 Voice2.micTap(); await RIG.settle();
 Voice2.speak("x"); tts.start(); Voice2.micTap();           // open + a SPEAKING-state tap-close → stood down again
@@ -1352,7 +1352,7 @@ RIG.transcripts.push("first ask");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
 Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();   // auto-reopen → listening
 Voice2.micTap();                                                 // AMENDED: the off-switch, like every other tap
-check("tap in auto-opened listening CLOSES cleanly: cs.close:tap, ONE falling cue, no sign-off", kinds2().includes("cs.close:tap") && !Voice2.isSessionOpen() && cue2("close") === 1 && !(H.utt && /Righto/.test(H.utt.text)));
+check("tap in auto-opened listening CLOSES cleanly: cs.close:tap, ONE falling cue, no sign-off", kinds2().includes("cs.close:tap") && !Voice2.isSessionOpen() && cue2("close") === 1 && !(H.utt && /Tap to talk\./.test(H.utt.text)));
 Voice2.micTap(); await RIG.settle();
 check("the next tap opens a FRESH session normally", Voice2.isSessionOpen() && kinds2().filter(k => k === "cs.open:session").length === 2);
 Voice2.closeSession("tap");
@@ -1419,6 +1419,23 @@ check("non-continue words are never handled", (() => { Voice2.speak(LIST34); tts
 const IDX34 = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
 check("sendMessage seam: Voice.resumeSpeech tried deterministically before routing", /if \(window\.Voice && Voice\.resumeSpeech && Voice\.resumeSpeech\(text\)\) \{/.test(IDX34));
 check("the trip-resume machinery is untouched (stale confirm + resume control intact)", /type: 'trip-resume-confirm', dest: staleDest, ask: text/.test(IDX34) && /function resumeTrip\(\)/.test(IDX34));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
+// ── SCENARIO 35: SIGN-OFF — "Tap to talk." everywhere + the dash-free speak seam ─
+console.log("\n--- 35. SIGN-OFF: the sign-off is 'Tap to talk.'; dashes never reach the engine ---");
+// (a) the speak seam turns em/en dashes into comma-pauses before the engine sees them
+RIG.reset(); RIG.enable();
+Voice2.micTap(); await RIG.settle();                        // a driver tap — speak must not drop
+const DASHED = "Down the range — two to three – easy.";
+Voice2.speak(DASHED);
+check("em AND en dashes reach the engine as comma-pauses", H.utt && H.utt.text === "Down the range, two to three, easy.", H.utt && H.utt.text);
+check("the seam filter lives in _speakNow — the one funnel, spoken side only", SRC.includes("clean = clean.replace(/\\s*[—–]\\s*/g, ', ')"));
+check("screen side untouched: addMsg renders originals, no dash filter outside the seam", !/replace\(\/\\s\*\[—–\]/.test(IDX34));
+Voice2.closeSession("tap"); await RIG.settle();
+// (b) the sign-off is EXACTLY "Tap to talk." at all three sites; the old line is gone
+check("both engines' close sites carry 'Tap to talk.' (2 sites in speech.js)", (SRC.match(/const m = 'Tap to talk\.';/g) || []).length === 2);
+check("the app-side no-session close echo carries it too", /const bye = 'Tap to talk\.';/.test(IDX34));
+check("the old dash sign-off is GONE from both files", !/Righto — tap the mic/.test(SRC) && !/Righto — tap the mic/.test(IDX34));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
