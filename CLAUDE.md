@@ -53,7 +53,7 @@ Worker `fetch(request, env)` dispatches by exact pathname (wrapped in try/catch 
 | `/log` · `/log/<id>` | POST · GET | Share a voice log: POST stores text under a short id, returns `{id}`; GET retrieves | `log:` 7-day |
 | `/version` | GET | Returns `WORKER_BUILD` | — |
 
-The shared `overpass(q)` helper (four mirrors, retry/backoff, 30-min in-memory cache) backs `/camps`, `/camps2-osm`, `/poi`, `/accom`, `/stations`. Data routes are called `fetch(...).then(r=>r.json())`, mostly `.catch(()=>({}))` so a failed route degrades gracefully.
+The shared `overpass(q)` helper (verified four-mirror pool **raced in pairs** — first good answer wins; 30-min in-memory cache, stale-serve on total failure) backs `/camps`, `/camps2-osm`, `/poi`, `/accom`, `/stations`. Pool refreshed 08 Aug 2026 (MIRROR-POOL); a replacement mirror must be verified with a real AU query returning elements before it earns a slot (regional instances answer 200 with zero AU elements). Data routes are called `fetch(...).then(r=>r.json())`, mostly `.catch(()=>({}))` so a failed route degrades gracefully.
 
 **Called directly from the browser (no key needed):** Nominatim (fallback), OSRM (routing/snap/distance tables), Overpass (ad-hoc POI), Leaflet + CartoDB tiles (map), Google Fonts (Inter).
 

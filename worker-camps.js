@@ -167,25 +167,61 @@ async function handleFuel(request, env) {
   return jsonResp({ source, fueltype, radiuskm: radius, results });
 }
 
-// ═══ OVERPASS — four mirrors, retries, and caching ═══
+// ═══ OVERPASS — verified mirror pool, raced in pairs, and caching ═══
+// Pool refreshed 07 Aug 2026 (MIRROR-POOL): every slot verified live with the real
+// AU camps query — a mirror earns its place only by returning Australian ELEMENTS,
+// never by a bare 200 (overpass.osm.ch answers 200 with zero AU elements; regional
+// instances must never slip in). Dropped: kumi.systems (flapping), private.coffee
+// (dead), osm.jp candidate (expired cert). Ordered by measured health on the day;
+// overpass-api.de kept last as the canonical anchor despite 504ing on verification day.
 const OVERPASS_MIRRORS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.openstreetmap.fr/api/interpreter",
+  "https://z.overpass-api.de/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
 ];
 
 const osmCache = new Map();
 const OSM_TTL = 30 * 60 * 1000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// Overpass is intermittently slow (2–12s) and sometimes 429/503s. The client aborts
-// at 15s, so we CANNOT grind 4 mirrors at 12s each (up to 48s). Instead: short
-// per-mirror timeout, retry a TRANSIENT failure once with backoff, fail over to the
-// next mirror — all under a hard TOTAL deadline that fits the client budget. On a
-// total miss, serve the stale in-memory copy; the caller adds a KV fallback on top.
-const OVERPASS_MIRROR_MS = 6000;   // was 12000 — two mirrors now fit the 15s client budget
+// Overpass mirrors are individually flaky (2–12s, 429/503s, whole instances vanish —
+// field 07 Aug: three of four dead left the pool ONE deep, so a single 504 blip of the
+// survivor burned the 13s budget serially and failed the ask). So: RACE mirrors in
+// PAIRS — fire the top two together, the first good answer wins, a mirror's failure
+// only costs anything if its partner fails too; then the next pair — all under the
+// same hard TOTAL deadline that fits the client's 15s abort. On a total miss, serve
+// the stale in-memory copy; the caller adds a KV fallback on top (7-day heal).
+const OVERPASS_MIRROR_MS = 6000;   // per-attempt cap — a lost racer aborts itself here
 const OVERPASS_DEADLINE_MS = 13000;
+
+// One attempt against one mirror: resolves with parsed JSON, or throws with the same
+// mirror-tagged reason strings the routes have always surfaced in their 503 detail
+// ("timeout from URL" / "HTTP 429 from URL" / "error from URL").
+async function overpassAttempt(mirror, q, ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(mirror, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "User-Agent": "NavigatorApp/1.0 (Australian road travel assistant)",
+      },
+      body: "data=" + encodeURIComponent(q),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status + " from " + mirror);
+    return await r.json();
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("timeout from " + mirror);
+    if (e && /^HTTP \d/.test(e.message || "")) throw e;
+    throw new Error("error from " + mirror);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function overpass(q) {
   const key = q;
   const hit = osmCache.get(key);
@@ -193,40 +229,19 @@ async function overpass(q) {
 
   const deadline = Date.now() + OVERPASS_DEADLINE_MS;
   let lastErr = "";
-  for (const mirror of OVERPASS_MIRRORS) {
-    for (let attempt = 0; attempt < 2; attempt++) {   // one retry per mirror for a transient blip
-      const remaining = deadline - Date.now();
-      if (remaining < 1200) { lastErr = lastErr || "deadline"; break; }   // out of budget — stop, serve stale
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), Math.min(OVERPASS_MIRROR_MS, remaining));
-        const r = await fetch(mirror, {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            "User-Agent": "NavigatorApp/1.0 (Australian road travel assistant)",
-          },
-          body: "data=" + encodeURIComponent(q),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        // Transient (busy/rate-limit) — back off and retry the SAME mirror once.
-        if (r.status === 429 || r.status === 502 || r.status === 503 || r.status === 504) {
-          lastErr = "HTTP " + r.status + " from " + mirror;
-          if (attempt === 0 && deadline - Date.now() > 1500) { await sleep(400); continue; }
-          break;   // still busy — move to the next mirror
-        }
-        if (!r.ok) { lastErr = "HTTP " + r.status + " from " + mirror; break; }   // hard error — next mirror
-        const data = await r.json();
-        if (osmCache.size > 200) osmCache.clear();
-        osmCache.set(key, { data, ts: Date.now() });
-        return { data };
-      } catch (e) {
-        lastErr = (e.name === 'AbortError' ? 'timeout from ' : 'error from ') + mirror;
-        break;   // timeout/network — next mirror (don't burn the budget retrying a dead endpoint)
-      }
+  for (let i = 0; i < OVERPASS_MIRRORS.length; i += 2) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1200) { lastErr = lastErr || "deadline"; break; }   // out of budget — stop, serve stale
+    const pair = OVERPASS_MIRRORS.slice(i, i + 2);
+    try {
+      const data = await Promise.any(pair.map((m) => overpassAttempt(m, q, Math.min(OVERPASS_MIRROR_MS, remaining))));
+      if (osmCache.size > 200) osmCache.clear();
+      osmCache.set(key, { data, ts: Date.now() });
+      return { data };
+    } catch (agg) {
+      // Every mirror in the pair failed — keep BOTH tagged reasons, move to the next pair.
+      lastErr = ((agg && agg.errors) || [agg]).map((e) => (e && e.message) || String(e)).join("; ");
     }
-    if (Date.now() > deadline) break;
   }
   if (hit) return { data: hit.data, cached: true, stale: true };   // stale in-memory copy beats a hard failure
   return { error: lastErr || "all mirrors failed" };
@@ -689,7 +704,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 05 Aug 2026, 03:14 AM AEST (phase 4: per-site phone endpoint retired + its verification helpers; /camps retained as the Places-down fallback only)";
+const WORKER_BUILD = "Navigator Worker — 08 Aug 2026, 06:40 AM AEST (MIRROR-POOL: Overpass pool re-verified — fr/z/mail.ru/canonical, dead mirrors dropped — and raced in pairs, first good answer wins)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
