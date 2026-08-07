@@ -1358,5 +1358,27 @@ check("the next tap opens a FRESH session normally", Voice2.isSessionOpen() && k
 Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
+// ── SCENARIO 33: SELF-OPENER (field MY3C5NL) — a tap on a talking one-shot SILENCES, never opens ─
+console.log("\n--- 33. self-opener: tts.start → +1.5s tap = silence, NO session; truly idle tap still opens ---");
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+// the log pattern: a one-shot answer speaking, NO session anywhere
+Voice2.speak("The cheapest diesel is at the BP in Mossman, one dollar ninety-two a litre."); tts.start();
+advance(1500);                                                    // 1.5s in — the driver taps to shut it up
+const cancels33 = synth._cancels;
+Voice2.micTap();
+check("the tap SILENCED the answer (synth.cancel fired, tts.stop:tap logged)", synth._cancels > cancels33 && kinds2().includes("tts.stop:tap"));
+check("NO session opened — the 477/1999/2039/3654s pattern is dead", !Voice2.isSessionOpen() && !kinds2().includes("cs.open:session") && Voice2.state() === "off");
+check("requestSession during one-shot TTS stays refused too (the gated path exonerated)", (() => { Voice2.speak("another answer"); tts.start(); const r = Voice2.requestSession(); tts.end(); advance(700); return r === false; })());
+// a TRULY idle tap still opens normally
+const rq33 = (Voice2.micTap(), null); await RIG.settle();
+check("the driver's tap on a genuinely idle app still opens a session", Voice2.isSessionOpen() && kinds2().includes("cs.open:session"));
+Voice2.closeSession("tap");
+// the after-call reopen: only a GENUINE, RECENT dial return (source pins — index.html)
+const IDX33 = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+check("the dial tap stamps calledAt (noteCampCalled)", /campRound\.calledAt = Date\.now\(\)/.test(IDX33));
+check("checkCampReturn requires a FRESH call (15 min) before any prompt/reopen", /const freshCall = campRound && campRound\.calledAt && \(Date\.now\(\) - campRound\.calledAt\) < 15 \* 60 \* 1000;/.test(IDX33) && /if \(freshCall && campRound\.calledSite/.test(IDX33));
+check("dead code confirmed: toggleConversation has no callers", (SRC.match(/toggleConversation/g) || []).length === 1);
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

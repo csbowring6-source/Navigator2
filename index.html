@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 05:22 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 05:53 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0522PM"></script>
+<script src="speech.js?v=07Aug2026-0553PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4172,6 +4172,7 @@ function currentRingSite() {
 function noteCampCalled(name) {
   if (!campRound) return;
   campRound.calledSite = name; campRound.ts = Date.now();
+  campRound.calledAt = Date.now();   // SELF-OPENER: the "Any joy?" reopen only follows a GENUINE, RECENT dial tap
   campOutcomePending = null;   // a fresh call re-arms the outcome prompt
   saveCampRound();
 }
@@ -4512,7 +4513,10 @@ async function handleNumberRequest(text) {
 // On regaining focus (or reload) after a Call, prompt for how it went (part 2).
 function checkCampReturn() {
   if (!campRound) loadCampRound();
-  if (campRound && campRound.calledSite && campSite(campRound.calledSite) && campRound.calledSite !== campOutcomePending) {
+  // SELF-OPENER: a stale calledSite (persisted in the round, up to 24h) must never re-prompt
+  // or reopen on a focus flap days of driving later — 15 minutes covers any real call return.
+  const freshCall = campRound && campRound.calledAt && (Date.now() - campRound.calledAt) < 15 * 60 * 1000;
+  if (freshCall && campRound.calledSite && campSite(campRound.calledSite) && campRound.calledSite !== campOutcomePending) {
     campOutcomePending = campRound.calledSite;
     if (document.getElementById('appView')?.classList.contains('hidden')) openAppView();
     promptCallOutcome(campRound.calledSite);

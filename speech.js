@@ -633,8 +633,13 @@ function micTap() {
     return;
   }
   if (convoActive) { closeConversation('tap'); return; }             // fallback engine: tap = close (unchanged)
+  // SELF-OPENER (field MY3C5NL): with nothing live but a ONE-SHOT answer still SPEAKING,
+  // a tap means STOP THE SOUND — never "open a session". The four "self-opens" at
+  // 477/1999/2039/3654s were THIS fallthrough reading a shut-up tap as idle→open (the
+  // only other open paths are requestSession, gated dead during TTS, and dead code).
+  if (_ttsActive || micState === 'speaking') { cancelSpeech(); logEvent('tts.stop', 'tap'); setMicState('off'); return; }
   if (micState === 'thinking') return;                               // processing — ignore taps
-  openConversation();                                                // idle → open a hands-free session
+  openConversation();                                                // a TRULY idle tap → open a hands-free session
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
@@ -1651,7 +1656,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '07 Aug 2026, 05:22 PM AEST',
+    BUILD: '07 Aug 2026, 05:53 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
