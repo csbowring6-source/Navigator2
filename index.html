@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 03:09 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 03:18 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0309PM"></script>
+<script src="speech.js?v=07Aug2026-0318PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3712,7 +3712,7 @@ function reaskPending(p) {
   if (p && p.type === 'trip-resume-confirm') return `Still on the trip to ${p.dest} — yes or no?`;
   if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
   if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
-  if (p && p.type === 'number-which') return `Which one — or all of them?`;
+  if (p && p.type === 'number-which') return `Which number on the list?`;
   return `Sorry, I didn't catch that — say it once more?`;
 }
 // What an UNMATCHED reply to a held question means: 'release' it to general routing
@@ -3954,11 +3954,12 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
     return null;
   }
   if (pending.type === 'number-which') {
-    // Answer to "Which one — A, B, C? Or all of them." A collective -> all; a
-    // named site -> that one. Resolves against the DISPLAYED records only.
+    // Answer to "Which number on the list?" — a position ("three", "number 4"), a name,
+    // or the collective. Resolves against the DISPLAYED records only; position wins.
     if (/\b(all|both|any|each|every|the (three|lot)|all of (them|these|three)|any of (them|these))\b/i.test(t) || /\bnumbers\b/i.test(t))
       return { action: 'get-all' };
     const site = matchListedSite(text);
+    if (site && site.outOfRange) return { action: 'num-range', count: site.count };
     if (site && !site.ambiguous) return { action: 'get-one', name: site.name };
     return null;
   }
@@ -4305,10 +4306,29 @@ function extractNumberRequest(text) {
   if (plural || collective) return { scope: 'all' };
   return { scope: 'ask' };
 }
-// Match spoken text to ONE of the sites on screen. Returns a site record, the
-// sentinel {ambiguous:true}, or null (no clear match) — caller asks which one.
+// PURE (ORDINAL-BIND, field G2TPL8F): a spoken LIST POSITION — "number three", "the third
+// one", "number 3 on the list", "the last one", or a bare "3"/"three" answering "Which
+// number on the list?". Returns the 1-based index ('last' resolves against max) or null.
+const ORDINAL_WORDS = { one:1, first:1, two:2, second:2, three:3, third:3, four:4, fourth:4, five:5, fifth:5, six:6, sixth:6, seven:7, seventh:7, eight:8, eighth:8, nine:9, ninth:9, ten:10, tenth:10 };
+function ordinalIndex(text, max) {
+  const t = cleanTranscript(text || '').toLowerCase().replace(/[.?!,]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  if (/\b(?:the\s+)?last(?:\s+one)?\b/.test(t)) return max >= 1 ? max : null;
+  let m = t.match(/\bnumber\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\b/)
+       || t.match(/\bthe\s+(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?:\s+one)?\b/)
+       || t.match(/^(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?:\s+one)?$/);
+  if (!m) return null;
+  const v = m[1];
+  return /^\d+$/.test(v) ? parseInt(v, 10) : (ORDINAL_WORDS[v] || null);
+}
+// Match spoken text to ONE of the sites on screen. Returns a site record, the sentinels
+// {ambiguous:true} / {outOfRange:true, count} (position past the list), or null — caller
+// asks which. POSITION IS TRIED FIRST and WINS over any name in the same utterance;
+// everything resolves against the ON-SCREEN records only, never re-parsed speech.
 function matchListedSite(spoken) {
   if (!campRound) return null;
+  const pos = ordinalIndex(spoken, campRound.sites.length);
+  if (pos) return (pos >= 1 && pos <= campRound.sites.length) ? campRound.sites[pos - 1] : { outOfRange: true, count: campRound.sites.length };
   const t = cleanTranscript(spoken).toLowerCase();
   if (!t) return null;
   let hits = campRound.sites.filter(s => { const nl = s.name.toLowerCase(); return t.includes(nl) || nl.includes(t); });
@@ -4321,10 +4341,12 @@ function matchListedSite(spoken) {
   return null;
 }
 function askWhichSite() {
-  const names = campRound.sites.map(s => s.name).join(', ');
-  const msg = `Which one — ${names}? Or say "all of them".`;
+  // ORDINAL-BIND (field G2TPL8F): NEVER read the list back — ten names aloud is unusable
+  // at the wheel. The list is on screen; the driver answers with a position (or a name).
+  // The all-line says what it actually DOES: every park's number fetched at once.
+  const msg = `Which number on the list? Or say "all of them" for every number at once.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-  setPending({ type: 'number-which' });   // a bare "all three" / a site name answers this
+  setPending({ type: 'number-which' });   // a position, a name, or "all of them" answers this
 }
 // Show the number (VISIBLE, never spoken) and ASK before readying the dial. A
 // web app cannot place the call itself — iOS Safari and Android Chrome both
@@ -4413,12 +4435,26 @@ async function handleNumberRequest(text) {
       }
       return true;
     }
+    if (ordinalIndex(text, 99)) {
+      // "number three" with NOTHING on screen (field case 1: it fell to the AI, which
+      // can't see the screen either) — say so plainly instead.
+      addMsg('user', text);
+      const m = `There's no list on screen yet — ask me for camps first.`;
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return true;
+    }
     return false;   // no trip context to anchor on — let general routing handle it
   }
   addMsg('user', text);
   if (req.scope === 'all') { await getNumbersForAll(); return true; }
   if (req.scope === 'ask') { askWhichSite(); return true; }
   const match = matchListedSite(req.name);
+  if (match && match.outOfRange) {
+    const m = `There are only ${match.count} on the list.`;
+    setPending({ type: 'number-which' });
+    addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+    return true;
+  }
   if (!match || match.ambiguous) { askWhichSite(); return true; }
   await getNumberFor(match);
   return true;
@@ -5416,6 +5452,11 @@ async function _sendMessageInner(silent){
         await getNumberFor(campSite(pa.site));
       } else if (pa.action === 'get-all') {
         await getNumbersForAll();
+      } else if (pa.action === 'num-range') {
+        // An out-of-range position — honest, short, and the question stays live.
+        const m = `There are only ${pa.count} on the list.`;
+        setPending({ type: 'number-which' });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'get-one') {
         await getNumberFor(campSite(pa.name));
       } else if (pa.action === 'dial') {
