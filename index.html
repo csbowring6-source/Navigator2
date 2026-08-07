@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 05:53 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 06:13 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0553PM"></script>
+<script src="speech.js?v=07Aug2026-0613PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5314,6 +5314,16 @@ async function _sendMessageInner(silent){
   if (/^(start again|start over|forget (that|it|all that)|reset|scrap that|clear (that|this)|let'?s start again)\b/i.test(text)) {
     inp.value=''; inp.style.height='auto';
     resetConversation();
+    return;
+  }
+
+  // CARRY-ON: continue-words ("carry on", "resume that"…) bind DETERMINISTICALLY to a
+  // freshly-cut spoken answer and re-speak it a few words back — never the AI. With
+  // nothing parked (always the case at app open) they fall through untouched, so the
+  // trip-resume machinery keeps sole ownership of "resume" there.
+  if (window.Voice && Voice.resumeSpeech && Voice.resumeSpeech(text)) {
+    inp.value=''; inp.style.height='auto';
+    addMsg('user', text);
     return;
   }
 

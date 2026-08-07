@@ -1380,5 +1380,46 @@ check("checkCampReturn requires a FRESH call (15 min) before any prompt/reopen",
 check("dead code confirmed: toggleConversation has no callers", (SRC.match(/toggleConversation/g) || []).length === 1);
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
+// ── SCENARIO 34: CARRY-ON (field 7 Aug) — a cut answer resumes a few words back ─
+console.log("\n--- 34. carry-on: cut → 'carry on' resumes ~4–6 words back; nothing reaches the AI; releases cleanly ---");
+const LIST34 = "Three parks near Mossman. Nearest: Tropic Breeze, ten minutes; Pandanus, twelve minutes; BIG4 Glengarry, fifteen minutes. Two more below.";
+Voice2.micTap(); Voice2.closeSession("silence");            // a driver tap re-arms (scenario 33 left a stand-down)
+// (a) BOUNDARY mode: the engine emits word boundaries; cut mid-list, resume backs up ~24 chars
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.speak(LIST34); tts.start();
+H.utt.onboundary({ charIndex: 60 });                       // the engine reports the word position ("Pandanus" region)
+advance(1200);
+Voice2.micTap();                                            // the cut (solo TTS → silence + PARK)
+check("the cut parked, silenced, opened nothing (stop proofs intact)", kinds2().includes("tts.stop:tap") && !Voice2.isSessionOpen());
+const preUtt34 = H.utt;
+check("'carry on' resumes DETERMINISTICALLY (true = handled; never the AI)", Voice2.resumeSpeech("carry on") === true && H.utt !== preUtt34);
+check("…from a few words BACK of the cut (word-snapped, ~24 chars before charIndex 60)", LIST34.includes(H.utt.text) && LIST34.indexOf(H.utt.text) > 20 && LIST34.indexOf(H.utt.text) <= 40, JSON.stringify(H.utt.text.slice(0, 40)));
+check("boundary mode was used and logged", kinds2().includes("resume.speech:boundary"));
+check("the parked answer was CONSUMED (a second 'carry on' → false)", Voice2.resumeSpeech("carry on") === false);
+// (b) ESTIMATE mode: no boundary events (the Android case) — elapsed time places the cut
+Voice2.clearLog(); RIG.reset();
+Voice2.speak(LIST34); tts.start();
+advance(3000);                                              // ~3s in ≈ char 39 by the 13 chars/s estimate
+Voice2.micTap();
+check("estimate: 'resume that' re-speaks from a sane word-snapped position", Voice2.resumeSpeech("resume that") === true && LIST34.includes(H.utt.text) && LIST34.indexOf(H.utt.text) < 39 && kinds2().includes("resume.speech:estimate"), JSON.stringify(H.utt.text.slice(0, 40)));
+// (c) the field phrasing + a SESSION cut both work
+Voice2.clearLog(); RIG.reset(); RIG.enable();
+Voice2.openSession(); await RIG.settle();
+Voice2.speak(LIST34); tts.start(); advance(1500);
+Voice2.micTap();                                            // session speaking → tap-close (shutUp parks)
+check("a session cut parks too (closed + parked)", !Voice2.isSessionOpen() && kinds2().includes("cs.close:tap"));
+check("the field phrasing works: 'Can you resume that, please'", Voice2.resumeSpeech("Can you resume that, please") === true);
+// (d) release rules: a NEW answer supersedes; nothing parked → false (trip-resume keeps 'resume')
+Voice2.speak(LIST34); tts.start(); advance(1000); Voice2.micTap();   // cut → parked
+Voice2.speak("A brand new answer.");                          // a new utterance supersedes the parked one
+check("a new answer RELEASES the parked one ('carry on' → false)", Voice2.resumeSpeech("carry on") === false);
+check("nothing parked → 'resume' is NOT handled (falls through to the trip machinery untouched)", Voice2.resumeSpeech("resume") === false);
+check("non-continue words are never handled", (() => { Voice2.speak(LIST34); tts.start(); advance(500); Voice2.micTap(); return Voice2.resumeSpeech("find fuel") === false && Voice2.resumeSpeech("carry on") === true; })());
+// (e) the app seam: sendMessage tries resumeSpeech BEFORE routing; trip-resume block untouched
+const IDX34 = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+check("sendMessage seam: Voice.resumeSpeech tried deterministically before routing", /if \(window\.Voice && Voice\.resumeSpeech && Voice\.resumeSpeech\(text\)\) \{/.test(IDX34));
+check("the trip-resume machinery is untouched (stale confirm + resume control intact)", /type: 'trip-resume-confirm', dest: staleDest, ask: text/.test(IDX34) && /function resumeTrip\(\)/.test(IDX34));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

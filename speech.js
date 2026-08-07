@@ -508,7 +508,49 @@ function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().f
 // the one self-opener (the after-call reopen) is gated through requestSession below.
 let selfOpenArmed = true;    // stood down by a shut-up; re-armed by the driver's next tap or word
 let _allowSignOff = false;   // one-shot: a close's own short sign-off is an acknowledgment, not a late reply
+// ── CARRY-ON (field 7 Aug): a spoken answer the driver CUT is PARKED, not killed — the
+// one exception to STAYS-SHUT (he asked for it; he interrupted it; he can have it back).
+// Continue-words bind to it deterministically and NEVER reach the AI. Restart point per
+// the driver's spec: ~1–1.5s (4–6 words) before the cut. Position comes from TTS word-
+// boundary events where the engine emits them; Android Chrome historically does NOT, so
+// the fallback estimates the cut from elapsed time (~13 chars/s at our rate), word-
+// snapped; with neither, the whole answer re-speaks. Freshly-cut only (5 min); any new
+// utterance supersedes the parked one.
+let parkedAnswer = null;      // { text, charIndex|null, elapsed, at }
+let _currentUttText = '', _speakStartedAt = 0, _boundariesSeen = false, _spokenCharIndex = 0;
+const PARKED_TTL_MS = 5 * 60 * 1000;
+function isContinuePhrase(text) {
+  const t = cleanTranscript(text || '').toLowerCase().replace(/[.!?,\s]+$/, '').trim();
+  return t.length <= 40 && /^(?:(?:can|could) you )?(?:carry on|continue|keep going|resume|go on|as you were)(?: with)?(?: that| it| the answer)?(?:,? please)?$/.test(t);
+}
+function parkCurrentSpeech() {
+  if (!_ttsActive || !_currentUttText) return;
+  parkedAnswer = { text: _currentUttText, charIndex: _boundariesSeen ? _spokenCharIndex : null, elapsed: Date.now() - _speakStartedAt, at: Date.now() };
+}
+// Public: try to resume the parked answer for this utterance. True = handled (re-spoken);
+// false = not a continue-word / nothing freshly parked — the caller routes normally, which
+// is what keeps the app-open trip-resume machinery's "resume" untouched.
+function resumeSpeech(text) {
+  if (!parkedAnswer || (Date.now() - parkedAnswer.at) > PARKED_TTL_MS) return false;
+  if (!isContinuePhrase(text)) return false;
+  const p = parkedAnswer; parkedAnswer = null;
+  let idx = null, mode = 'whole';
+  if (p.charIndex != null) { idx = p.charIndex; mode = 'boundary'; }
+  else if (p.elapsed != null && p.elapsed > 0) { idx = Math.min(p.text.length, Math.round((p.elapsed / 1000) * 13)); mode = 'estimate'; }
+  let tail = p.text;
+  if (idx != null) {
+    idx = Math.max(0, idx - 24);                        // ~1–1.5s ≈ 4–6 words back
+    const sp = p.text.lastIndexOf(' ', idx);            // snap to a word start
+    tail = p.text.slice(sp >= 0 ? sp + 1 : 0);
+    if (!tail.trim()) { tail = p.text; mode = 'whole'; }
+  }
+  logEvent('resume.speech', mode);
+  selfOpenArmed = true;   // the resume IS a driver request — it must never die under a prior shut-up's stand-down
+  speak(tail);
+  return true;
+}
 function shutUp() {
+  parkCurrentSpeech();          // CARRY-ON: the cut answer is parked before the audio dies
   cancelSpeech();            // the audio dies mid-word, queue and all
   selfOpenArmed = false;     // the self-opener stands down until the driver acts
   try { if (window._onShutUp) window._onShutUp(); } catch (e) {}   // the app drops late replies too
@@ -637,7 +679,7 @@ function micTap() {
   // a tap means STOP THE SOUND — never "open a session". The four "self-opens" at
   // 477/1999/2039/3654s were THIS fallthrough reading a shut-up tap as idle→open (the
   // only other open paths are requestSession, gated dead during TTS, and dead code).
-  if (_ttsActive || micState === 'speaking') { cancelSpeech(); logEvent('tts.stop', 'tap'); setMicState('off'); return; }
+  if (_ttsActive || micState === 'speaking') { parkCurrentSpeech(); cancelSpeech(); logEvent('tts.stop', 'tap'); setMicState('off'); return; }   // parked, not killed (CARRY-ON)
   if (micState === 'thinking') return;                               // processing — ignore taps
   openConversation();                                                // a TRULY idle tap → open a hands-free session
 }
@@ -1563,6 +1605,7 @@ function speak(text) {
 
 function _speakNow(text) {
   _ttsActive = true;
+  parkedAnswer = null;   // a NEW utterance supersedes any parked one (CARRY-ON release rule)
   let clean=text.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1').trim();
   // Speak abbreviations as words — "300m" must not be read as "three hundred em"
   clean = clean
@@ -1575,6 +1618,8 @@ function _speakNow(text) {
   const voices=synth.getVoices();
   const v=voices.find(v=>v.lang.startsWith('en-AU'))||voices.find(v=>v.lang.startsWith('en-GB'))||voices.find(v=>v.lang.startsWith('en'));
   if(v) utt.voice=v;
+  _currentUttText = clean; _speakStartedAt = Date.now(); _boundariesSeen = false; _spokenCharIndex = 0;   // CARRY-ON position tracking
+  utt.onboundary = (e) => { if (e && typeof e.charIndex === 'number') { _spokenCharIndex = e.charIndex; _boundariesSeen = true; } };
   utt.onstart = () => { logEvent('tts.start', ''); setMicState('speaking'); };
   utt.onerror = _afterSpeak;
   utt.onend = _afterSpeak;
@@ -1656,7 +1701,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '07 Aug 2026, 05:53 PM AEST',
+    BUILD: '07 Aug 2026, 06:13 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
@@ -1667,6 +1712,7 @@ function _afterSpeak() {
     reset:        voiceReset,
     // speech out
     speak:        speak,
+    resumeSpeech: resumeSpeech,   // CARRY-ON: continue-words re-speak a freshly-cut answer (true = handled)
     queueReplies: queueReplies,   // app-sequential replies queue (don't self-interrupt)
     cancelSpeech: cancelSpeech,
     unlockAudio:  unlockAudio,
