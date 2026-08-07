@@ -1281,5 +1281,43 @@ check("the red micPulse keyframe is gone; the green twin exists", !/@keyframes m
 check("mic-hearing styles are GREEN with the pulse (motion as the second channel)", /\.home-mic\.mic-hearing\{background:#2ECC71[^}]*micPulseGreen/.test(IDX30) && /\.input-row\.mic-hearing\{border-color:#2ECC71[^}]*convoPulse/.test(IDX30));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
+// ── SCENARIO 31: STAYS-SHUT-2 (field HWDXWWT) — the tap kills the AUDIO; nothing self-opens ─
+console.log("\n--- 31. stays-shut: tap stops sound in the same tick; self-opens refused; late replies die; driver re-arms ---");
+// (a) replay 1330–1345s: reply speaking, tap 0.35s in → audio cancelled INSTANTLY, session closed
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("caravan parks near mossman");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+Voice2.speak("There are three caravan parks near Mossman. The first is…"); tts.start();
+advance(350);                                             // 0.35s into the reply — the driver has had enough
+const cancelsBefore31 = synth._cancels;
+Voice2.micTap();                                           // the shut-up tap
+check("the tap CANCELLED the audio in the same tick (synth.cancel fired)", synth._cancels > cancelsBefore31);
+check("…and closed the session (cs.close:tap, one cue)", kinds2().includes("cs.close:tap") && !Voice2.isSessionOpen() && cue2("close") === 1);
+// (b) a late reply arrives after the shut-up → dropped ENTIRELY
+const uttBefore31 = H.utt;
+Voice2.speak("Here is the rest of that answer you did not want.");
+check("the late reply was DROPPED — never reached the speech engine (tts.drop logged)", H.utt === uttBefore31 && kinds2().includes("tts.drop"));
+// (c) 3s later the after-call reopen fires (the 1337.56 pattern) → REFUSED
+advance(3000);
+check("the self-opener is REFUSED while stood down (no session, no cs.open)", Voice2.requestSession() === false && !Voice2.isSessionOpen());
+check("…again and again (the 1777/1786 pattern): still refused, still shut", Voice2.requestSession() === false && Voice2.requestSession() === false && !Voice2.isSessionOpen() && !kinds2().slice(kinds2().indexOf("cs.close:tap")).some(k => k === "cs.open:session"));
+// (d) the driver's next tap returns everything to normal
+Voice2.micTap(); await RIG.settle();                       // driver opens — always works, re-arms
+check("the driver's own tap still opens instantly (re-armed)", Voice2.isSessionOpen() && kinds2().filter(k => k === "cs.open:session").length === 2);
+Voice2.closeSession("phrase");                             // NOT a shut-up close — sign-off allowed
+check("a phrase close still speaks its sign-off (the acknowledgment bypass)", H.utt && /Righto — tap the mic/.test(H.utt.text));
+// (e) the self-opener NEVER fires while speech is playing (armed or not)
+Voice2.micTap(); await RIG.settle(); Voice2.micTap();      // open + tap-close → stood down again
+Voice2.micTap(); await RIG.settle();                       // driver re-opens (armed)
+Voice2.closeSession("silence");                            // a quiet close (no stand-down)
+Voice2.speak("A normal one-shot style reply."); tts.start();
+check("requestSession is refused while ANY audio plays", Voice2.requestSession() === false);
+tts.end(); advance(700);
+const rq31 = Voice2.requestSession(); await RIG.settle();   // the gated open is async (getUserMedia)
+check("…and works again once the air is clear (armed, silent, sessionless)", rq31 === true && Voice2.isSessionOpen());
+Voice2.closeSession("tap");
+RIG.disable(); rafQueue.length = 0; timers.length = 0;
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

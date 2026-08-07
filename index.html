@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:35 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:50 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0435PM"></script>
+<script src="speech.js?v=07Aug2026-0450PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2764,7 +2764,14 @@ function cleanText(t){return t.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*
 // destinations — Navigate buttons come only from knownPlaces (real, pinned
 // data) and trips only from what the USER says (parseTripIntent on user text).
 
+// STAYS-SHUT-2: after a shut-up tap, anything the app tries to SAY OR SHOW before the
+// driver's next tap or word is a late reply — dropped entirely. speech.js stops the audio
+// and calls _onShutUp; the driver's next tap (_onDriverTap) or word (sendMessage) re-arms.
+let suppressReplies = false;
+window._onShutUp = () => { suppressReplies = true; };
+window._onDriverTap = () => { suppressReplies = false; };
 function addMsg(role,text,spoken){
+  if (role === 'nav' && suppressReplies) return;   // a late reply: not shown (speech.js already drops the audio)
   document.getElementById('welcome')?.remove();
   const chat=document.getElementById('chatArea');
   const div=document.createElement('div'); div.className='msg '+(role==='user'?'user':'nav');
@@ -4200,7 +4207,7 @@ function promptCallOutcome(name) {
   // standing permission, not a fresh gesture; if a platform blocks it, the pending below
   // doesn't care which ear answers — the driver's next tap or the buttons do). ONE short
   // question with two real answers (doctrine: never a question with one sensible answer).
-  try { if (window.Voice && Voice.openSession && !Voice.isSessionOpen()) Voice.openSession(); } catch (e) {}
+  try { if (window.Voice && Voice.requestSession) Voice.requestSession(); } catch (e) {}   // STAYS-SHUT-2: the gated self-open — refused while stood down or while audio plays
   const msg = `Any joy?`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   setPending({ type: 'call-joy', site: name });
@@ -5277,6 +5284,7 @@ async function sendMessage(silent){
   }
 }
 async function _sendMessageInner(silent){
+  suppressReplies = false;   // the driver's word — everything returns to normal (STAYS-SHUT-2)
   Voice.unlockAudio();
   const inp=document.getElementById('userInput');
   const text=inp.value.trim();

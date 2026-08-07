@@ -502,7 +502,19 @@ function cancelBlip() {
 
 function releaseConvoStream() { try { if (convoStream) convoStream.getTracks().forEach(t => t.stop()); } catch(e) {} convoStream = null; }
 
+// STAYS-SHUT-2 (field HWDXWWT): a shut-up tap must stop the SOUND ITSELF, instantly —
+// cs.close:tap at 1334.22s with tts.end at 1350.59s was sixteen seconds of talking after
+// the driver said stop. And nothing may open a session except the driver's own action:
+// the one self-opener (the after-call reopen) is gated through requestSession below.
+let selfOpenArmed = true;    // stood down by a shut-up; re-armed by the driver's next tap or word
+let _allowSignOff = false;   // one-shot: a close's own short sign-off is an acknowledgment, not a late reply
+function shutUp() {
+  cancelSpeech();            // the audio dies mid-word, queue and all
+  selfOpenArmed = false;     // the self-opener stands down until the driver acts
+  try { if (window._onShutUp) window._onShutUp(); } catch (e) {}   // the app drops late replies too
+}
 function closeConversation(reason) {
+  if (reason === 'tap' || reason === 'x-escape') shutUp();   // the shut-up gestures — silence NOW
   // CS-SKELETON (flag-gated): a cloud session closes on its own path. csActive can
   // only ever be true when the engine pick chose cloud (CS_ENABLED live since step 9).
   if (csActive) { csCloseSession(reason); return; }
@@ -534,6 +546,7 @@ function closeConversation(reason) {
     }
   } else if (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape') {
     const m = 'Righto — tap the mic when you need me.';
+    _allowSignOff = true;   // the close acknowledgment bypasses the shut-up drop-guard once
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
 }
@@ -606,6 +619,8 @@ function setMicState(state) {
 // send a one-shot capture, close a session, or (idle) open a session.
 function micTap() {
   unlockAudio();
+  selfOpenArmed = true;   // any driver tap re-arms (STAYS-SHUT-2)
+  try { if (window._onDriverTap) window._onDriverTap(); } catch (e) {}
   if (cloudActive || captureActive) { stopCapture(true); return; }   // one-shot capture → send
   if (convoActive || csActive) { closeConversation('tap'); return; } // EITHER session → close (closeConversation routes cs)
   if (micState === 'thinking') return;                               // processing — ignore taps
@@ -650,6 +665,8 @@ const BASIC_CHURN_MS = 15000;  // restart churn with no NEW captured words this 
 
 function toggleVoice() {
   unlockAudio();
+  selfOpenArmed = true;   // a driver tap (STAYS-SHUT-2)
+  try { if (window._onDriverTap) window._onDriverTap(); } catch (e) {}
   if (captureActive) stopCapture(true);   // tap-to-send — the primary endpoint
   else startListening();
 }
@@ -1254,8 +1271,10 @@ function csCloseSession(reason) {
   if (was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape')) {
     // A session ends with a short sign-off, never silently (settled design) — the SAME
     // reasons and line as the convo session. Tap stays line-less (a deliberate close);
-    // swap/honest speak their own honest lines.
+    // swap/honest speak their own honest lines. The sign-off is a close ACKNOWLEDGMENT,
+    // so it bypasses the shut-up drop-guard exactly once.
     const m = 'Righto — tap the mic when you need me.';
+    _allowSignOff = true;
     addMsg('nav', m); lastSpoken = m; speak(m);
   }
 }
@@ -1443,6 +1462,7 @@ function deliverTranscript(text, source, endReason, tag) {
   // against fragments left by a hard cutoff. Not a second route — just metadata.
   pendingTurnEnd = endReason || 'silence';
   lastSessionCancelAt = 0;   // a DELIVERED turn resets the ✕-escape pattern
+  selfOpenArmed = true;      // a driver WORD re-arms the self-opener (STAYS-SHUT-2)
   // DIAGNOSTIC (console only now): WHICH ears heard it — ☁️ cloud/Whisper vs
   // 📱 basic/Web Speech. The status element shows only the five mic states, so the
   // source tag no longer rides the status line (it stays in the console log).
@@ -1493,6 +1513,10 @@ function queueReplies(on) { _queueReplies = !!on; }
 
 function speak(text) {
   if (!synth) return;
+  // STAYS-SHUT-2: after a shut-up, with no session open, a late reply is DROPPED entirely
+  // — not spoken, not queued. The close's own sign-off carries a one-shot allowance.
+  const allow = _allowSignOff; _allowSignOff = false;
+  if (!selfOpenArmed && !convoActive && !csActive && !allow) { logEvent('tts.drop', ''); return; }
   // App-sequential reply while something is already playing → wait our turn.
   if (_queueReplies && _ttsActive) { _ttsQueue.push(text); return; }
   if (csActive) {
@@ -1597,11 +1621,20 @@ function _afterSpeak() {
   }
   // One-shot end-reason for the NEXT app send (was: read+null pendingTurnEnd).
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
+  // STAYS-SHUT-2: the ONLY entry a self-opener may use. Refused while stood down (a
+  // shut-up happened and the driver hasn't acted since), while ANY audio is playing,
+  // or while a session already holds the mic. Driver taps keep using openSession.
+  function requestSession() {
+    if (!selfOpenArmed || _ttsActive || convoActive || csActive) return false;
+    openConversation();
+    return true;
+  }
 
   return {
-    BUILD: '07 Aug 2026, 04:35 PM AEST',
+    BUILD: '07 Aug 2026, 04:50 PM AEST',
     // sessions + capture
     openSession:  openConversation,
+    requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
     closeSession: closeConversation,
     toggleCapture: toggleVoice,
     cancelCapture: cancelCapture,   // bin the in-progress capture (the red ✕ / a spoken "scratch that")
