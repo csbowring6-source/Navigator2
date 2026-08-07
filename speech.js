@@ -550,9 +550,9 @@ function convoFailHonestly() { closeConversation('honest'); }
 // (the in-row one-shot mic, grouped with Hands-free on the left) is a NEUTRAL tap
 // target — it never reports state, setMicState does — and setVoiceStatus/setListeningUI are gone.
 let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
-const MIC_META = {      // state → [status word, colour]
-  off:       ['Off', 'red'], listening: ['Listening', 'green'], recording: ['Recording', 'green'],
-  thinking:  ['Thinking', 'amber'], speaking: ['Speaking', 'amber'],
+const MIC_META = {      // state → [driver word, colour] (MIC-WORDS: plain language only)
+  off:       ['Tap to talk', 'red'], listening: ['I can hear you', 'green'], recording: ['I can hear you', 'green'],
+  thinking:  ['Wait…', 'amber'], speaking: ['Wait…', 'amber'],
 };
 function setMicState(state) {
   if (!MIC_META[state]) state = 'off';
@@ -563,16 +563,18 @@ function setMicState(state) {
   // internal restart that re-enters 'listening') does NOT — so churn can never re-trigger the cue.
   if (state !== 'listening' && state !== 'recording') openCued = false;
   // THE button is now the SOLE mic indicator, and it lives IN the input row (compact, no
-  // full-width bar). So the label is a short state WORD only (colour rides in the class):
-  // idle names the FEATURE for discovery, the live states are one word each. This drops the
+  // full-width bar). The label answers the driver's ONE question in plain words (colour
+  // and the pulse ride in the classes); idle INSTRUCTS (tap to talk). This drops the
   // old "· tap to send / tap to close" engine hint — too long for the in-row button — but
   // the tap still does the right thing (micTap), and the colour + word carry the state.
+  // MIC-WORDS (MIC-SIMPLE step 2): plain driver language, identical everywhere — the
+  // state words Listening/Recording/Thinking/Speaking are gone from every surface.
+  // hearing → "I can hear you" · busy → "Wait…" · closed → "Tap to talk" (an
+  // INSTRUCTION, not a feature name — a first-time driver knows what to do untold).
   let label;
-  if (state === 'off') label = '🎙 Hands-free';
-  else if (state === 'recording') label = '🎙 Recording';
-  else if (state === 'listening') label = '🎙 Listening';
-  else if (state === 'thinking') label = '🎙 Thinking';
-  else /* speaking */ label = '🎙 Speaking';
+  if (state === 'off') label = '🎙 Tap to talk';
+  else if (state === 'recording' || state === 'listening') label = '🎙 I can hear you';
+  else /* thinking | speaking */ label = '🎙 Wait…';
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
   // GREEN-SIGNAL (MIC-SIMPLE step 1): ONE rule — GREEN MEANS IT CAN HEAR YOU. The binary
   // (mic-hearing = listening+recording collapsed · mic-busy = thinking/speaking ·
@@ -1597,7 +1599,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '07 Aug 2026, 02:20 PM AEST',
+    BUILD: '07 Aug 2026, 03:09 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,

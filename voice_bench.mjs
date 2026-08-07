@@ -386,31 +386,32 @@ check("open cues only at the two turn-starts (session open + the post-reply reop
 check("speak() pauses the silence + offer clocks while the app speaks",
   /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
 
-// ── SCENARIO 11: the compact in-row button names the feature idle ('🎙 Hands-free') and shows a
-// short state WORD when live ('🎙 Listening'). The bar was folded into the input row, so the label
+// ── SCENARIO 11: the compact in-row button INSTRUCTS idle ('🎙 Tap to talk') and answers the
+// driver's one question live ('🎙 I can hear you' / '🎙 Wait…'). Folded into the input row, so the label
 // is a state word only (colour rides in the class); the WORD must change between idle and open.
-console.log("\n--- 11. in-row label: '🎙 Hands-free' idle, '🎙 Listening' when a session is open ---");
+console.log("\n--- 11. in-row label: '🎙 Tap to talk' idle, '🎙 I can hear you' when a session is open ---");
 Voice.closeSession("tap");   // force setMicState('off') -> writes the idle label
 const idleLabel = el("wakeBtn").textContent;
-check("idle button names the feature '🎙 Hands-free'", idleLabel === "🎙 Hands-free", idleLabel);
+check("idle button INSTRUCTS: '🎙 Tap to talk'", idleLabel === "🎙 Tap to talk", idleLabel);
 fresh(); timers.length = 0;
 Voice.openSession(); rec.onstart();   // session open, listening
 const openLabel = el("wakeBtn").textContent;
-check("open session reads the compact '🎙 Listening'", openLabel === "🎙 Listening" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
-check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Hands-free/.test(idleLabel) && /Listening/.test(openLabel));
+check("open session reads '🎙 I can hear you'", openLabel === "🎙 I can hear you" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
+check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Tap to talk/.test(idleLabel) && /I can hear you/.test(openLabel));
 Voice.closeSession("tap");
-check("returns to '🎙 Hands-free' idle after close", el("wakeBtn").textContent === "🎙 Hands-free");
+check("returns to '🎙 Tap to talk' idle after close", el("wakeBtn").textContent === "🎙 Tap to talk");
 check("Voice.canHandsFree() is exposed and true under a supporting engine", Voice.canHandsFree() === true);
 // session behaviour unchanged is covered by scenarios 1–10 above (all still pass).
 
 // three state labels retained (off / listening / speaking), via REAL transitions (setMicState is
 // the sole writer; there is no separate status line to read the word off).
 Voice.closeSession("tap");
-check("state OFF → '🎙 Hands-free'", el("wakeBtn").textContent === "🎙 Hands-free", el("wakeBtn").textContent);
+check("state OFF → '🎙 Tap to talk'", el("wakeBtn").textContent === "🎙 Tap to talk", el("wakeBtn").textContent);
 fresh(); timers.length = 0; Voice.openSession(); rec.onstart();
-check("state LISTENING → '🎙 Listening'", el("wakeBtn").textContent === "🎙 Listening", el("wakeBtn").textContent);
+check("state LISTENING → '🎙 I can hear you'", el("wakeBtn").textContent === "🎙 I can hear you", el("wakeBtn").textContent);
 Voice.speak("here are three camps near Innisfail"); tts.start();   // TTS onstart → 'speaking'
-check("state SPEAKING → '🎙 Speaking'", el("wakeBtn").textContent === "🎙 Speaking" && Voice.state() === "speaking", el("wakeBtn").textContent);
+check("state SPEAKING → '🎙 Wait…'", el("wakeBtn").textContent === "🎙 Wait…" && Voice.state() === "speaking", el("wakeBtn").textContent);
+check("the words Listening/Recording/Thinking/Speaking are GONE from every label (source)", !/label = '🎙 (Listening|Recording|Thinking|Speaking)'/.test(SRC) && !/🎙 Hands-free/.test(SRC) && !/🎙 Hands-free/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
 tts.end(); Voice.closeSession("tap");
 
 // ── SCENARIO 11b: dock compaction — the mic word lives ONLY in the button; the separate
@@ -440,8 +441,8 @@ check("one-shot capture also reachable from the home mic", /function homeMic\(\)
 // headless @380px: dock height IDENTICAL 73px across Hands-free/Listening/Recording/Speaking/Thinking;
 // button width constant 116px, no clip; "Type here…" would wrap without nowrap but stays one line with it.
 const wakeRule = (indexSrc.match(/\.wake-word-btn\{[^}]*\}/) || [""])[0];
-check("Hands-free button has a FIXED width (flex:0 0 116px) → label changes can't reflow the row",
-  /flex:0 0 116px/.test(wakeRule) && !/flex-shrink:0;padding:0 12px/.test(wakeRule));
+check("the mic button has a FIXED width (flex:0 0 128px — sized to the widest driver label) → label changes can't reflow the row",
+  /flex:0 0 128px/.test(wakeRule) && !/flex-shrink:0;padding:0 12px/.test(wakeRule));
 const inputRule = (indexSrc.match(/#userInput\{[^}]*\}/) || [""])[0];
 check("type box placeholder can't wrap: white-space:nowrap + text-overflow:ellipsis on #userInput",
   /white-space:nowrap/.test(inputRule) && /text-overflow:ellipsis/.test(inputRule));
