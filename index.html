@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:05 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:35 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0405PM"></script>
+<script src="speech.js?v=07Aug2026-0435PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3592,10 +3592,10 @@ function formatCampsAnswer(res) {
       'no-gps': "I don't have your location yet — tap the pin to set it and I'll find camps.",
       'offline': "No coverage here, so I can't reach the camp data — I'll answer the moment we're back in range.",
       'service': "The camp data service is playing up — not your signal. Try again in a minute.",
-      'none-ahead': `Nothing showing ahead on the ${currentRunDest} route right now. Want me to widen the search or look further along?`,
-      'empty': "No campsites showing in the data around here right now. Want me to widen the search?",
+      'none-ahead': `Nothing showing ahead on the ${currentRunDest} route, even with the search widened.`,
+      'empty': "No campsites showing in the data around here, even with the search widened.",
       'no-place': `I couldn't find ${res.place} on the map — can you say the town again?`,
-      'empty-place': `No caravan parks showing in the data around ${res.place} right now. Want me to widen the search?`,
+      'empty-place': `No caravan parks showing in the data around ${res.place}, even with the search widened.`,
     };
     const t = map[res.error] || map['service'];
     return { text: t, spoken: t, sites: [] };
@@ -4248,9 +4248,10 @@ function campOutcome(name, outcome) {
   const prefix = outcome === 'nojoy' ? '' : outcome === 'noanswer' ? `No answer at ${name}.` : `No room at ${name}.`;   // a spoken "no" to Any joy? carries no outcome detail — no prefix
   const next = nextUntriedCallable();
   if (!next) {
-    // Part 5 — exhausted. Say so plainly and offer to widen the search area.
+    // WIDEN-AUTO (QUESTION-AUDIT FIX-A): exhausted = one sensible next step. Widen once,
+    // SAY so, deliver — never ask. The 🔍 button stays as the affordance for repeats.
     const where = campRound.place ? ` near ${campRound.place}` : '';
-    const msg = (prefix ? prefix + ' ' : '') + `That's everyone I had a number for${where}, and you've tried each one. Want me to widen the search area?`;
+    const msg = (prefix ? prefix + ' ' : '') + `That's everyone I had a number for${where} — widening the search.`;
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
     const bub = lastNavBubble();
     if (bub) {
@@ -4259,6 +4260,7 @@ function campOutcome(name, outcome) {
       b.textContent = '🔍 Widen the search'; b.onclick = () => widenCampSearch();
       bub.appendChild(b);
     }
+    widenCampSearch();   // the existing 🔍 action — the wider round arrives as a fresh answer
     return;
   }
   // NUMBER-FLOW (field 7 Aug): NEVER auto-advance — the driver's next is not the list's
@@ -4555,9 +4557,24 @@ function askCampsAnchor(tf, ask) {
 }
 async function loadTripCampRound(scanText, override) {
   const { named, anchorCoords } = override || campsAnchor(scanText);
-  const res = named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps();
+  let res = named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps();
   if (res.error === 'too-far') return { tooFar: res, text: '', spoken: '', sites: [] };   // CAMPS-SCALE: ask, never search
+  // WIDEN-AUTO (QUESTION-AUDIT FIX-A): an empty result widens ONCE automatically — "want
+  // me to widen?" had one sensible answer. Structurally loop-proof: the retry fires only
+  // from the un-widened scale and at most once per call; the manual 🔍 / spoken widen
+  // (widenCampSearch) already runs AT scale 2, so it can never re-trigger this.
+  let widenNote = '';
+  if ((res.error === 'empty' || res.error === 'empty-place' || res.error === 'none-ahead') && campWidenScale === 1) {
+    widenNote = res.error === 'none-ahead'
+      ? 'Nothing inside the hour ahead — widening the search.'
+      : `Nothing showing around ${named || 'here'} — widening the search.`;
+    campWidenScale = 2;
+    try { res = named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps(); }
+    finally { campWidenScale = 1; }
+    if (res.error === 'too-far') return { tooFar: res, text: '', spoken: '', sites: [] };
+  }
   const ans = formatCampsAnswer(res);
+  if (widenNote) { ans.text = widenNote + ' ' + ans.text; ans.spoken = widenNote + ' ' + (ans.spoken || ans.text); }
   if (ans.sites.length) {
     addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
     startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
