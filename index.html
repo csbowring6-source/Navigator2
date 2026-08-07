@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:00 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:05 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0400PM"></script>
+<script src="speech.js?v=07Aug2026-0405PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3734,6 +3734,7 @@ function reaskPending(p) {
   if (p && p.type === 'number-which') return `Which number on the list?`;
   if (p && p.type === 'camps-anchor-confirm') return `Did you mean ${p.cand.name} — yes or no?`;
   if (p && p.type === 'camps-anchor-which') return `Where did you mean?`;
+  if (p && p.type === 'call-joy') return `Any joy?`;
   return `Sorry, I didn't catch that — say it once more?`;
 }
 // What an UNMATCHED reply to a held question means: 'release' it to general routing
@@ -3985,6 +3986,14 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
       return { action: 'declined' };
     return null;
   }
+  if (pending.type === 'call-joy') {
+    // "Any joy?" after the call — binary by doctrine: a booking, or choose another.
+    if (/^(?:yes|yeah|yep|yup|booked|got (?:it|in|a spot|one)|all good|beauty|sweet|sorted)\b/.test(t) && !isTopicChange(t))
+      return { action: 'joy-yes', site: pending.site };
+    if (/^(?:no|nah|nope|nothing|engaged|full|busy|didn'?t)\b/.test(t) || /\bno (?:joy|luck|answer|room|good)\b/.test(t))
+      return { action: 'joy-no', site: pending.site };
+    return null;
+  }
   if (pending.type === 'number-which') {
     // Answer to "Which number on the list?" — a position ("three", "number 4"), a name,
     // or the collective. "None"-style answers END the ring-around politely. Resolves
@@ -4187,8 +4196,14 @@ function roundCallButton(bub, s) {
 // The three-option prompt shown when we regain focus after a Call (part 2).
 function promptCallOutcome(name) {
   if (!campSite(name)) return;
-  const msg = `Any luck at ${name}?`;
+  // CALL-OUTCOME: back from the call — reopen the ear (an ATTEMPT: getUserMedia needs the
+  // standing permission, not a fresh gesture; if a platform blocks it, the pending below
+  // doesn't care which ear answers — the driver's next tap or the buttons do). ONE short
+  // question with two real answers (doctrine: never a question with one sensible answer).
+  try { if (window.Voice && Voice.openSession && !Voice.isSessionOpen()) Voice.openSession(); } catch (e) {}
+  const msg = `Any joy?`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  setPending({ type: 'call-joy', site: name });
   const bub = lastNavBubble(); if (!bub) return;
   const mk = (label, colour, fn) => {
     const b = document.createElement('button'); b.className = 'nav-btn';
@@ -4211,7 +4226,7 @@ function campOutcome(name, outcome) {
     // cleared so "take me there" still works.
     const site = campSite(name);
     lastBookedSite = site ? { name: site.name, lat: site.lat, lon: site.lon, mins: site.mins } : null;
-    const msg = `Great — you're booked at ${name}. Tap Navigate to head there, or say "take me there".`;
+    const msg = `Beauty — say navigate when you're ready.`;   // CALL-OUTCOME: a statement, not another question; arms the booked-navigate handoff
     clearCampRound();
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
     if (site) {
@@ -4230,12 +4245,12 @@ function campOutcome(name, outcome) {
   }
   if (name && !campRound.tried.includes(name)) campRound.tried.push(name);
   saveCampRound();
-  const prefix = outcome === 'noanswer' ? `No answer at ${name}.` : `No room at ${name}.`;
+  const prefix = outcome === 'nojoy' ? '' : outcome === 'noanswer' ? `No answer at ${name}.` : `No room at ${name}.`;   // a spoken "no" to Any joy? carries no outcome detail — no prefix
   const next = nextUntriedCallable();
   if (!next) {
     // Part 5 — exhausted. Say so plainly and offer to widen the search area.
     const where = campRound.place ? ` near ${campRound.place}` : '';
-    const msg = `${prefix} That's everyone I had a number for${where}, and you've tried each one. Want me to widen the search area?`;
+    const msg = (prefix ? prefix + ' ' : '') + `That's everyone I had a number for${where}, and you've tried each one. Want me to widen the search area?`;
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
     const bub = lastNavBubble();
     if (bub) {
@@ -4249,7 +4264,7 @@ function campOutcome(name, outcome) {
   // NUMBER-FLOW (field 7 Aug): NEVER auto-advance — the driver's next is not the list's
   // next. Show the list again (tried rows greyed, no next-up highlight), scroll it into
   // view, and INSTRUCT: a position or a name chooses (ORDINAL-BIND); "none" ends it.
-  const msg = `${prefix} Choose another caravan park — say the number or the name.`;
+  const msg = (prefix ? prefix + ' ' : '') + `Choose another caravan park — say the number or the name.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   const bub = lastNavBubble();
   if (bub) { renderRoundCards(bub, campRound.sites, campRound.tried, null); scrollFirstCardIntoView(bub); }
@@ -4296,7 +4311,9 @@ function handleNavigateBooked(text) {
   const t = text.toLowerCase().trim();
   const nav = /\b(navigate|take me|drive me|directions|guide me|head there|go there|let'?s go|start driving|route me)\b/.test(t);
   const deictic = /\b(there|that one|that place|this one|the one|it|that site|that park)\b/.test(t);
-  if (!(nav && deictic)) return false;
+  // CALL-OUTCOME: the booked statement promises "say navigate when you're ready" — a BARE
+  // "navigate" with a booked site armed is unambiguous and must work (the statement never lies).
+  if (!(nav && (deictic || /^\W*navigate\W*$/.test(t)))) return false;
   addMsg('user', text);
   navigateTo(lastBookedSite.name, lastBookedSite.lat, lastBookedSite.lon);   // from the STORED record
   return true;
@@ -5520,6 +5537,10 @@ async function _sendMessageInner(silent){
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'get-one') {
         await getNumberFor(campSite(pa.name));
+      } else if (pa.action === 'joy-yes') {
+        campOutcome(pa.site, 'booked');    // "Beauty — say navigate when you're ready." + the handoff armed
+      } else if (pa.action === 'joy-no') {
+        campOutcome(pa.site, 'nojoy');     // choose-another: list re-rendered, scrolled, number-which live
       } else if (pa.action === 'ring-done') {
         // NUMBER-FLOW: a "none" to the choose-instruction ends the ring-around politely.
         const m = `Righto — the list's on screen if you change your mind.`;
