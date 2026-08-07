@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 03:18 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 03:44 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0318PM"></script>
+<script src="speech.js?v=07Aug2026-0344PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3464,8 +3464,28 @@ async function getCampsNear(place, coords) {
   // committed record by name → a fresh geocode (only for a DIFFERENT town the
   // driver named). Never GPS/origin — that decoupling searched a different
   // "Cardwell" than the route, or the driver's origin instead of the destination.
-  const c = (coords && coords.lat != null) ? coords : (committedCoordsFor(place) || await geocodePlace(place));
+  let c = (coords && coords.lat != null) ? coords : committedCoordsFor(place);
+  let freshGeocode = false;
+  if (!c) { c = await geocodePlace(place); freshGeocode = true; }
   if (!c) return { error: 'no-place', place };
+  // CAMPS-SCALE (field G2TPL8F): a misheard town ("Mossman" heard as "Boston") must never
+  // silently anchor a parks search 34 hours away. SAME bound as trip commits — no second
+  // threshold: a freshly-geocoded anchor is sane if within AU_TRIP_SANITY_KM of the DRIVER
+  // or of the COMMITTED trip (explicit coords / the committed record are already vetted).
+  if (freshGeocode && gps) {
+    if (!committedDest) loadCommittedDest();
+    let km = distKm(gps.lat, gps.lon, c.lat, c.lon);
+    if (committedDest && committedDest.lat != null) km = Math.min(km, distKm(committedDest.lat, committedDest.lon, c.lat, c.lon));
+    if (km > AU_TRIP_SANITY_KM) {
+      // The existing phonetic machinery offers the likely INTENDED town, ranked by sound
+      // AND driver proximity (one phonetic edit ≈ 300km of unlikeliness — a CAMPS anchor
+      // is overwhelmingly a town near the driver: Boston→Mossman/0km beats Broughton/422km).
+      const near = matchTowns(place, driverState())
+        .filter(x => distKm(gps.lat, gps.lon, x.lat, x.lon) <= AU_TRIP_SANITY_KM)
+        .sort((a, b) => (a.score + distKm(gps.lat, gps.lon, a.lat, a.lon) / 300) - (b.score + distKm(gps.lat, gps.lon, b.lat, b.lon) / 300));
+      return { error: 'too-far', place, km: Math.round(km), lat: c.lat, lon: c.lon, cand: near[0] || null };
+    }
+  }
   const merged = await fetchMergedCamps(c.lat, c.lon, Math.min(25 * campWidenScale, 100));   // Places + OSM non-commercial, with /camps fallback
   if (merged.error) return { error: merged.error, place };
   const d = { results: merged.results };
@@ -3713,6 +3733,8 @@ function reaskPending(p) {
   if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
   if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
   if (p && p.type === 'number-which') return `Which number on the list?`;
+  if (p && p.type === 'camps-anchor-confirm') return `Did you mean ${p.cand.name} — yes or no?`;
+  if (p && p.type === 'camps-anchor-which') return `Where did you mean?`;
   return `Sorry, I didn't catch that — say it once more?`;
 }
 // What an UNMATCHED reply to a held question means: 'release' it to general routing
@@ -3934,6 +3956,25 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
     if (/^(?:yes|yeah|yep|yup|correct|that'?s right|sure|really|i am|we are|it is|go ahead|do it|heading (?:there|to)|keep it)\b/.test(t) && !isTopicChange(t))
       return { action: 'scale-yes', dest: pending.dest, lat: pending.lat, lon: pending.lon, orig: pending.orig, wantsCamps: pending.wantsCamps };
     return { action: 'scale-no' };
+  }
+  if (pending.type === 'camps-anchor-confirm') {
+    // "Boston is about 34 hours away — did you mean Mossman — yes or no?" Restating the
+    // FAR name is an explicit go-ahead — search there (its coords are held, no re-geocode);
+    // yes or the candidate's name → the offered town; no → ask where they meant.
+    const saysBad = t.includes(pending.bad.toLowerCase());
+    const saysCand = t.includes(pending.cand.name.toLowerCase());
+    if (saysBad && !saysCand) return { action: 'camps-at', name: pending.bad, lat: pending.badLat, lon: pending.badLon, ask: pending.ask };
+    if (saysCand || /^(?:yes|yeah|yep|yup|correct|that'?s right|sure|it is)\b/.test(t))
+      return { action: 'camps-at', name: pending.cand.name, lat: pending.cand.lat, lon: pending.cand.lon, ask: pending.ask };
+    if (/^(?:no|nah|nope)\b/.test(t)) return { action: 'camps-where', ask: pending.ask };
+    return null;
+  }
+  if (pending.type === 'camps-anchor-which') {
+    // "Where did you mean?" — the answer is a place; the guard re-runs on it, so a
+    // still-absurd answer just re-asks instead of searching.
+    const ext = extractDestCandidates(text);
+    if (ext.candidates.length >= 1 && !ext.ambiguous) return { action: 'camps-which', name: ext.candidates[0], ask: pending.ask };
+    return null;
   }
   if (pending.type === 'camps-offer') {
     // "Want the caravan sites now?" — yes runs the held camps ask; a fresh
@@ -4497,9 +4538,27 @@ function campsAnchor(scanText) {
 // Fetch + format + persist the camps round for the current context WITHOUT speaking.
 // Shared by answerCamps (which then speaks) and the number path (which then serves the
 // numbers from the populated round instead of bailing to the GPS-anchored relay).
-async function loadTripCampRound(scanText) {
-  const { named, anchorCoords } = campsAnchor(scanText);
-  const ans = formatCampsAnswer(named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps());
+// CAMPS-SCALE: the ask that replaces a silent far search. The estimated drive time is
+// spoken in the locked hours-and-minutes convention (the search never ran, so there is
+// no OSRM figure — a road-factor estimate from the crow distance carries the point).
+function campsEstMins(km) { return Math.round((km * 1.25) / 85 * 60); }
+function askCampsAnchor(tf, ask) {
+  const far = hrsMinsSpoken(campsEstMins(tf.km));
+  let m;
+  if (tf.cand) {
+    setPending({ type: 'camps-anchor-confirm', bad: tf.place, badLat: tf.lat, badLon: tf.lon, cand: { name: tf.cand.name, lat: tf.cand.lat, lon: tf.cand.lon }, ask });
+    m = `${tf.place} is about ${far} away — did you mean ${tf.cand.name} — yes or no?`;
+  } else {
+    setPending({ type: 'camps-anchor-which', bad: tf.place, ask });
+    m = `${tf.place} is about ${far} away — that seems too far. Where did you mean?`;
+  }
+  addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+}
+async function loadTripCampRound(scanText, override) {
+  const { named, anchorCoords } = override || campsAnchor(scanText);
+  const res = named ? await getCampsNear(named, anchorCoords) : await getCorridorCamps();
+  if (res.error === 'too-far') return { tooFar: res, text: '', spoken: '', sites: [] };   // CAMPS-SCALE: ask, never search
+  const ans = formatCampsAnswer(res);
   if (ans.sites.length) {
     addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
     startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
@@ -4644,9 +4703,10 @@ function scrollFirstCardIntoView(bub) {
   chat.scrollTop += (bRect.top - cRect.top) - 8;   // result-block top to the viewport top, 8px breathing room
   return true;
 }
-async function answerCamps(scanText) {
+async function answerCamps(scanText, override) {
   const pref = campFilterFromText(scanText); if (pref) campFilter = pref;   // a spoken preference pre-selects the chip (no question asked)
-  const ans = await loadTripCampRound(scanText);   // anchor + fetch + format + persist the round
+  const ans = await loadTripCampRound(scanText, override);   // anchor + fetch + format + persist the round
+  if (ans.tooFar) { askCampsAnchor(ans.tooFar, scanText); return; }   // CAMPS-SCALE: confirm before any far search
   campsOwed = false;                               // a camps answer is being delivered — the owed ask is serviced
   addMsg('nav', ans.text, ans.spoken);   // banner: full detail; replay/"say again": spoken variant
   speak(ans.spoken || ans.text);         // aloud: confirmed facts only
@@ -5439,6 +5499,28 @@ async function _sendMessageInner(silent){
         const m = `No worries — where did you mean? Give me the town.`;
         setPending({ type: 'destination' });
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      } else if (pa.action === 'camps-at') {
+        // CAMPS-SCALE: run the confirmed search at the HELD coords (explicit coords skip
+        // the guard — the driver just confirmed the place, offered or genuinely far).
+        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+        try { await answerCamps(pa.ask, { named: pa.name, anchorCoords: { lat: pa.lat, lon: pa.lon } }); } catch(e) {
+          const m = "Couldn't check camps just now — try again in a minute.";
+          addMsg('nav', m); speak(m);
+        }
+        hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
+      } else if (pa.action === 'camps-where') {
+        const m = `No worries — where did you mean?`;
+        setPending({ type: 'camps-anchor-which', ask: pa.ask });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      } else if (pa.action === 'camps-which') {
+        // The restated town: geocode fresh — the scale guard runs AGAIN, so a second
+        // mishear re-asks instead of searching absurdly far.
+        busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
+        try { await answerCamps(pa.ask, { named: pa.name, anchorCoords: null }); } catch(e) {
+          const m = "Couldn't check camps just now — try again in a minute.";
+          addMsg('nav', m); speak(m);
+        }
+        hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
       } else if (pa.action === 'camps') {
         // The accepted "want the caravan sites now?" — run the held camps ask.
         busy = true; document.getElementById('sendBtn').disabled = true; showTyping();
