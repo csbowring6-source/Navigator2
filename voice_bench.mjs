@@ -778,7 +778,7 @@ check("CUES: reopening AFTER the thinking spell earns exactly one new open cue",
 RIG.transcripts.push("fuel prices in Tully");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
 check("speech flipped the state to recording (cs.vad:speech logged once this window)", kinds2().includes("cs.vad:speech"));
-check("VAD quiet ended the window: ONE upload, deliver:cloud:silence in the ring buffer", RIG.fetches.length === 2 && kinds2().includes("deliver:cloud:silence"));
+check("VAD quiet ended the window: ONE upload, deliver:cloud:silence (window-stamped) in the ring buffer", RIG.fetches.length === 2 && kinds2().some(k => /^deliver:cloud:silence w\d+$/.test(k)));
 advance(700);
 check("delivered exactly ONCE to the app; NO restart until the reply-flow resume (speak owns it now)", delivered2 === 1 && RIG.starts === 2);
 check("CUES: still no extra open cue after the delivered turn (no reopen yet)", cue2("open") === 2);
@@ -985,16 +985,16 @@ Voice2.micTap();                                                // close
 const L24 = kinds2();
 check("lifecycle IN ORDER: pick→open→window→cue→speech→upload→deliver→tts→reopen→cancel→fail→local-discard→offer→answer→close", inOrder(L24, [
   "engine:cloud", "cs.open:session", /^cs\.window:\d+$/, "cue:open",
-  "cs.vad:speech", /^cs\.upload:/, "deliver:cloud:silence",
+  "cs.vad:speech", /^cs\.upload:/, /^deliver:cloud:silence w\d+$/,
   "tts.start", "tts.end", /^cs\.window:/, "cue:open",
   "cancel:tap-session", "cs.discard:cancel", /^cs\.window:/,
   /^cs\.fail:/, /^cs\.window:/,
   /^cs\.discard:silence:\d+ms$/, /^cs\.window:/,
   "offer:anything-else", "cs.discard:offer", /^cs\.window:/,
-  /^cs\.upload:/, "deliver:cloud:silence",
+  /^cs\.upload:/, /^deliver:cloud:silence w\d+$/,
   "cue:close", "cs.close:tap",
 ]), L24.join(" | "));
-check("the upload event carries size + VOICED time", L24.some(k => /^cs\.upload:\d+b \d+ms$/.test(k)));
+check("the upload event carries WINDOW ID + size + VOICED time", L24.some(k => /^cs\.upload:w\d+ \d+b \d+ms$/.test(k)));
 check("every window outcome is readable from the log alone", L24.includes("cs.discard:cancel") && L24.includes("cs.discard:offer") && L24.some(k => /^cs\.fail:/.test(k)) && L24.some(k => /^cs\.discard:silence:/.test(k)));
 const flat24 = Voice2.getLog().map(e => e.kind + " " + e.detail).join("\n").toLowerCase();
 check("PRIVACY: no logged string contains any scripted transcript text", SCRIPTS.every(t => !flat24.includes(t)) && !flat24.includes("port douglas") && !flat24.includes("diesel"));
@@ -1111,6 +1111,72 @@ rec.speech(); rec.final("should I stop at Ingham"); advance(2800); advance(700);
 check("convo: 'should I stop at Ingham' DELIVERS as an ordinary turn", delivered === 1 && Voice.isSessionOpen());
 Voice.closeSession("tap");
 timers.length = 0; rafQueue.length = 0;
+
+// ── SCENARIO 28: CS-DELIVER-ONCE — both latches against the 140ms double-fire ───
+console.log("\n--- 28. deliver-once: the window latch + the sendMessage re-entrancy latch ---");
+// (a) speech.js half: csFinishWindow driven DIRECTLY — a duplicate finish for the SAME
+// window (the unknown upstream double-fire, whatever it is) delivers once and names its window.
+{
+  const fw = exFn("csFinishWindow");
+  const mkFinish = new Function("deps", `
+    let csActive = true, csSpeaking = false, csDeliveredWin = 0, csFailStreak = 0;
+    const CS_FAIL_MAX = 3, REC_MIN_MS = 700, REC_SHORT_MS = 1500;
+    const logEvent = deps.logEvent, setMicState = () => {}, csStartWindow = deps.csStartWindow,
+          transcribeBlob = deps.transcribeBlob, csSwapToWebSpeech = () => {},
+          isSilenceArtefact = () => false, deliverTranscript = deps.deliver;
+    return (${fw.replace(/^(?:async )?function csFinishWindow/, "async function")});
+  `);
+  const ev = [], delivered28 = [];
+  const f = mkFinish({
+    logEvent: (k, d) => ev.push(k + ":" + d),
+    csStartWindow: () => {},
+    transcribeBlob: async () => "caravan parks near port douglas",
+    deliver: (text, src2, end, tag) => delivered28.push(src2 + ":" + end + " " + tag),
+  });
+  const CH = [new Blob(["x".repeat(4096)], { type: "audio/webm" })];
+  await f(7, CH, "audio/webm", true, 4000, 2000, true, "silence");
+  await f(7, CH, "audio/webm", true, 4000, 2000, true, "silence");   // the 140ms duplicate — same window
+  check("window latch: the duplicate finish delivered NOTHING (exactly one delivery)", delivered28.length === 1 && delivered28[0] === "cloud:silence w7", delivered28.join(" | "));
+  check("window latch: the duplicate NAMES its window in the log (cs.dupe:w7)", ev.includes("cs.dupe:w7"), ev.join(" | "));
+  check("window latch: the upload log carries the window id", ev.some(e => /^cs\.upload:w7 /.test(e)));
+  await f(8, CH, "audio/webm", true, 4000, 2000, true, "silence");   // a DISTINCT window still delivers
+  check("window latch: a legitimate NEXT window still delivers", delivered28.length === 2 && delivered28[1] === "cloud:silence w8");
+}
+// (b) index.html half: the sendMessage wrapper — same text re-entrant = dropped; a
+// DISTINCT rapid turn queues and runs after the current send completes.
+{
+  const IDX = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8").match(/<script>([\s\S]*)<\/script>/)[1];
+  function exIdx(n) { let a = IDX.indexOf("function " + n); if (a < 0) throw new Error("nf " + n); if (IDX.slice(a - 6, a) === "async ") a -= 6; let d = 0, s2 = false; for (let j = IDX.indexOf("{", a); j < IDX.length; j++) { if (IDX[j] === "{") { d++; s2 = true; } else if (IDX[j] === "}") { d--; if (s2 && d === 0) return IDX.slice(a, j + 1); } } }
+  const uiNode = { value: "" };
+  const doc = { getElementById: (id) => (id === "userInput" ? uiNode : null) };
+  const inner = [], gates = [];
+  const mkSend = new Function("document", "innerSpy", `
+    let _sendBusy = false, _sendText = '', _sendQueued = null;
+    async function _sendMessageInner(silent){ return innerSpy(silent); }
+    ${exIdx("sendMessage")}
+    return sendMessage;
+  `);
+  const send = mkSend(doc, async () => { inner.push(uiNode.value); await new Promise(r => gates.push(r)); });
+  const settle28 = () => new Promise(r => setImmediate(r));
+  // the 140ms double-fire: the SAME turn delivered twice
+  uiNode.value = "find me campsites at port douglas";
+  const p1 = send(true);
+  uiNode.value = "find me campsites at port douglas";   // duplicate delivery re-fills the input
+  send(true);                                            // re-entrant, same text → DROPPED
+  gates.shift()(); await p1; await settle28();
+  check("send latch: the duplicated turn ran the pipeline EXACTLY once", inner.length === 1, JSON.stringify(inner));
+  // a legitimate rapid pair of DISTINCT turns: both run, in order, no interleave
+  uiNode.value = "cheapest diesel";
+  const p2 = send(true);
+  uiNode.value = "any weather coming";
+  send(true);                                            // distinct → queued (one deep)
+  check("send latch: the distinct second turn did NOT interleave (still one in flight)", inner.length === 2 && inner[1] === "cheapest diesel");
+  gates.shift()(); await p2; await settle28();
+  check("send latch: the queued distinct turn ran AFTER the first completed", inner.length === 3 && inner[2] === "any weather coming", JSON.stringify(inner));
+  gates.shift()(); await settle28();
+  check("send latch: the queue drained (no ghost re-runs)", inner.length === 3);
+}
+check("camps-carry still routes through sendMessage (the queue serialises it, never drops it)", /if \(pa\.ask\) \{ inp\.value = pa\.ask; await sendMessage\(true\); \}/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

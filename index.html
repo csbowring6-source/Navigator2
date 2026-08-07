@@ -610,7 +610,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 09:03 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 10:00 AM AEST</div>
   </div>
 </div>
 
@@ -839,7 +839,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0903AM"></script>
+<script src="speech.js?v=07Aug2026-1000AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5115,7 +5115,33 @@ function sendOrCancel(){
   if (Voice.state() === 'recording') { Voice.cancelCapture(); return; }
   sendMessage();
 }
+// CS-DELIVER-ONCE (fields 2WYPVSZ + BXCG2P4): sendMessage used to be re-entrant — `busy` is
+// set only after the early awaits (handleNumberRequest → camps fetches, seconds of open
+// window), so a duplicated voice delivery 140ms later passed deliverTranscript's !_isBusy()
+// gate and TWO executions interleaved, each grabbing "the last nav bubble" (the suspected
+// Port Douglas cards killer). ONE send runs at a time, latched SYNCHRONOUSLY before any
+// await. A re-entrant call with the SAME text is a duplicate of the same spoken turn —
+// DROPPED (that turn is already mid-answer; nothing of the driver's is lost). A DIFFERENT
+// text is a genuine new turn — QUEUED, one deep (latest wins), and run the moment the
+// current send completes, so a real turn never silently vanishes.
+let _sendBusy = false, _sendText = '', _sendQueued = null;
 async function sendMessage(silent){
+  const inp0 = document.getElementById('userInput');
+  const t0 = inp0 ? inp0.value.trim() : '';
+  if (_sendBusy) {
+    if (t0 && t0 !== _sendText) _sendQueued = { text: t0, silent: silent };
+    if (inp0) inp0.value = '';
+    return;
+  }
+  _sendBusy = true; _sendText = t0;
+  try { await _sendMessageInner(silent); }
+  finally {
+    _sendBusy = false; _sendText = '';
+    const q = _sendQueued; _sendQueued = null;
+    if (q && q.text) { const i2 = document.getElementById('userInput'); if (i2) i2.value = q.text; sendMessage(q.silent); }
+  }
+}
+async function _sendMessageInner(silent){
   Voice.unlockAudio();
   const inp=document.getElementById('userInput');
   const text=inp.value.trim();

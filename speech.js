@@ -1009,6 +1009,7 @@ const CS_WINDOW_MS = 45000; // no window grows past this (voiced → cutoff send
                             // close beats a pure-idle window to the bound, so idle discard is
                             // now just the safety net for a close-less edge, e.g. VAD down)
 const CS_FAIL_MAX = 3;      // consecutive transcribe failures before the ONE honest engine swap
+let csDeliveredWin = 0;     // CS-DELIVER-ONCE: the last window id that DELIVERED — a duplicate finish for the same window can never deliver twice
 let csFailStreak = 0;       // reset by any successful /transcribe round trip (and at open)
 
 // ONE honest engine swap, at most once per session — never silent, never a ping-pong
@@ -1142,6 +1143,7 @@ function csStartWindow() {
 
 function csEndWindow(send, endReason) {
   if (!csActive) return;
+  const win = csWinSeq;                          // THIS window's id (assigned at csStartWindow) — stamped into upload/deliver logs
   csWinSeq++;                                    // orphan this window's VAD/timer at once
   clearTimeout(csWindowTimer);
   try { if (csVad) csVad.stop(); } catch (e) {} csVad = null;
@@ -1151,7 +1153,7 @@ function csEndWindow(send, endReason) {
   const finish = () => {
     const chunks = csChunks; csChunks = [];
     const type = (rec && rec.mimeType) || pickRecordingMime() || 'audio/webm';
-    csFinishWindow(chunks, type, voiced, Date.now() - startedAt, voicedMs, send, endReason);
+    csFinishWindow(win, chunks, type, voiced, Date.now() - startedAt, voicedMs, send, endReason);
   };
   try {
     if (rec && rec.state !== 'inactive') { rec.onstop = finish; rec.stop(); }
@@ -1159,7 +1161,7 @@ function csEndWindow(send, endReason) {
   } catch (e) { finish(); }
 }
 
-async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, endReason) {
+async function csFinishWindow(win, chunks, type, voiced, durationMs, voicedMs, send, endReason) {
   if (!csActive) return;
   const blob = new Blob(chunks, { type });
   // An idle / unvoiced / too-small window is discarded LOCALLY — never uploaded;
@@ -1170,7 +1172,7 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
     return;
   }
   setMicState('thinking');
-  logEvent('cs.upload', blob.size + 'b ' + voicedMs + 'ms');   // size + VOICED time — the field signal for cut quality
+  logEvent('cs.upload', 'w' + win + ' ' + blob.size + 'b ' + voicedMs + 'ms');   // window id + size + VOICED time
   let text = '';
   try { text = await transcribeBlob(blob); }
   catch (e) {
@@ -1193,7 +1195,12 @@ async function csFinishWindow(chunks, type, voiced, durationMs, voicedMs, send, 
     if (!csSpeaking) csStartWindow();
     return;
   }
-  deliverTranscript(text, 'cloud', endReason);   // → thinking → the app; the same seam as every ears path
+  // CS-DELIVER-ONCE (fields 2WYPVSZ + BXCG2P4: two deliver events 140ms apart off one
+  // upload): a window DELIVERS AT MOST ONCE, whatever double-fires upstream. A duplicate
+  // names its window in the field log and dies here.
+  if (csDeliveredWin === win) { logEvent('cs.dupe', 'w' + win); return; }
+  csDeliveredWin = win;
+  deliverTranscript(text, 'cloud', endReason, 'w' + win);   // → thinking → the app; the same seam as every ears path
   // NO restart here: the reply is about to play — speak() freezes the session and
   // _afterSpeak's tail reopens the next window (the step-5 reply-flow resume).
 }
@@ -1356,7 +1363,7 @@ function startRecogniser() {
 // THE handoff point. Every set of ears — Web Speech finals or a cloud
 // transcript — arrives HERE and nowhere else, so nothing downstream knows or
 // cares which engine heard it. Do not add a second route into sendMessage.
-function deliverTranscript(text, source, endReason) {
+function deliverTranscript(text, source, endReason, tag) {
   // Cloud transcription punctuates; the phone's recogniser doesn't. Normalise
   // once HERE so "Cardwell." and "Cardwell" are the same word everywhere after.
   text = cleanTranscript(text);
@@ -1408,7 +1415,7 @@ function deliverTranscript(text, source, endReason) {
   console.info('[ears] transcript via ' + (source === 'basic' ? 'BASIC (Web Speech)' : 'CLOUD (Whisper)') + ': ' + JSON.stringify(text));
   showCaptured(text);
   setMicState('thinking');   // heard — now processing
-  logEvent('deliver', source + ':' + endReason);
+  logEvent('deliver', source + ':' + endReason + (tag ? ' ' + tag : ''));   // the cs window id rides the LOG only — never the turn metadata
   setTimeout(() => { if (!_isBusy()) _onTranscript(); }, 600);
 }
 
@@ -1558,7 +1565,7 @@ function _afterSpeak() {
   function takeTurnEnd() { const t = pendingTurnEnd; pendingTurnEnd = null; return t; }
 
   return {
-    BUILD: '07 Aug 2026, 09:03 AM AEST',
+    BUILD: '07 Aug 2026, 10:00 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     closeSession: closeConversation,
