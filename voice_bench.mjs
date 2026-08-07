@@ -869,7 +869,7 @@ Voice2.cancelCapture();
 check("✕ on cs: cancel:tap-session + cs.discard:cancel logged, ZERO uploads", kinds2().filter(k => k === "cancel:tap-session").length === cancelsBefore + 1 && kinds2().includes("cs.discard:cancel") && RIG.fetches.length === 0);
 check("✕ on cs: a FRESH window opened, session still open, state listening", RIG.starts === 2 && Voice2.isSessionOpen() && Voice2.state() === "listening");
 check("CUES: the fresh post-cancel turn earned a new open cue", cue2("open") === 2);
-check("one-shot state untouched by a cs cancel (isolation holds in source)", /if \(csActive\) \{\n    if \(csSpeaking \|\| !csRec\) return;\n    logEvent\('cancel', 'tap-session'\);\n    cancelBlip\(\);\n    csDiscardWindow\('cancel'\);/.test(SRC));
+check("one-shot state untouched by a cs cancel (isolation holds in source)", /if \(csActive\) \{\n    if \(csSpeaking \|\| !csRec\) return;\n    if \(xEscapeTripped\(\)\) \{ closeConversation\('x-escape'\); return; \}[^\n]*\n    logEvent\('cancel', 'tap-session'\);\n    cancelBlip\(\);\n    csDiscardWindow\('cancel'\);/.test(SRC));
 // the 45s close was armed by the SPEECH (t_speech+45000), not the cancel: at t_speech+45.5s it must be CLOSED
 advance(43500); await RIG.settle();                   // t_cancel+43.5s ≈ t_speech+45.5s < t_cancel+45s
 check("the 45s close fired on the SPEECH clock — the cancel did NOT reset it", kinds2().includes("cs.close:silence") && Voice2.isSessionOpen() === false);
@@ -1177,6 +1177,56 @@ console.log("\n--- 28. deliver-once: the window latch + the sendMessage re-entra
   check("send latch: the queue drained (no ghost re-runs)", inner.length === 3);
 }
 check("camps-carry still routes through sendMessage (the queue serialises it, never drops it)", /if \(pa\.ask\) \{ inp\.value = pa\.ask; await sendMessage\(true\); \}/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
+
+// ── SCENARIO 29: CS-X-ESCAPE — a second quick ✕ means the driver wants OUT ──────
+console.log("\n--- 29. x-escape: two quick ✕ close; a delivered turn resets; the 7-press field replay ---");
+check("the threshold is pinned at 3000ms", /const X_ESCAPE_MS = 3000;/.test(SRC));
+// (a) CLOUD: ✕ then ✕ 700ms later → closed, ONE cue, sign-off, its own reason
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
+Voice2.openSession(); await RIG.settle();
+await RIG.pump(Array(5).fill(40));                       // driver speaking — a window is open
+Voice2.cancelCapture();                                   // first ✕: normal cancel, fresh window
+check("first ✕ still cancels normally (fresh window, session open)", kinds2().includes("cs.discard:cancel") && Voice2.isSessionOpen());
+advance(700); await RIG.settle();
+Voice2.cancelCapture();                                   // second ✕, 0.7s later → OUT
+check("second quick ✕ CLOSES with its own reason (cs.close:x-escape)", kinds2().includes("cs.close:x-escape") && !Voice2.isSessionOpen() && Voice2.state() === "off");
+check("x-escape: ONE close cue + the sign-off", cue2("close") === 1 && H.utt && /Righto — tap the mic when you need me\./.test(H.utt.text));
+check("x-escape: only the FIRST press logged a cancel (no blip spam on the second)", kinds2().filter(k => k === "cancel:tap-session").length === 1);
+// (b) a DELIVERED turn resets the pattern: ✕ → turn delivers → ✕ 2.5s after the first → normal cancel
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+await RIG.pump(Array(3).fill(40)); Voice2.cancelCapture();            // first ✕ at t0
+RIG.transcripts.push("real question");
+await RIG.pump([...Array(8).fill(40), ...Array(12).fill(0)]);          // ~2.0s in: speech, then quiet…
+await RIG.pump(Array(20).fill(0)); await RIG.settle(); advance(700);   // …the turn DELIVERS (pattern reset)
+check("setup: the turn between the presses delivered", delivered2 === 1);
+Voice2.speak("Answer."); tts.start(); tts.end(); advance(700); await RIG.settle();   // reply → fresh window
+await RIG.pump(Array(3).fill(40));
+Voice2.cancelCapture();                                                // a later ✕ — pattern was reset
+check("✕ → delivered turn → ✕ does NOT close (normal cancel, session open)", Voice2.isSessionOpen() && !kinds2().includes("cs.close:x-escape"));
+Voice2.closeSession("tap");
+// (c) the EBQFG6V field pattern: seven presses ~0.7s apart → closed on the SECOND, rest harmless
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+await RIG.pump(Array(3).fill(40));
+let closedAtPress = 0;
+for (let press = 1; press <= 7; press++) {
+  Voice2.cancelCapture();
+  if (!Voice2.isSessionOpen() && !closedAtPress) closedAtPress = press;
+  advance(700); await RIG.settle();
+}
+check("field replay: the session closed on the SECOND press", closedAtPress === 2, "closed at press " + closedAtPress);
+check("field replay: presses 3–7 were harmless no-ops (one close, one cue, no extra logs)", kinds2().filter(k => k.startsWith("cs.close:x-escape")).length === 1 && cue2("close") === 1);
+// (d) CONVO: the shared seam — two quick session-cancels close there too
+Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0; H.utt = null;
+Voice.onTranscript(() => { delivered++; });
+Voice.openSession(); rec.onstart(); rec.speech();
+Voice.cancelCapture();                                    // first: normal session cancel (reopens)
+check("convo: first ✕ cancels normally (session open)", kinds().includes("cancel:tap-session") && Voice.isSessionOpen());
+advance(700);
+Voice.cancelCapture();                                    // second, 0.7s later
+check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /Righto — tap the mic/.test(H.utt.text));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
