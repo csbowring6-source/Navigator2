@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 03:44 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 07 Aug 2026, 04:00 PM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=07Aug2026-0344PM"></script>
+<script src="speech.js?v=07Aug2026-0400PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3731,7 +3731,6 @@ function reaskPending(p) {
   if (p && p.type === 'trip-overnight') return `Back tonight, or staying over and back tomorrow?`;
   if (p && p.type === 'trip-resume-confirm') return `Still on the trip to ${p.dest} — yes or no?`;
   if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
-  if (p && (p.type === 'number-offer' || p.type === 'dial-offer')) return `Yes or no?`;
   if (p && p.type === 'number-which') return `Which number on the list?`;
   if (p && p.type === 'camps-anchor-confirm') return `Did you mean ${p.cand.name} — yes or no?`;
   if (p && p.type === 'camps-anchor-which') return `Where did you mean?`;
@@ -3986,30 +3985,17 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
       return { action: 'declined' };
     return null;
   }
-  if (pending.type === 'number-offer') {
-    // "Want the number for <next site>?" after a not-found.
-    if (t.length <= 40 && /^(yes|yeah|yep|yup|please|ok(ay)?|sure|go on|that one|do it)\b/.test(t))
-      return { action: 'get-number', site: pending.site };
-    if (t.length <= 40 && /^(no|nah|nope|no thanks|leave it|forget it)\b/.test(t))
-      return { action: 'declined' };
-    return null;
-  }
   if (pending.type === 'number-which') {
     // Answer to "Which number on the list?" — a position ("three", "number 4"), a name,
-    // or the collective. Resolves against the DISPLAYED records only; position wins.
+    // or the collective. "None"-style answers END the ring-around politely. Resolves
+    // against the DISPLAYED records only; position wins.
+    if (/^(?:none|no more|neither|no thanks?|leave it|that'?ll do|that'?s enough|no)\b/.test(t) && t.length <= 20)
+      return { action: 'ring-done' };
     if (/\b(all|both|any|each|every|the (three|lot)|all of (them|these|three)|any of (them|these))\b/i.test(t) || /\bnumbers\b/i.test(t))
       return { action: 'get-all' };
     const site = matchListedSite(text);
     if (site && site.outOfRange) return { action: 'num-range', count: site.count };
     if (site && !site.ambiguous) return { action: 'get-one', name: site.name };
-    return null;
-  }
-  if (pending.type === 'dial-offer') {
-    // "Want to ring them?" — yes readies the one-tap dial (a web app can't dial).
-    if (t.length <= 40 && /^(yes|yeah|yep|yup|please|ok(ay)?|sure|go on|do it|call them|ring them|get them|dial)\b/.test(t))
-      return { action: 'dial', site: pending.site };
-    if (t.length <= 40 && /^(no|nah|nope|no thanks|not (yet|now)|later|leave it|don'?t)\b/.test(t))
-      return { action: 'dial-no', site: pending.site };
     return null;
   }
   if (pending.type === 'dest-confirm') {
@@ -4260,13 +4246,14 @@ function campOutcome(name, outcome) {
     }
     return;
   }
-  const msg = `${prefix} Next up: ${next.name}${next.mins != null ? ', ' + hrsMinsSpoken(next.mins) : ''} — give them a ring.`;
+  // NUMBER-FLOW (field 7 Aug): NEVER auto-advance — the driver's next is not the list's
+  // next. Show the list again (tried rows greyed, no next-up highlight), scroll it into
+  // view, and INSTRUCT: a position or a name chooses (ORDINAL-BIND); "none" ends it.
+  const msg = `${prefix} Choose another caravan park — say the number or the name.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   const bub = lastNavBubble();
-  // ONE renderer: the full round as single-row cards (each with its own 📞 icon). The overlay greys
-  // the tried rows + tags them, and highlights the next-up row — no strikethrough lines, no
-  // full-width Call button, nothing between cards (field 4 Aug).
-  if (bub) renderRoundCards(bub, campRound.sites, campRound.tried, next.name);
+  if (bub) { renderRoundCards(bub, campRound.sites, campRound.tried, null); scrollFirstCardIntoView(bub); }
+  setPending({ type: 'number-which' });
 }
 
 // Part 5 action — re-run the EXISTING search over a bigger area (campWidenScale),
@@ -4382,20 +4369,24 @@ function matchListedSite(spoken) {
   return null;
 }
 function askWhichSite() {
-  // ORDINAL-BIND (field G2TPL8F): NEVER read the list back — ten names aloud is unusable
-  // at the wheel. The list is on screen; the driver answers with a position (or a name).
-  // The all-line says what it actually DOES: every park's number fetched at once.
-  const msg = `Which number on the list? Or say "all of them" for every number at once.`;
+  // ORDINAL-BIND + NUMBER-FLOW: NEVER read the list back — ten names aloud is unusable
+  // at the wheel — and no all-numbers offer (field verdict: nobody wants all of them).
+  // The list is on screen; the driver answers with a position or a name.
+  const msg = `Which number on the list?`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
-  setPending({ type: 'number-which' });   // a position, a name, or "all of them" answers this
+  setPending({ type: 'number-which' });   // a position or a name answers this ("all of them" still works unprompted)
 }
 // Show the number (VISIBLE, never spoken) and ASK before readying the dial. A
 // web app cannot place the call itself — iOS Safari and Android Chrome both
 // require a physical tap plus the OS's own call confirmation, and a code-fired
 // tel: from a voice "yes" has no user gesture, so it silently no-ops. The honest
 // floor is: on a spoken yes, ONE tap on the button and you're through.
+// ONE step (NUMBER-FLOW, field 7 Aug): asking for the number IS wanting to ring — the
+// name, the visible digits and the green button arrive together; no "Want me to ring
+// them?", no yes needed. The PHYSICAL tap stays the driver's own (OS rule) — we never
+// claim to dial for them. (readyDial + the dial-offer question are retired.)
 function presentNumber(site, phone) {
-  const msg = `I've got a number for ${site.name}. Want to ring them?`;
+  const msg = `${site.name} — tap the green button and you're straight through.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   const bub = lastNavBubble();
   if (bub) {
@@ -4403,27 +4394,18 @@ function presentNumber(site, phone) {
     line.style.cssText = 'margin-top:6px;font-size:13px;color:var(--gray1);';
     line.textContent = `${site.name}: ${localPhone(phone)}`;
     bub.appendChild(line);
-    scrollControlIntoView(line);   // ring-around presentations stay ON SCREEN too (DIAL-IN-VIEW)
+    scrollControlIntoView(line);   // stays ON SCREEN (DIAL-IN-VIEW); the button scrolls itself too
+    roundCallButton(bub, { name: site.name, phone: phone });
   }
-  setPending({ type: 'dial-offer', site: site.name });
 }
-// The spoken "yes": readies the one-tap dial. The button is the ring-around's own
-// (records the call), so tapping it feeds straight into the Booked / No room /
-// No answer loop. Honest wording — we never claim to dial for them.
-function readyDial(site) {
-  if (!site || !site.phone) return;
-  const msg = `Tap the green button and you're straight through to ${site.name}.`;
+// No number — say so plainly, then the same choose-instruction as a call outcome:
+// the LIST decides what's next, never the list's order (NUMBER-FLOW).
+function denyNumber(site) {
+  const msg = phoneMiss(site.name, { noRing: true }) + ` Choose another caravan park — say the number or the name.`;
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   const bub = lastNavBubble();
-  if (bub) roundCallButton(bub, { name: site.name, phone: site.phone });
-}
-// No number — say so plainly, name the site, offer the next one (never a guess).
-function denyNumber(site) {
-  const idx = campRound.sites.findIndex(s => s.name === site.name);
-  const next = campRound.sites.slice(idx + 1).concat(campRound.sites.slice(0, idx)).find(s => s.name !== site.name);
-  let msg = phoneMiss(site.name, { noRing: true });   // an interactive offer follows — no passive "ring one of the others" clause
-  if (next) { msg += ` Want the number for ${next.name}?`; setPending({ type: 'number-offer', site: next.name }); }
-  addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
+  if (bub) { renderRoundCards(bub, campRound.sites, campRound.tried, null); scrollFirstCardIntoView(bub); }
+  setPending({ type: 'number-which' });
 }
 // Resolve a site's number from its STORED record (numbers arrive with the round —
 // /camps2 field mask); present or deny honestly. No back-fill lookup (retired,
@@ -5529,9 +5511,6 @@ async function _sendMessageInner(silent){
           addMsg('nav', m); speak(m);
         }
         hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
-      } else if (pa.action === 'get-number') {
-        // "Yes" to "want the number for <next site>?" — look up THAT stored site.
-        await getNumberFor(campSite(pa.site));
       } else if (pa.action === 'get-all') {
         await getNumbersForAll();
       } else if (pa.action === 'num-range') {
@@ -5541,14 +5520,10 @@ async function _sendMessageInner(silent){
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       } else if (pa.action === 'get-one') {
         await getNumberFor(campSite(pa.name));
-      } else if (pa.action === 'dial') {
-        // "Yes" to "want to ring them?" — ready the one-tap dial (can't auto-dial).
-        readyDial(campSite(pa.site));
-      } else if (pa.action === 'dial-no') {
-        const s = campSite(pa.site);
-        const m = s ? `No worries — the number's on screen if you want it.` : `No worries.`;
+      } else if (pa.action === 'ring-done') {
+        // NUMBER-FLOW: a "none" to the choose-instruction ends the ring-around politely.
+        const m = `Righto — the list's on screen if you change your mind.`;
         addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
-        const bub = lastNavBubble(); if (bub && s && s.phone) roundCallButton(bub, { name: s.name, phone: s.phone });
       } else if (pa.action === 'dest-pick') {
         // The driver chose which place. Commit with bound coords, then run any
         // follow-ups the original sentence asked for (plan / camps).
