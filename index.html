@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 08:43 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 09:22 AM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-0843AM"></script>
+<script src="speech.js?v=08Aug2026-0922AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1292,9 +1292,10 @@ async function proceedAfterTrip(trip, wantsPlan, wantsCamps, text) {
   else { msg = `Already on the ${trip.dest} run. What do you need?`; }
   addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
 }
-// Commit a chosen mode and deliver the brief (+ carried camps, or the journey
-// overnight offer). Extracted so the trip-mode ANSWER and a disambiguation commit
-// that already knows the mode share ONE path. campsText routes answerCamps.
+// Commit a chosen mode and deliver the brief (+ carried camps; a journey brief
+// closes with the camps STATEMENT — nothing pends). Extracted so the trip-mode
+// ANSWER and a disambiguation commit that already knows the mode share ONE path.
+// campsText routes answerCamps.
 async function finishTripMode(mode, wantsCamps, campsText) {
   tripMode = mode;
   try {
@@ -1322,8 +1323,11 @@ async function finishTripMode(mode, wantsCamps, campsText) {
     } finally { Voice.queueReplies(false); }
     hideTyping(); busy = false; document.getElementById('sendBtn').disabled = false;
   } else if (mode === 'journey') {
-    msg += ' Want me to look at overnight stops?';
-    setPending({ type: 'camps-offer', ask: 'overnight stops' });
+    // OVERNIGHT-STATEMENT (field RM7XS6S): a statement, never a question — NOTHING
+    // pends, so the driver's next words are always a fresh request routed normally.
+    // No yes-memory either: honouring a bare "yes" here would need pending state by
+    // another name, so the statement stands alone.
+    msg += ' Say camps when you want overnight stops.';
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
   } else {
     addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
@@ -3813,7 +3817,7 @@ function reaskPending(p) {
   if (p && p.type === 'trip-mode') return `Out for the day, or on a journey?`;
   if (p && p.type === 'trip-overnight') return `Back tonight, or staying over and back tomorrow?`;
   if (p && p.type === 'trip-resume-confirm') return `Still on the trip to ${p.dest} — yes or no?`;
-  if (p && p.type === 'camps-offer') return `Want me to look at ${p.ask || 'that'} — yes or no?`;
+  if (p && p.type === 'camps-offer') return `Want the caravan sites now?`;   // only the compound-ask offer pends this type now (OVERNIGHT-STATEMENT)
   if (p && p.type === 'number-which') return `Which number on the list?`;
   if (p && p.type === 'camps-anchor-confirm') return `Did you mean ${p.cand.name} — yes or no?`;
   if (p && p.type === 'camps-anchor-which') return `Where did you mean?`;
