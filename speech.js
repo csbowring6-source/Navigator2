@@ -157,7 +157,7 @@ function openWebSpeechSession() {
   unlockAudio();
   try { if (captureActive) stopCapture(false); } catch(e) {}   // don't let two mics fight
   logEvent('open', 'session');
-  convoActive = true; convoOffered = false; convoHadExchange = false; offerAnswerPending = false; lastSessionCancelAt = 0;
+  convoActive = true; convoOffered = false; convoHadExchange = false; offerAnswerPending = false;
   convoRestarts = 0; convoCued = false; convoLastError = '';
   convoTurn = ''; convoDelivered = ''; clearTimeout(convoDeliverTimer);   // fresh turn accumulator
   convoFlips = 0; convoLastState = ''; convoUndelivered = 0; convoCycleHadSpeech = false; convoReplyPending = false; clearTimeout(convoResumeTimer);    // fresh oscillation guards
@@ -353,58 +353,22 @@ function isCancelPhrase(text) {
   const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '');
   return /\b(cancel|scratch|forget) that$/.test(t);
 }
-// CANCEL a capture in progress (the red ✕ that replaces the send arrow while recording). Discards
-// the utterance — nothing transcribed, delivered or replied to — plays the neutral blip, and then:
-// one-shot → the mic closes; a session → stays OPEN and returns to a FRESH listening turn (one open
-// cue as normal). A session rebuilds a fresh recogniser so the muddled cumulative results can't
-// re-deliver as the next turn.
-// CS-X-ESCAPE (fields 2WYPVSZ + EBQFG6V: nine ✕ in 22s, then seven in 5s): to a driver,
-// cancel-then-chirp-open-again reads as "the app refuses to shut". A SECOND session-cancel
-// within X_ESCAPE_MS — with no delivered turn between the two — means they want OUT: close
-// the session with the sign-off, one close cue, and its own logged reason. Any delivered
-// turn resets the pattern, so cancel → a real turn → a later cancel never trips it. TAP
-// cancels only (a spoken "scratch that" is deliberate wording, never a stuck driver); the
-// one-shot ✕ is untouched.
-const X_ESCAPE_MS = 3000;
-let lastSessionCancelAt = 0;
-function xEscapeTripped() {
-  const now = Date.now();
-  const tripped = (now - lastSessionCancelAt) <= X_ESCAPE_MS && lastSessionCancelAt > 0;
-  lastSessionCancelAt = now;
-  return tripped;
-}
+// The ✕ (the red button that replaces the send arrow while the mic is live).
+// X-MEANS-STOP (field 9 Aug, third strike — the cancel-and-reopen caught ambient
+// gobbledygook and the AI came back asking about it): TOUCH MEANS STOP. A single ✕
+// during a session CLOSES it — audio killed and PARKED for carry-on if speaking, the
+// open window discarded UNSENT if recording, in-flight callbacks orphaned, no fresh
+// window, one falling cue, session off. The wake-tap's off-switch from the other
+// button (reason 'x' so field logs know which). The deliberate cancel-and-continue
+// lives on by VOICE only — spoken "scratch that", handled at deliverTranscript,
+// unchanged. The one-shot ✕ below is untouched. (This retires the CS-X-ESCAPE
+// double-press latch as redundant: one press now does what two used to.)
 function cancelCapture() {
-  // CLOUD session cancel (CS-CANCEL, flag-gated — csActive needs CS_ENABLED): bin the open
-  // window outright (nothing uploads), blip, and open a FRESH turn window — session stays
-  // open. Sane no-ops: during TTS/tail/offer, or with no window running, there is NOTHING
-  // to discard — no blip spam, no double windows (the pending resume owns the reopen). The
-  // 45s close is deliberately NOT re-armed — only voiced speech resets the clocks. One-shot
-  // state (cloudActive/captureActive/recognition) is never touched: the cs isolation rule.
-  if (csActive) {
-    if (csSpeaking || !csRec) return;
-    if (xEscapeTripped()) { closeConversation('x-escape'); return; }   // second ✕ inside the window — get them OUT (no blip; the close cue + sign-off carry it)
-    logEvent('cancel', 'tap-session');
-    cancelBlip();
-    csDiscardWindow('cancel');
-    openCued = false;                    // the fresh turn earns a new open cue, exactly as convo's cancel does
-    csStartWindow();
-    return;
-  }
-  const wasSession = convoActive;
-  if (!(cloudActive || captureActive || wasSession)) return;   // nothing recording → no-op
-  if (wasSession && xEscapeTripped()) { closeConversation('x-escape'); return; }   // the same escape on the convo engine — the seam is shared
-  logEvent('cancel', wasSession ? 'tap-session' : 'tap-oneshot');
+  if (csActive || convoActive) { closeConversation('x'); return; }
+  if (!(cloudActive || captureActive)) return;                 // nothing recording → no-op
+  logEvent('cancel', 'tap-oneshot');
   cancelBlip();
-  if (cloudActive || captureActive) stopCapture(false);        // one-shot: stop WITHOUT sending → discarded, mic off
-  if (wasSession) {
-    clearTimeout(convoDeliverTimer);
-    convoTurn = ''; convoDelivered = '';                       // drop the half-heard turn
-    convoFlips = 0; convoUndelivered = 0; convoLastState = ''; convoReplyPending = false; convoCycleHadSpeech = false;
-    if (convoRec) { try { convoRec.onend = null; convoRec.onerror = null; convoRec.onresult = null; convoRec.abort ? convoRec.abort() : convoRec.stop(); } catch (e) {} }
-    convoRec = null; convoRecRunning = false;                  // fresh instance next start → muddled results gone
-    openCued = false;                                          // the fresh turn earns a new open cue
-    if (convoActive) { convoSetState('listening'); convoStartRecogniser(); convoOpenCue(); convoArmSilence(); }
-  }
+  stopCapture(false);                                          // one-shot: stop WITHOUT sending → discarded, mic off
 }
 
 // Silence handling: nudge at 20s, hard close at 45s. Reset on any speech/reply.
@@ -561,7 +525,7 @@ function shutUp() {
   try { if (window._onShutUp) window._onShutUp(); } catch (e) {}   // the app drops late replies too
 }
 function closeConversation(reason) {
-  if (reason === 'tap' || reason === 'x-escape') shutUp();   // the shut-up gestures — silence NOW
+  if (reason === 'tap' || reason === 'x') shutUp();   // the shut-up gestures (wake-tap, ✕) — silence NOW
   // CS-SKELETON (flag-gated): a cloud session closes on its own path. csActive can
   // only ever be true when the engine pick chose cloud (CS_ENABLED live since step 9).
   if (csActive) { csCloseSession(reason); return; }
@@ -577,7 +541,7 @@ function closeConversation(reason) {
   // CLOSE-ORDER (field 9 Aug): a SPEAKING close says its words FIRST — the falling cue
   // is the goodbye, so it plays LAST, after the sign-off completes (_afterSpeak fires
   // it via _closeCueAfterSpeak). Wordless/other closes keep the immediate cue.
-  const signOff = wasActive && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape');
+  const signOff = wasActive && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no');   // 'x' closes wordless, like the tap
   if (wasActive && !signOff) convoCloseCue();
   if (reason === 'honest') {
     const m = "Hands-free listening won't hold on this browser — tap the mic for each question.";
@@ -1178,7 +1142,7 @@ async function csOpen() {
   try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
-  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false; lastSessionCancelAt = 0; csCloseAfterDeliver = false;
+  csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false; csCloseAfterDeliver = false;
   logEvent('cs.open', 'session');
   setMicState('listening');
   csArmSilence();             // armed BEFORE the first window, so at a 45s tie the close beats the window bound
@@ -1346,7 +1310,7 @@ function csCloseSession(reason) {
   setMicState('off');
   // CLOSE-ORDER: same rule as the convo engine — a speaking close is words FIRST,
   // falling cue LAST (fired by _afterSpeak); wordless closes (tap etc.) cue now.
-  const csSignOff = was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape');
+  const csSignOff = was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no');   // 'x' closes wordless, like the tap
   if (was && !csSignOff) convoCloseCue();   // the same falling cue, once per session (convoCued guard)
   logEvent('cs.close', reason + (was ? '' : ' (noop)'));
   if (csSignOff) {
@@ -1544,7 +1508,6 @@ function deliverTranscript(text, source, endReason, tag) {
   // chose to send). sendMessage consumes it once to guard destination resolution
   // against fragments left by a hard cutoff. Not a second route — just metadata.
   pendingTurnEnd = endReason || 'silence';
-  lastSessionCancelAt = 0;   // a DELIVERED turn resets the ✕-escape pattern
   selfOpenArmed = true;      // a driver WORD re-arms the self-opener (STAYS-SHUT-2)
   // DIAGNOSTIC (console only now): WHICH ears heard it — ☁️ cloud/Whisper vs
   // 📱 basic/Web Speech. The status element shows only the five mic states, so the
@@ -1762,7 +1725,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 02:36 PM AEST',
+    BUILD: '08 Aug 2026, 03:35 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

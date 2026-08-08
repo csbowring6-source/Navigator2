@@ -594,20 +594,19 @@ check("both cues route through the shared melody player (triggers unchanged)", /
 check("the cue GUARDS are unchanged (openCued + micState gate on open; convoCued on close)", /function convoOpenCue\(\) \{\s*if \(openCued\) return;[\s\S]{0,140}micState !== 'listening'/.test(SRC) && /function convoCloseCue\(\) \{\s*if \(convoCued\) return;/.test(SRC));
 
 // ── SCENARIO 17: CANCEL a capture (B) ─────────────────────────────────────────
-console.log("\n--- 17. cancel: session survives + reopens listening; one-shot bins + closes; spoken 'scratch that' routes nowhere ---");
-// (a) SESSION tap-cancel mid-turn: nothing delivered, session stays open, back to a fresh listening turn + one open cue
-fresh(); timers.length = 0;
+console.log("\n--- 17. the ✕ stops the session (X-MEANS-STOP); one-shot bins + closes; spoken 'scratch that' continues ---");
+// (a) X-MEANS-STOP: the session tap-✕ CLOSES — nothing delivered, one falling cue, wordless
+fresh(); timers.length = 0; H.utt = null;
 Voice.openSession(); rec.onstart();
 rec.speech(); rec.final("find me a serv");         // driver gets muddled mid-utterance
-const openBeforeCancel = countCue("open");
-Voice.cancelCapture();                              // TAP the red ✕
-check("session cancel is logged", kinds().includes("cancel:tap-session"));
+Voice.cancelCapture();                              // TAP the red ✕ — OUT
+check("one ✕ CLOSES the convo session (close:x)", kinds().includes("close:x") && !Voice.isSessionOpen());
 check("cancel delivered NOTHING", delivered === 0);
-check("session STAYS OPEN after a cancel", Voice.isSessionOpen() === true);
-check("session returned to a fresh LISTENING turn", Voice.state() === "listening");
-check("the fresh turn earns exactly ONE open cue", countCue("open") === openBeforeCancel + 1);
-rec.onstart(); rec.speech(); rec.final("cheapest fuel"); advance(2800); advance(600);
-check("a clean utterance AFTER the cancel delivers normally (muddled turn is gone)", delivered === 1);
+check("wordless: one falling cue, no sign-off", countCue("close") === 1 && !(H.utt && /Tap to talk/.test(H.utt.text)));
+Voice.openSession(); rec.onstart();
+check("the next open works normally after the ✕ stop", Voice.isSessionOpen() === true && Voice.state() === "listening");
+rec.speech(); rec.final("cheapest fuel"); advance(2800); advance(600);
+check("a clean utterance in the NEW session delivers normally", delivered === 1);
 Voice.closeSession("tap");
 
 // (b) SPOKEN cancel: a transcript ENDING "scratch that" routes nowhere; mid-sentence does NOT trigger
@@ -871,24 +870,20 @@ check("the same stock phrase with REAL voiced time (~1.9s) DELIVERS", delivered2
 Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
-// ── SCENARIO 22: CS-CANCEL — ✕ + spoken "scratch that" on the cloud engine ─────
-console.log("\n--- 22. CS-cancel: ✕ discards + fresh window; spoken cancel routes nowhere; harmless no-ops; close clock untouched ---");
+// ── SCENARIO 22: the ✕ STOPS (X-MEANS-STOP) + spoken "scratch that" continues ──
+console.log("\n--- 22. ✕ = stop (close, nothing uploads); spoken cancel = continue; idle ✕ no-op ---");
 check("the shipped flag is ON (field build)", /const CS_ENABLED = true;/.test(SRC));
-// (a) ✕ mid-recording: discard, blip, fresh window, session open — and the 45s close is NOT reset
-Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0;
-Voice2.openSession(); await RIG.settle();            // close armed at open (t0)
-await RIG.pump(Array(8).fill(40));                    // driver speaking — last voiced tick re-arms the close
+// (a) X-MEANS-STOP: ✕ mid-recording CLOSES — window discarded UNSENT, no fresh window
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
+Voice2.openSession(); await RIG.settle();
+await RIG.pump(Array(8).fill(40));                    // driver speaking — a window is open
 check("mid-recording: state recording, ✕ showing", Voice2.state() === "recording" && el("sendBtn").textContent === "✕");
-const cancelsBefore = kinds2().filter(k => k === "cancel:tap-session").length;
-advance(2000);                                        // a beat later (under the 2.8s cut) the driver hits ✕
+advance(2000);                                        // a beat later the driver hits ✕
 Voice2.cancelCapture();
-check("✕ on cs: cancel:tap-session + cs.discard:cancel logged, ZERO uploads", kinds2().filter(k => k === "cancel:tap-session").length === cancelsBefore + 1 && kinds2().includes("cs.discard:cancel") && RIG.fetches.length === 0);
-check("✕ on cs: a FRESH window opened, session still open, state listening", RIG.starts === 2 && Voice2.isSessionOpen() && Voice2.state() === "listening");
-check("CUES: the fresh post-cancel turn earned a new open cue", cue2("open") === 2);
-check("one-shot state untouched by a cs cancel (isolation holds in source)", /if \(csActive\) \{\n    if \(csSpeaking \|\| !csRec\) return;\n    if \(xEscapeTripped\(\)\) \{ closeConversation\('x-escape'\); return; \}[^\n]*\n    logEvent\('cancel', 'tap-session'\);\n    cancelBlip\(\);\n    csDiscardWindow\('cancel'\);/.test(SRC));
-// the 45s close was armed by the SPEECH (t_speech+45000), not the cancel: at t_speech+45.5s it must be CLOSED
-advance(43500); await RIG.settle();                   // t_cancel+43.5s ≈ t_speech+45.5s < t_cancel+45s
-check("the 45s close fired on the SPEECH clock — the cancel did NOT reset it", kinds2().includes("cs.close:silence") && Voice2.isSessionOpen() === false);
+check("✕ on cs: ONE press CLOSES (cs.close:x), NOTHING uploaded", kinds2().includes("cs.close:x") && !Voice2.isSessionOpen() && RIG.fetches.length === 0 && delivered2 === 0);
+check("✕ close is WORDLESS: one falling cue, no sign-off, no cancel blip", cue2("close") === 1 && !(H.utt && /Tap to talk/.test(H.utt.text)) && !kinds2().includes("cancel:tap-session"));
+check("✕ close: NO fresh window after the press (the ambient-gobbledygook hole is shut)", RIG.starts === 1 && Voice2.state() === "off");
+check("one-shot isolation holds in source (session ✕ routes to close, one-shot path separate)", /if \(csActive \|\| convoActive\) \{ closeConversation\('x'\); return; \}/.test(SRC));
 // (b) spoken "scratch that": binned before _onTranscript, blip, fresh window, session open
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();
@@ -903,15 +898,11 @@ RIG.transcripts.push("real question");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
 advance(700);
 check("setup: a real turn delivered", delivered2 === 1);
-const logLenAfterDeliver = Voice2.getLog().length;
-Voice2.cancelCapture();                               // post-deliver: NO window running → no-op
-check("cancel with nothing recording is a silent no-op (no log entries, no discard)", Voice2.getLog().length === logLenAfterDeliver);
-Voice2.speak("The answer."); tts.start(); tts.end();  // reply done — the 600ms tail is pending
-const startsBeforeTailCancel = RIG.starts;
-Voice2.cancelCapture();                               // during the tail: csSpeaking → no-op
-advance(700); await RIG.settle();
-check("cancel during the post-TTS tail: no-op, then exactly ONE window opens (no doubles)", RIG.starts === startsBeforeTailCancel + 1 && Voice2.isSessionOpen() && Voice2.state() === "listening");
-Voice2.closeSession("tap");
+Voice2.cancelCapture();                               // post-deliver, session LIVE → ✕ still means STOP
+check("✕ with a live session but nothing recording STILL stops (touch means stop)", kinds2().includes("cs.close:x") && !Voice2.isSessionOpen());
+const logLenAfterClose = Voice2.getLog().length;
+Voice2.cancelCapture();                               // session already off, one-shot idle → true no-op
+check("✕ with NOTHING live is a silent no-op (no log entries)", Voice2.getLog().length === logLenAfterClose);
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 
 // ── SCENARIO 23: CS-SEAM — engine pick, micTap close, honest swaps, no ping-pong ─
@@ -986,8 +977,8 @@ Voice2.openSession(); await RIG.settle();
 RIG.transcripts.push(SCRIPTS[0]);                               // turn 1 → deliver
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
 Voice2.speak("Three parks near Port Douglas."); tts.start(); tts.end(); advance(700); await RIG.settle();   // reply 1 → reopen
-await RIG.pump(Array(5).fill(40));                              // cancel mid-window
-Voice2.cancelCapture();
+RIG.transcripts.push("no scratch that");                        // SPOKEN cancel mid-flow (the ✕ would STOP — X-MEANS-STOP)
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
 RIG.transcripts.push({ fail: "down" });                         // a failed upload
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle();
 RIG.audio = new Blob(["x".repeat(500)], { type: "audio/webm" });   // a sub-minimum window → the LOCAL-discard path
@@ -1003,7 +994,7 @@ check("lifecycle IN ORDER: pick→open→window→cue→speech→upload→delive
   "engine:cloud", "cs.open:session", /^cs\.window:\d+$/, "cue:open",
   "cs.vad:speech", /^cs\.upload:/, /^deliver:cloud:silence w\d+$/,
   "tts.start", "tts.end", /^cs\.window:/, "cue:open",
-  "cancel:tap-session", "cs.discard:cancel", /^cs\.window:/,
+  /^cs\.upload:/, "cancel:spoken", /^cs\.window:/,
   /^cs\.fail:/, /^cs\.window:/,
   /^cs\.discard:silence:\d+ms$/, /^cs\.window:/,
   "offer:anything-else", "cs.discard:offer", /^cs\.window:/,
@@ -1011,7 +1002,7 @@ check("lifecycle IN ORDER: pick→open→window→cue→speech→upload→delive
   "cue:close", "cs.close:tap",
 ]), L24.join(" | "));
 check("the upload event carries WINDOW ID + size + VOICED time", L24.some(k => /^cs\.upload:w\d+ \d+b \d+ms$/.test(k)));
-check("every window outcome is readable from the log alone", L24.includes("cs.discard:cancel") && L24.includes("cs.discard:offer") && L24.some(k => /^cs\.fail:/.test(k)) && L24.some(k => /^cs\.discard:silence:/.test(k)));
+check("every window outcome is readable from the log alone", L24.includes("cancel:spoken") && L24.includes("cs.discard:offer") && L24.some(k => /^cs\.fail:/.test(k)) && L24.some(k => /^cs\.discard:silence:/.test(k)));
 const flat24 = Voice2.getLog().map(e => e.kind + " " + e.detail).join("\n").toLowerCase();
 check("PRIVACY: no logged string contains any scripted transcript text", SCRIPTS.every(t => !flat24.includes(t)) && !flat24.includes("port douglas") && !flat24.includes("diesel"));
 // the swap session's sequence
@@ -1200,35 +1191,16 @@ console.log("\n--- 28. deliver-once: the window latch + the sendMessage re-entra
 }
 check("camps-carry still routes through sendMessage (the queue serialises it, never drops it)", /if \(pa\.ask\) \{ inp\.value = pa\.ask; await sendMessage\(true\); \}/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
 
-// ── SCENARIO 29: CS-X-ESCAPE — a second quick ✕ means the driver wants OUT ──────
-console.log("\n--- 29. x-escape: two quick ✕ close; a delivered turn resets; the 7-press field replay ---");
-check("the threshold is pinned at 3000ms", /const X_ESCAPE_MS = 3000;/.test(SRC));
-// (a) CLOUD: ✕ then ✕ 700ms later → closed, ONE cue, sign-off, its own reason
+// ── SCENARIO 29: X-MEANS-STOP — a single ✕ ends the session; carry-on survives ─
+console.log("\n--- 29. X-MEANS-STOP: one ✕ closes (both engines); ✕ mid-speech parks + carry-on resumes; the escape latch is gone ---");
+check("the double-press escape latch is RETIRED (source: latch, timer and reason all gone)", !/X_ESCAPE_MS|xEscapeTripped|lastSessionCancelAt/.test(SRC) && !/x-escape/.test(SRC));
+// (a) CLOUD: one ✕ while recording → closed, one cue, wordless, zero uploads (covered
+// in depth by scenario 22a; here the LISTENING state too)
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
 Voice2.openSession(); await RIG.settle();
-await RIG.pump(Array(5).fill(40));                       // driver speaking — a window is open
-Voice2.cancelCapture();                                   // first ✕: normal cancel, fresh window
-check("first ✕ still cancels normally (fresh window, session open)", kinds2().includes("cs.discard:cancel") && Voice2.isSessionOpen());
-advance(700); await RIG.settle();
-Voice2.cancelCapture();                                   // second ✕, 0.7s later → OUT
-check("second quick ✕ CLOSES with its own reason (cs.close:x-escape)", kinds2().includes("cs.close:x-escape") && !Voice2.isSessionOpen() && Voice2.state() === "off");
-tts.start(); tts.end();   // CLOSE-ORDER
-check("x-escape: ONE close cue + the sign-off", cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
-check("x-escape: only the FIRST press logged a cancel (no blip spam on the second)", kinds2().filter(k => k === "cancel:tap-session").length === 1);
-// (b) a DELIVERED turn resets the pattern: ✕ → turn delivers → ✕ 2.5s after the first → normal cancel
-Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
-Voice2.openSession(); await RIG.settle();
-await RIG.pump(Array(3).fill(40)); Voice2.cancelCapture();            // first ✕ at t0
-RIG.transcripts.push("real question");
-await RIG.pump([...Array(8).fill(40), ...Array(12).fill(0)]);          // ~2.0s in: speech, then quiet…
-await RIG.pump(Array(20).fill(0)); await RIG.settle(); advance(700);   // …the turn DELIVERS (pattern reset)
-check("setup: the turn between the presses delivered", delivered2 === 1);
-Voice2.speak("Answer."); tts.start(); tts.end(); advance(700); await RIG.settle();   // reply → fresh window
-await RIG.pump(Array(3).fill(40));
-Voice2.cancelCapture();                                                // a later ✕ — pattern was reset
-check("✕ → delivered turn → ✕ does NOT close (normal cancel, session open)", Voice2.isSessionOpen() && !kinds2().includes("cs.close:x-escape"));
-Voice2.closeSession("tap");
-// (c) the EBQFG6V field pattern: seven presses ~0.7s apart → closed on the SECOND, rest harmless
+Voice2.cancelCapture();                                   // ✕ while merely LISTENING
+check("✕ while listening closes too (cs.close:x, one cue, session off)", kinds2().includes("cs.close:x") && cue2("close") === 1 && !Voice2.isSessionOpen());
+// (b) the EBQFG6V 7-press field replay: now closed on the FIRST press, the rest harmless
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); delivered2 = 0;
 Voice2.openSession(); await RIG.settle();
 await RIG.pump(Array(3).fill(40));
@@ -1238,19 +1210,23 @@ for (let press = 1; press <= 7; press++) {
   if (!Voice2.isSessionOpen() && !closedAtPress) closedAtPress = press;
   advance(700); await RIG.settle();
 }
-check("field replay: the session closed on the SECOND press", closedAtPress === 2, "closed at press " + closedAtPress);
-tts.start(); tts.end();   // CLOSE-ORDER: press 2's sign-off completes → its cue
-check("field replay: presses 3–7 were harmless no-ops (one close, one cue, no extra logs)", kinds2().filter(k => k.startsWith("cs.close:x-escape")).length === 1 && cue2("close") === 1);
-// (d) CONVO: the shared seam — two quick session-cancels close there too
+check("field replay: the session now closes on the FIRST press", closedAtPress === 1, "closed at press " + closedAtPress);
+check("field replay: presses 2–7 were harmless no-ops (one close, one cue)", kinds2().filter(k => k.startsWith("cs.close:x")).length === 1 && cue2("close") === 1);
+// (c) THE TICKET PIN: ✕ mid-SPEECH parks the cut answer; "carry on" in a fresh session resumes it
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+Voice2.speak("Tropic Breeze, ten minutes away; Pandanus, twelve; Glengarry, twenty."); tts.start(); advance(1500);
+Voice2.cancelCapture();                                   // ✕ cuts the answer mid-word
+check("✕ mid-speech: instant close (cs.close:x), audio killed by the shut-up", kinds2().includes("cs.close:x") && !Voice2.isSessionOpen());
+Voice2.micTap(); await RIG.settle();                      // the driver reopens the mic
+check("…and 'carry on' RESUMES the parked answer in the fresh session (X-MEANS-STOP + CARRY-ON)", Voice2.resumeSpeech("carry on") === true && H.utt && /(Tropic|Pandanus|Glengarry)/.test(H.utt.text));
+Voice2.closeSession("tap");
+// (d) CONVO: the same single-press stop on the fallback engine
 Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0; H.utt = null;
 Voice.onTranscript(() => { delivered++; });
 Voice.openSession(); rec.onstart(); rec.speech();
-Voice.cancelCapture();                                    // first: normal session cancel (reopens)
-check("convo: first ✕ cancels normally (session open)", kinds().includes("cancel:tap-session") && Voice.isSessionOpen());
-advance(700);
-Voice.cancelCapture();                                    // second, 0.7s later
-tts.start(); tts.end();   // CLOSE-ORDER
-check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text));
+Voice.cancelCapture();                                    // one ✕ — out
+check("convo: ONE ✕ closes (close:x, one cue, wordless)", kinds().includes("close:x") && countCue("close") === 1 && !Voice.isSessionOpen() && !(H.utt && /Tap to talk/.test(H.utt.text)));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 // ── SCENARIO 30: GREEN-SIGNAL — one binary on every mic surface, both engines ───
