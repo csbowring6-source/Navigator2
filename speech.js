@@ -1596,9 +1596,11 @@ let _ttsNextTimer = null;  // deferred play of the next queued reply
 // the goodbye tone is the LAST sound. Cleared by cancelSpeech (a driver kill
 // silences everything, cue included — STAYS-SHUT).
 let _closeCueAfterSpeak = false;
-// CLOSE-ORDER clip protection: SHORT standalone utterances start this much late so a
-// cold speaker route (Bluetooth/cab audio waking up) can't eat the first word.
-const TTS_LEAD_PAD_MS = 250;
+// CLIP-2 clip protection: SHORT standalone utterances on a cold speaker route
+// (Bluetooth/cab audio waking up) start this much late AND behind a silent primer
+// utterance, so the wake-up cost can never land on the first word. (250ms of bare
+// delay was not enough in the field — raised, and the primer added.)
+const TTS_LEAD_PAD_MS = 600;
 let _ttsPadTimer = null;   // the pending padded start — cleared by any newer speak/cancel
 function queueReplies(on) { _queueReplies = !!on; }
 
@@ -1650,6 +1652,15 @@ function _speakNow(text) {
     .replace(/(\d)\s*m\b/g,  '$1 metres')
     .replace(/(\d)\s*c\/L\b/gi, '$1 cents a litre')
     .replace(/\bL\/100km\b/gi, 'litres per hundred kilometres');
+  // CLIP-2: a cold route needs waking BEFORE the real words. Decide now, and build the
+  // silent PRIMER first (construction order matters to the bench's utterance capture —
+  // the LAST-built utterance is the audible one).
+  const coldShort = clean.length <= 40 && !synth.speaking;
+  let primer = null;
+  if (coldShort) {
+    primer = new SpeechSynthesisUtterance('. . .');
+    primer.volume = 0; primer.rate = 2;   // brief, silent — pure route wake-up
+  }
   const utt=new SpeechSynthesisUtterance(clean);
   utt.lang='en-AU'; utt.rate=0.92; utt.pitch=1.0; utt.volume=1.0;
   const voices=synth.getVoices();
@@ -1660,12 +1671,15 @@ function _speakNow(text) {
   utt.onstart = () => { logEvent('tts.start', ''); setMicState('speaking'); };
   utt.onerror = _afterSpeak;
   utt.onend = _afterSpeak;
-  // CLOSE-ORDER clip pad: short standalone utterances (the sign-off family) on a COLD
-  // route start TTS_LEAD_PAD_MS late; ordinary replies (long, or a warm route mid-flow)
-  // start immediately. The pending start dies with any newer speak/cancel.
+  // CLIP-2 (field 9 Aug: 250ms of pure delay still clipped to "…auk" — many routes only
+  // wake when AUDIO FLOWS, a delay wakes nothing): cold-route short utterances get BOTH
+  // braces. (1) the raised pad — TTS_LEAD_PAD_MS before anything is handed over; then
+  // (2) the silent PRIMER speaks first, so the wake-up cost lands on silence and the
+  // real words queue behind it on a now-warm route. Ordinary replies (long, or a warm
+  // route mid-flow) start immediately. The pending start dies with any newer speak/cancel.
   clearTimeout(_ttsPadTimer);
-  if (clean.length <= 40 && !synth.speaking) {
-    _ttsPadTimer = setTimeout(() => synth.speak(utt), TTS_LEAD_PAD_MS);
+  if (coldShort) {
+    _ttsPadTimer = setTimeout(() => { synth.speak(primer); synth.speak(utt); }, TTS_LEAD_PAD_MS);
   } else {
     synth.speak(utt);
   }
@@ -1748,7 +1762,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 02:16 PM AEST',
+    BUILD: '08 Aug 2026, 02:22 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
