@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 01:53 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 02:16 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-0153PM"></script>
+<script src="speech.js?v=08Aug2026-0216PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1761,10 +1761,27 @@ function toggleMapView() {
 // setView, clamped to [floor 11, cap 14] (14 = the app's existing fit cap).
 const CAMP_FRAME_MIN_ZOOM = 11;
 const CAMP_FRAME_MAX_ZOOM = 14;
+// STALKS-TRIM (field 9 Aug: a corridor round framed Cairns AND Mission Beach): the
+// frame's subject is the ANCHOR CLUSTER — the pins around the round's search anchor.
+// The round stores no anchor, so its stand-in is the MEDOID (the site with the least
+// summed distance to the rest); sites beyond the ~search radius of it are stragglers
+// and may fall off-screen, like the driver. The cluster fills the view.
+const CAMP_FRAME_CLUSTER_KM = 40;   // ≈ the camps search radius
+function campAnchorCluster(sites) {
+  const pts = (sites || []).filter(s => s.lat && s.lon);
+  if (pts.length <= 2) return pts;
+  let best = pts[0], bestSum = Infinity;
+  for (const a of pts) {
+    let sum = 0;
+    for (const b of pts) sum += distKm(a.lat, a.lon, b.lat, b.lon);
+    if (sum < bestSum) { bestSum = sum; best = a; }
+  }
+  return pts.filter(s => distKm(best.lat, best.lon, s.lat, s.lon) <= CAMP_FRAME_CLUSTER_KM);
+}
 function frameCampRound() {
   if (!window._navMap || !window.L) return false;
   if (!(campRound && campRound.sites && campRound.sites.length)) return false;
-  const pts = campRound.sites.filter(s => s.lat && s.lon).map(s => [s.lat, s.lon]);
+  const pts = campAnchorCluster(campRound.sites).map(s => [s.lat, s.lon]);
   if (!pts.length) return false;
   try {
     const b = L.latLngBounds(pts);
@@ -2218,9 +2235,11 @@ let optionPins = [];
 // FAN_PX circle, stalk from true spot → shown spot. Re-run on every zoom (zooming
 // in can un-overlap: members snap home, stalks go). Icons, popups and taps are the
 // SAME objects — a fanned pin is a normal pin, just displaced.
-const OVERLAP_PX = 30;   // ≈ one 28px number circle — closer than this is unreadable
-const FAN_PX = 36;       // stalk length: clear separation, still obviously "here"
-let optionLeaders = [];  // the stalk polylines — cleared with the pins
+const OVERLAP_PX = 24;   // genuinely PILED UP — two 28px circles substantially overlapping
+                         // (STALKS-TRIM: honestly-separated pins never move)
+const FAN_MIN_PX = 22;   // the shortest stalk that clears two numbers — fan no further
+                         // than reading needs; bigger piles get just enough radius
+let optionLeaders = [];  // the stalk polylines + true-spot dots — cleared with the pins
 function spreadOverlappingPins() {
   const map = window._navMap;
   if (!map || !window.L || !optionPins.length) return;
@@ -2235,12 +2254,16 @@ function spreadOverlappingPins() {
       if (!used[j] && ents[i].pt.distanceTo(ents[j].pt) < OVERLAP_PX) { group.push(j); used[j] = true; }
     }
     if (group.length === 1) { ents[i].m.setLatLng(ents[i].m._trueLatLng); continue; }   // alone → home, no stalk
+    // Only as far as reading needs: enough ring circumference for ~30px between numbers.
+    const r = Math.max(FAN_MIN_PX, Math.ceil((group.length * 30) / (2 * Math.PI)));
     group.forEach((gi, k) => {
       const e = ents[gi];
       const ang = (2 * Math.PI * k) / group.length - Math.PI / 2;
-      const ll = map.layerPointToLatLng(L.point(e.pt.x + FAN_PX * Math.cos(ang), e.pt.y + FAN_PX * Math.sin(ang)));
+      const ll = map.layerPointToLatLng(L.point(e.pt.x + r * Math.cos(ang), e.pt.y + r * Math.sin(ang)));
       e.m.setLatLng(ll);
       optionLeaders.push(L.polyline([e.m._trueLatLng, ll], { color: '#5A6C80', weight: 1, opacity: 0.6, interactive: false }).addTo(map));
+      // STALKS-TRIM: a small dot marks the TRUE spot the stalk leads back to
+      optionLeaders.push(L.circleMarker(e.m._trueLatLng, { radius: 3, stroke: false, fillColor: '#5A6C80', fillOpacity: 0.9, interactive: false }).addTo(map));
     });
   }
 }
