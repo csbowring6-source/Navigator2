@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 02:22 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 02:36 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-0222PM"></script>
+<script src="speech.js?v=08Aug2026-0236PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1781,7 +1781,16 @@ function campAnchorCluster(sites) {
 function frameCampRound() {
   if (!window._navMap || !window.L) return false;
   if (!(campRound && campRound.sites && campRound.sites.length)) return false;
-  const pts = campAnchorCluster(campRound.sites).map(s => [s.lat, s.lon]);
+  // FRAME-ANCHOR (field 9 Aug: a Mossman round framed Cairns — a corridor round's
+  // MEDOID sits mid-span and its 40km net caught both ends): frame the sites within
+  // the SEARCH RADIUS of the round's stored anchor — the place the driver named.
+  // The medoid stays only as the fallback for legacy rounds saved without an anchor.
+  const a = campRound.anchor;
+  let cluster = (a && a.lat != null)
+    ? campRound.sites.filter(s => s.lat && s.lon && distKm(a.lat, a.lon, s.lat, s.lon) <= (a.radiusKm || CAMP_FRAME_CLUSTER_KM))
+    : campAnchorCluster(campRound.sites);
+  if (!cluster.length) cluster = campAnchorCluster(campRound.sites);   // never frame nothing
+  const pts = cluster.map(s => [s.lat, s.lon]);
   if (!pts.length) return false;
   try {
     const b = L.latLngBounds(pts);
@@ -3640,7 +3649,8 @@ async function getCorridorCamps() {
   const sel = selectCorridorCamps(cands, { gps, routePath: onTrip ? window._tripRoute.path : null, rig: currentVehicle, windowMins: 60 });
   if (!sel.sites.length) return { error: onTrip ? 'none-ahead' : 'empty', directional: onTrip };
   const top = dedupeCampSites(sel.sites).slice(0, CAMPS_SHOWN_MAX);
-  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered, osmDown: merged.osmDown };
+  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: sel.directional, widened: sel.widened, rigFiltered: sel.rigFiltered, osmDown: merged.osmDown,
+           anchor: { lat: gps.lat, lon: gps.lon, radiusKm: radius } };   // FRAME-ANCHOR: a corridor/near-me round's subject is the driver's area
 }
 
 // Geocode a named place browser-side (Nominatim, no key) → {lat,lon} or null.
@@ -3681,7 +3691,8 @@ async function getCampsNear(place, coords) {
       return { error: 'too-far', place, km: Math.round(km), lat: c.lat, lon: c.lon, cand: near[0] || null };
     }
   }
-  const merged = await fetchMergedCamps(c.lat, c.lon, Math.min(25 * campWidenScale, 100));   // Places + OSM non-commercial, with /camps fallback
+  const searchRadiusKm = Math.min(25 * campWidenScale, 100);
+  const merged = await fetchMergedCamps(c.lat, c.lon, searchRadiusKm);   // Places + OSM non-commercial, with /camps fallback
   if (merged.error) return { error: merged.error, place };
   const d = { results: merged.results };
   if (!d.results || !d.results.length) return { error: 'empty-place', place };
@@ -3705,7 +3716,8 @@ async function getCampsNear(place, coords) {
     cands.forEach(s => { s.km = s.crow; s.mins = null; });
   }
   const top = dedupeCampSites(cands).slice(0, CAMPS_SHOWN_MAX);
-  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: false, near: true, place, osmDown: merged.osmDown };
+  return { sites: top, freeCamps: pickFreeCampGroup(top, cands), directional: false, near: true, place, osmDown: merged.osmDown,
+           anchor: { lat: c.lat, lon: c.lon, radiusKm: searchRadiusKm } };   // FRAME-ANCHOR: the place the driver ASKED about
 }
 
 // ── ANSWER SHAPE + CALL HANDOFF (S2.3) — deterministic, so the TRUST RULE is
@@ -4335,10 +4347,13 @@ function resumeCampRoundIfPersisted() {
 }
 
 // Start a fresh round from a produced answer (part 1) — persisted immediately.
-function startCampRound(place, query, sites) {
+function startCampRound(place, query, sites, anchor) {
   campRound = {
     place: place || '',
     query: query || '',
+    // FRAME-ANCHOR: the search anchor — the asked-about place's coords + the radius
+    // used — so framing can centre on what the driver NAMED, not the pins' middle.
+    anchor: (anchor && anchor.lat != null) ? { lat: anchor.lat, lon: anchor.lon, radiusKm: anchor.radiusKm || null } : null,
     sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '', source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
     tried: [], calledSite: null, ts: Date.now(),
   };
@@ -4776,7 +4791,7 @@ async function loadTripCampRound(scanText, override) {
   if (widenNote) { ans.text = widenNote + ' ' + ans.text; ans.spoken = widenNote + ' ' + (ans.spoken || ans.text); }
   if (ans.sites.length) {
     addPendingPins(ans.sites.map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }))); notePlaces(ans.sites.map(s => s.name));
-    startCampRound(named || '', scanText, ans.sites);   // persist the set for the ring-around (part 1)
+    startCampRound(named || '', scanText, ans.sites, ans.anchor);   // persist the set + its search ANCHOR (FRAME-ANCHOR)
   }
   return ans;
 }

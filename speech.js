@@ -1762,7 +1762,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 02:22 PM AEST',
+    BUILD: '08 Aug 2026, 02:36 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
