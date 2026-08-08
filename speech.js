@@ -130,13 +130,18 @@ function toggleConversation() {
 
 // The opening TAP (a real gesture): unlock audio + start the ONE recogniser here,
 // synchronously, before any await — this is what makes it hold on iOS.
+// THE ENGINE PICK, as one predicate — shared by openConversation and the ONE-MIC
+// delegation in toggleVoice (MIC-SIMPLE step 3): Android with the full cloud kit.
+function cloudSessionPick() {
+  return CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
+}
 function openConversation() {
   // CS-SEAM (step 7) — THE ENGINE PICK. Android with the full cloud kit present
   // (MediaRecorder + getUserMedia + AudioContext) gets the CLOUD session; everything
   // else — including iOS, per the design report — keeps the Web-Speech session exactly
   // as shipped. CS_ENABLED is LIVE (step 9): Android + full kit sessions run cloud;
   // every other device falls straight through to openWebSpeechSession.
-  const cloudPick = CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
+  const cloudPick = cloudSessionPick();
   if (CS_ENABLED) logEvent('engine', cloudPick ? 'cloud' : 'webspeech');   // the PICK — the first line of every session in the field log
   if (cloudPick) { csOpen(); return; }
   openWebSpeechSession();
@@ -721,6 +726,14 @@ const SILENCE_MS = 2800;       // long enough to survive a mid-sentence breath
 const BASIC_CHURN_MS = 15000;  // restart churn with no NEW captured words this long -> stop honestly (matches the convo ceiling; bounds BOTH engines)
 
 function toggleVoice() {
+  // ONE-MIC (MIC-SIMPLE step 3, field 8 Aug): on Android with the full cloud kit,
+  // EVERY mic is the same mic — a one-shot entry point (home mic, small round mic)
+  // opens the SESSION through micTap's shipped tap table instead, so one tap anywhere
+  // gives the ear that stays open. micTap also covers a live one-shot capture
+  // (tap-to-send) and every session state, so the delegation is unconditional under
+  // the pick. The one-shot body below stays as the iOS/desktop default and the
+  // internal fallback.
+  if (cloudSessionPick()) { micTap(); return; }
   unlockAudio();
   selfOpenArmed = true;   // a driver tap (STAYS-SHUT-2)
   try { if (window._onDriverTap) window._onDriverTap(); } catch (e) {}
@@ -1706,7 +1719,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 09:22 AM AEST',
+    BUILD: '08 Aug 2026, 11:26 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

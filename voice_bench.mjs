@@ -1438,5 +1438,34 @@ check("the app-side no-session close echo carries it too", /const bye = 'Tap to 
 check("the old dash sign-off is GONE from both files", !/Righto — tap the mic/.test(SRC) && !/Righto — tap the mic/.test(IDX34));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
+// ── SCENARIO 36: ONE-MIC-ANDROID (MIC-SIMPLE step 3) — every mic is the same mic ─
+console.log("\n--- 36. ONE-MIC: Android+kit one-shot entries open the SESSION; the tap table holds; one-shot lives on elsewhere ---");
+RIG.reset(); RIG.enable(); Voice2.clearLog(); rafQueue.length = 0; timers.length = 0;
+// (a) a one-shot entry point (home mic / small round mic → toggleCapture) opens the SESSION
+Voice2.toggleCapture(); await RIG.settle();
+check("Android+kit: toggleCapture opens the CLOUD SESSION (same engine pick as Hands-free)", Voice2.isSessionOpen() && kinds2().includes("cs.open:session") && kinds2().includes("engine:cloud"));
+check("…and NOT a one-shot capture", !Voice2.isCapturing());
+// (b) the shipped tap table applies from the SAME entry: tap in listening closes
+Voice2.toggleCapture(); await RIG.settle();
+check("second tap from the same entry CLOSES (tap table: listening → off)", !Voice2.isSessionOpen() && kinds2().includes("cs.close:tap"));
+// (c) tap during session SPEECH from the one-shot entry kills the audio (tap table)
+Voice2.clearLog(); RIG.reset(); Voice2.toggleCapture(); await RIG.settle();
+Voice2.speak("A long answer."); tts.start();
+Voice2.toggleCapture();
+check("tap while a session reply speaks → instant close, audio killed (tap table holds)", kinds2().includes("cs.close:tap") && !Voice2.isSessionOpen());
+// (d) the delegation is the ONE seam; thinking-defer etc. inherit micTap's proven table
+check("toggleVoice delegates to micTap under the pick — one seam, whole table", SRC.includes("if (cloudSessionPick()) { micTap(); return; }"));
+check("openConversation and the delegation share ONE pick predicate", /const cloudPick = cloudSessionPick\(\);/.test(SRC) && /function cloudSessionPick\(\)/.test(SRC));
+// (e) iOS/desktop (no Android UA): toggleCapture still runs the ONE-SHOT
+Voice.closeSession("tap"); await Promise.resolve();
+Voice.toggleCapture();
+for (let i = 0; i < 6; i++) await Promise.resolve();
+check("non-Android: toggleCapture still starts a one-shot capture, never a session", Voice.isCapturing() && !Voice.isSessionOpen());
+Voice.toggleCapture(); await Promise.resolve();          // tap-to-send — the one-shot endpoint intact
+check("…and the second tap SENDS (one-shot endpoint unchanged)", !Voice.isCapturing());
+// (f) entry WIRING unchanged — the pick lives behind the API, not in the buttons
+check("wiring pins hold: home mic + round mic → toggleCapture, Hands-free → micTap", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc) && /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc) && /id="wakeBtn"[^>]*onclick="Voice\.micTap\(\)"/.test(indexSrc));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
