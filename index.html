@@ -31,6 +31,8 @@
   .menu-item:hover,.menu-item:active{background:var(--navy3);}
   .menu-item.danger{color:var(--red);}
   .menu-item.danger:hover,.menu-item.danger:active{background:rgba(231,76,60,0.1);}
+  .menu-item.primary{color:var(--amber);font-weight:600;}   /* MENU-EMPHASIS: the routine action carries the colour */
+  .menu-item.primary:hover,.menu-item.primary:active{background:rgba(245,166,35,0.1);}
 
   /* VERSION LINE — tap the title on any screen to see the build + update state */
   .version-line{display:none;align-items:center;justify-content:space-between;gap:10px;
@@ -550,10 +552,12 @@
     <div class="menu-picker" id="menuPicker">
       <button class="menu-btn" onclick="toggleAppMenu()" title="Settings and start fresh">⋯</button>
       <div class="menu-dropdown" id="menuDropdown">
+        <!-- MENU-EMPHASIS: the routine action carries the colour; the profile-wiping
+             reset sits plain at the BOTTOM (its are-you-sure confirm is unchanged) -->
         <div class="menu-item" onclick="menuGo('setup')">⚙ Edit setup<span>Name · rig · fuel · apps</span></div>
-        <div class="menu-item" onclick="menuGo('trip')">↺ Clear this trip<span>Wipes chat and trip. Keeps your profile.</span></div>
-        <div class="menu-item danger" onclick="menuGo('fresh')">⚠ Start completely fresh<span>Erases everything. Back to setup.</span></div>
+        <div class="menu-item primary" onclick="menuGo('trip')">↺ Clear this trip<span>Wipes chat and trip. Keeps your profile.</span></div>
         <div class="menu-item" onclick="menuGo('version')">ⓘ Version<span>Build stamp + update check</span></div>
+        <div class="menu-item" onclick="menuGo('fresh')">⚠ Start completely fresh<span>Erases everything. Back to setup.</span></div>
       </div>
     </div>
     <button class="sos-btn" onclick="openSOS()" title="Emergency help — call 000, find nearest help">🆘</button>
@@ -616,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:39 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:42 AM AEST</div>
   </div>
 </div>
 
@@ -845,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1139AM"></script>
+<script src="speech.js?v=08Aug2026-1142AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
