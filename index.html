@@ -616,7 +616,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:26 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:39 AM AEST</div>
   </div>
 </div>
 
@@ -845,7 +845,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1126AM"></script>
+<script src="speech.js?v=08Aug2026-1139AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1529,7 +1529,8 @@ function formatDayBrief(dest, origin, route, vehicle, headOverride) {
   const dur = hrsMinsSpoken(hrs * 60);                 // spoken hours-and-minutes, never decimal
   const days = hrs <= 8 ? 1 : Math.ceil(hrs / 8);
   if (days === 1) {
-    return `${head} ${route.km} km, about ${dur}' driving at ${vehicle || 'car'} pace — a comfortable one-day run. Leave mid-morning and you're there with light to spare.`;
+    // BRIEF-TRIM (driver veto, 8 Aug): facts only — no pacing/comfort/departure colour.
+    return `${head} ${route.km} km, about ${dur}' driving at ${vehicle || 'car'} pace.`;
   }
   return `${head} ${route.km} km, about ${dur}' driving at ${vehicle || 'car'} pace — call it ${days} days, roughly ${Math.round(route.km / days)} km a day.`;
 }
