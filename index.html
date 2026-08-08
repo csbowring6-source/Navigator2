@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 01:23 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 01:53 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-0123PM"></script>
+<script src="speech.js?v=08Aug2026-0153PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2209,10 +2209,48 @@ let routeLine = null;
 // ── OPTION PINS — show the servos/places we just offered, numbered, on the map ──
 let optionPins = [];
 
+// MAP-READABLE stalks (field 9 Aug): pins overlapping at the rendered zoom fan out
+// radially around their true location, each on a thin leader line back to its real
+// spot — some sites are genuinely co-located, so no zoom can ever separate them.
+// Leaflet (our map layer) has no built-in spiderfy — that's the markercluster
+// plugin, an external script we don't ship — so this is HAND-ROLLED displacement:
+// group pins within OVERLAP_PX at the current zoom, spread each group evenly on a
+// FAN_PX circle, stalk from true spot → shown spot. Re-run on every zoom (zooming
+// in can un-overlap: members snap home, stalks go). Icons, popups and taps are the
+// SAME objects — a fanned pin is a normal pin, just displaced.
+const OVERLAP_PX = 30;   // ≈ one 28px number circle — closer than this is unreadable
+const FAN_PX = 36;       // stalk length: clear separation, still obviously "here"
+let optionLeaders = [];  // the stalk polylines — cleared with the pins
+function spreadOverlappingPins() {
+  const map = window._navMap;
+  if (!map || !window.L || !optionPins.length) return;
+  optionLeaders.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+  optionLeaders = [];
+  const ents = optionPins.map(m => ({ m, pt: map.latLngToLayerPoint(m._trueLatLng) }));
+  const used = new Array(ents.length).fill(false);
+  for (let i = 0; i < ents.length; i++) {
+    if (used[i]) continue;
+    const group = [i]; used[i] = true;
+    for (let j = i + 1; j < ents.length; j++) {
+      if (!used[j] && ents[i].pt.distanceTo(ents[j].pt) < OVERLAP_PX) { group.push(j); used[j] = true; }
+    }
+    if (group.length === 1) { ents[i].m.setLatLng(ents[i].m._trueLatLng); continue; }   // alone → home, no stalk
+    group.forEach((gi, k) => {
+      const e = ents[gi];
+      const ang = (2 * Math.PI * k) / group.length - Math.PI / 2;
+      const ll = map.layerPointToLatLng(L.point(e.pt.x + FAN_PX * Math.cos(ang), e.pt.y + FAN_PX * Math.sin(ang)));
+      e.m.setLatLng(ll);
+      optionLeaders.push(L.polyline([e.m._trueLatLng, ll], { color: '#5A6C80', weight: 1, opacity: 0.6, interactive: false }).addTo(map));
+    });
+  }
+}
+
 function clearOptionPins() {
-  if (!window._navMap) { optionPins = []; return; }
+  if (!window._navMap) { optionPins = []; optionLeaders = []; return; }
   optionPins.forEach(p => { try { window._navMap.removeLayer(p); } catch(e) {} });
+  optionLeaders.forEach(l => { try { window._navMap.removeLayer(l); } catch(e) {} });
   optionPins = [];
+  optionLeaders = [];
 }
 
 // places: [{name, km, price, lat, lon}] — first is the "pick" (amber), rest muted
@@ -2264,9 +2302,15 @@ function showOptionPins(places) {
     m.bindPopup(popupHtml, { closeButton: true, autoPan: true });
     // Explicit tap handler — divIcons on touch don't always fire the default popup
     m.on('click', function(){ this.openPopup(); });
+    m._trueLatLng = [p.lat, p.lon];   // MAP-READABLE: the real spot — stalks lead back here
     optionPins.push(m);
     pts.push([p.lat, p.lon]);
   });
+  // MAP-READABLE: fan out whatever overlaps at this zoom, and keep it right as the
+  // driver zooms (named handler — off/on stays idempotent across renders).
+  spreadOverlappingPins();
+  window._navMap.off('zoomend', spreadOverlappingPins);
+  window._navMap.on('zoomend', spreadOverlappingPins);
   // Auto-fit so all options AND the driver are visible. The map may still be
   // hidden (toggle not tapped) — remember the bounds so toggleMapView can re-fit
   // once the container actually has a size.
