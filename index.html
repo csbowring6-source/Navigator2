@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:58 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:06 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1158AM"></script>
+<script src="speech.js?v=08Aug2026-1206PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1703,6 +1703,17 @@ function offerMap() {   // results exist — show the toggle, leave the map clos
   btn.style.display = '';
   const open = document.getElementById('mapWrap')?.style.display !== 'none';
   btn.textContent = open ? '✕ Map' : '🗺 Map';
+}
+// MAP-OPEN-VOICE: the demo slice of map-by-voice — open and close ONLY (zoom,
+// ordinals and steering stay parked). Full-match style like the close words: the
+// phrase must BE the utterance (short, optional courtesy tail), so neither command
+// can trigger inside a longer sentence, and bare "close" stays end-the-session.
+function matchMapCommand(text) {
+  const t = cleanTranscript(text || '').toLowerCase().replace(/[.!?,\s]+$/, '').trim();
+  if (t.length > 30) return null;
+  if (/^(?:show (?:me )?the map|show map|open the map)(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'open';
+  if (/^(?:close the map|hide the map)(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'close';
+  return null;
 }
 function toggleMapView() {
   const mw = document.getElementById('mapWrap');
@@ -5392,6 +5403,26 @@ async function _sendMessageInner(silent){
   if (window.Voice && Voice.resumeSpeech && Voice.resumeSpeech(text)) {
     inp.value=''; inp.style.height='auto';
     addMsg('user', text);
+    return;
+  }
+
+  // MAP-OPEN-VOICE: deterministic map open/close, tried BEFORE the close words —
+  // "close the map" is its own full phrase and must never read as end-the-session —
+  // and before any AI routing. Does exactly what the Map button does, nothing more;
+  // the session (if open) is untouched, so the whole round trip stays hands-free.
+  const mapCmd = matchMapCommand(text);
+  if (mapCmd) {
+    inp.value=''; inp.style.height='auto';
+    addMsg('user', text);
+    const mbtn = document.getElementById('mapToggle');
+    if (!mbtn || mbtn.style.display === 'none') {
+      // The button isn't offered = the map has nothing to show — honest, no empty view.
+      const m = 'Nothing on the map yet — ask for camps or fuel first.';
+      addMsg('nav', m); lastSpoken = m; speak(m);
+      return;
+    }
+    const mapOpen = document.getElementById('mapWrap')?.style.display !== 'none';
+    if (mapCmd === 'open' ? !mapOpen : mapOpen) toggleMapView();   // already there → nothing to do
     return;
   }
 

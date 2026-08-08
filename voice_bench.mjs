@@ -1467,5 +1467,22 @@ check("…and the second tap SENDS (one-shot endpoint unchanged)", !Voice.isCapt
 check("wiring pins hold: home mic + round mic → toggleCapture, Hands-free → micTap", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc) && /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc) && /id="wakeBtn"[^>]*onclick="Voice\.micTap\(\)"/.test(indexSrc));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
+// ── SCENARIO 37: MAP-OPEN-VOICE — the map phrases pass THROUGH the session, alive ─
+console.log("\n--- 37. MAP-OPEN-VOICE: 'close the map' is app business — the session survives; bare 'close' still ends it ---");
+RIG.reset(); RIG.enable(); Voice2.clearLog(); delivered2 = 0;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("close the map");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("'close the map' DELIVERS to the app (not a close word) — session STAYS open", delivered2 === 1 && Voice2.isSessionOpen() && !kinds2().some(k => k.startsWith("cs.close")));
+Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();   // the app's reply → window reopens
+RIG.transcripts.push("show me the map");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("'show me the map' delivers too — the whole round trip is hands-free", delivered2 === 2 && Voice2.isSessionOpen());
+Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();
+RIG.transcripts.push("close");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("bare 'close' still ENDS the session, untouched", kinds2().includes("cs.close:phrase") && !Voice2.isSessionOpen() && delivered2 === 2);
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);
