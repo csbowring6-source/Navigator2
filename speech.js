@@ -610,9 +610,9 @@ function convoFailHonestly() { closeConversation('honest'); }
 // (the in-row one-shot mic, grouped with Hands-free on the left) is a NEUTRAL tap
 // target — it never reports state, setMicState does — and setVoiceStatus/setListeningUI are gone.
 let micState = 'off';   // 'off' | 'listening' | 'recording' | 'thinking' | 'speaking'
-const MIC_META = {      // state → [driver word, colour] (MIC-WORDS: plain language only)
-  off:       ['Tap to talk', 'red'], listening: ['I can hear you', 'green'], recording: ['I can hear you', 'green'],
-  thinking:  ['Wait…', 'amber'], speaking: ['Wait…', 'amber'],
+const MIC_META = {      // state → [driver word, colour] (LABELS-TRIM: two labels only)
+  off:       ['Tap to talk', 'red'], listening: ['Listening', 'green'], recording: ['Listening', 'green'],
+  thinking:  ['', 'amber'], speaking: ['', 'amber'],
 };
 function setMicState(state) {
   if (!MIC_META[state]) state = 'off';
@@ -627,14 +627,14 @@ function setMicState(state) {
   // and the pulse ride in the classes); idle INSTRUCTS (tap to talk). This drops the
   // old "· tap to send / tap to close" engine hint — too long for the in-row button — but
   // the tap still does the right thing (micTap), and the colour + word carry the state.
-  // MIC-WORDS (MIC-SIMPLE step 2): plain driver language, identical everywhere — the
-  // state words Listening/Recording/Thinking/Speaking are gone from every surface.
-  // hearing → "I can hear you" · busy → "Wait…" · closed → "Tap to talk" (an
-  // INSTRUCTION, not a feature name — a first-time driver knows what to do untold).
+  // LABELS-TRIM (driver ruling, 9 Aug): TWO labels only, glanceable — hearing →
+  // "Listening" · closed → "Tap to talk" (the instruction). The busy amber state is
+  // WORDLESS: the field read "Wait…" as "white" ("I'm not waiting for anything");
+  // the amber colour + pulse carry it alone, the glyph stays.
   let label;
   if (state === 'off') label = '🎙 Tap to talk';
-  else if (state === 'recording' || state === 'listening') label = '🎙 I can hear you';
-  else /* thinking | speaking */ label = '🎙 Wait…';
+  else if (state === 'recording' || state === 'listening') label = '🎙 Listening';
+  else /* thinking | speaking */ label = '🎙';
   const cls = state === 'off' ? 'convo-off' : (state === 'thinking' || state === 'speaking') ? 'convo-busy' : 'convo-on';
   // GREEN-SIGNAL (MIC-SIMPLE step 1): ONE rule — GREEN MEANS IT CAN HEAR YOU. The binary
   // (mic-hearing = listening+recording collapsed · mic-busy = thinking/speaking ·
@@ -1719,7 +1719,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 12:50 PM AEST',
+    BUILD: '08 Aug 2026, 01:07 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

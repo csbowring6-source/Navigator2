@@ -387,17 +387,17 @@ check("speak() pauses the silence + offer clocks while the app speaks",
   /convoSpeaking = true; convoStopRecogniser\(\);[\s\S]{0,600}?clearTimeout\(convoSilenceTimer\); clearTimeout\(convoOfferTimer\);/.test(SRC));
 
 // ── SCENARIO 11: the compact in-row button INSTRUCTS idle ('🎙 Tap to talk') and answers the
-// driver's one question live ('🎙 I can hear you' / '🎙 Wait…'). Folded into the input row, so the label
+// driver's one question live ('🎙 Listening'; busy amber is WORDLESS). Folded into the input row, so the label
 // is a state word only (colour rides in the class); the WORD must change between idle and open.
-console.log("\n--- 11. in-row label: '🎙 Tap to talk' idle, '🎙 I can hear you' when a session is open ---");
+console.log("\n--- 11. in-row label: '🎙 Tap to talk' idle, '🎙 Listening' when a session is open ---");
 Voice.closeSession("tap");   // force setMicState('off') -> writes the idle label
 const idleLabel = el("wakeBtn").textContent;
 check("idle button INSTRUCTS: '🎙 Tap to talk'", idleLabel === "🎙 Tap to talk", idleLabel);
 fresh(); timers.length = 0;
 Voice.openSession(); rec.onstart();   // session open, listening
 const openLabel = el("wakeBtn").textContent;
-check("open session reads '🎙 I can hear you'", openLabel === "🎙 I can hear you" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
-check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Tap to talk/.test(idleLabel) && /I can hear you/.test(openLabel));
+check("open session reads '🎙 Listening'", openLabel === "🎙 Listening" && Voice.isSessionOpen() && Voice.state() === "listening", openLabel);
+check("the WORD changes between idle and open, not colour alone", idleLabel !== openLabel && /Tap to talk/.test(idleLabel) && /Listening/.test(openLabel));
 Voice.closeSession("tap");
 check("returns to '🎙 Tap to talk' idle after close", el("wakeBtn").textContent === "🎙 Tap to talk");
 check("Voice.canHandsFree() is exposed and true under a supporting engine", Voice.canHandsFree() === true);
@@ -408,10 +408,10 @@ check("Voice.canHandsFree() is exposed and true under a supporting engine", Voic
 Voice.closeSession("tap");
 check("state OFF → '🎙 Tap to talk'", el("wakeBtn").textContent === "🎙 Tap to talk", el("wakeBtn").textContent);
 fresh(); timers.length = 0; Voice.openSession(); rec.onstart();
-check("state LISTENING → '🎙 I can hear you'", el("wakeBtn").textContent === "🎙 I can hear you", el("wakeBtn").textContent);
+check("state LISTENING → '🎙 Listening'", el("wakeBtn").textContent === "🎙 Listening", el("wakeBtn").textContent);
 Voice.speak("here are three camps near Innisfail"); tts.start();   // TTS onstart → 'speaking'
-check("state SPEAKING → '🎙 Wait…'", el("wakeBtn").textContent === "🎙 Wait…" && Voice.state() === "speaking", el("wakeBtn").textContent);
-check("the words Listening/Recording/Thinking/Speaking are GONE from every label (source)", !/label = '🎙 (Listening|Recording|Thinking|Speaking)'/.test(SRC) && !/🎙 Hands-free/.test(SRC) && !/🎙 Hands-free/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
+check("state SPEAKING is WORDLESS amber — glyph only", el("wakeBtn").textContent === "🎙" && Voice.state() === "speaking", el("wakeBtn").textContent);
+check("the retired words are GONE from every label: no Wait, no I-can-hear-you, no state jargon (source)", !/label = '🎙 (Recording|Thinking|Speaking|Wait|I can hear you)'/.test(SRC) && !/🎙 Hands-free/.test(SRC) && !/🎙 Hands-free/.test(fs.readFileSync(new URL("./index.html", import.meta.url), "utf8")));
 tts.end(); Voice.closeSession("tap");
 
 // ── SCENARIO 11b: dock compaction — the mic word lives ONLY in the button; the separate
