@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:42 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:50 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1242PM"></script>
+<script src="speech.js?v=08Aug2026-1250PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1717,6 +1717,19 @@ function matchMapCommand(text) {
   // "map", so a close word with the noun can NEVER end the session.)
   if (/^(?:close|shut|hide) (?:the )?map(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'close';
   return null;
+}
+// MAP-EARS (field 9 Aug): the map is zero-consequence, so hearing is GENEROUS — any
+// SHORT utterance containing a map-like word ("map", plus the observed field mishears
+// "mat"/"mep" as whole words) TOGGLES the map: up when down, down when up. ≤6 words
+// after the courtesy tail is dropped; longer map-mentioning sentences are real
+// requests and route normally. Tried LAST among the deterministic gates (ordinals,
+// close words, carry-on and the directional show/hide all claim first) — see the
+// gate in sendMessage — so it catches only what nothing else wanted.
+function isMapMention(text) {
+  const t = cleanTranscript(text || '').toLowerCase().replace(/[.!?,]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/\s+(?:please|mate|thanks|thank you|now)$/, '');
+  if (!/\b(?:maps?|mat|mep)\b/.test(t)) return false;
+  return t.split(' ').length <= 6;
 }
 function toggleMapView() {
   const mw = document.getElementById('mapWrap');
@@ -5766,6 +5779,23 @@ async function _sendMessageInner(silent){
   if (handleNavigateBooked(text)) { inp.value=''; inp.style.height='auto'; return; }
   // "give me the number for X" — a listed site's STORED number (never re-parsed).
   if (await handleNumberRequest(text)) { inp.value=''; inp.style.height='auto'; return; }
+
+  // MAP-EARS: the generous map TOGGLE — deliberately the LAST deterministic gate, so
+  // ordinals ("number three on the map"), close words, carry-on and the directional
+  // show/hide all claim first; this catches the brief mentions and mishears nothing
+  // else wanted ("map", "hold map", "hide mat", "this is mep"). Zero stakes: toggle.
+  if (isMapMention(text)) {
+    inp.value=''; inp.style.height='auto';
+    addMsg('user', text);
+    const mbtn2 = document.getElementById('mapToggle');
+    if (!mbtn2 || mbtn2.style.display === 'none') {
+      const m = 'Nothing on the map yet — ask for camps or fuel first.';
+      addMsg('nav', m); lastSpoken = m; speak(m);
+      return;
+    }
+    toggleMapView();   // up when down, down when up — the button's exact path
+    return;
+  }
 
   // A destination statement sets or updates the trip — no AI round-trip needed.
   const trip = parseTripIntent(text, { currentDest: currentRunDest });
