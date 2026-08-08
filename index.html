@@ -536,7 +536,7 @@
   </div>
   <div class="header-right">
     <!-- Map show/hide moved UP from the old second row; hidden until a query returns mappable results (offerMap) -->
-    <button class="appview-back" id="mapToggle" onclick="toggleMapView()" style="display:none;">🗺 Map</button>
+    <button class="appview-back" id="mapToggle" onclick="toggleMapView()" style="display:none;">🗺 🎙 Show</button>
     <div class="map-picker" id="mapPicker">
       <button class="map-btn" onclick="toggleMapMenu()">
         <span id="mapIcon">🗺</span> <span id="mapLabel" class="map-label-text">Apple Maps</span> ▾
@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:06 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:26 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1206PM"></script>
+<script src="speech.js?v=08Aug2026-1226PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1702,7 +1702,7 @@ function offerMap() {   // results exist — show the toggle, leave the map clos
   if (!btn) return;
   btn.style.display = '';
   const open = document.getElementById('mapWrap')?.style.display !== 'none';
-  btn.textContent = open ? '✕ Map' : '🗺 Map';
+  btn.textContent = open ? '🗺 🎙 Hide' : '🗺 🎙 Show';
 }
 // MAP-OPEN-VOICE: the demo slice of map-by-voice — open and close ONLY (zoom,
 // ordinals and steering stay parked). Full-match style like the close words: the
@@ -1711,8 +1711,11 @@ function offerMap() {   // results exist — show the toggle, leave the map clos
 function matchMapCommand(text) {
   const t = cleanTranscript(text || '').toLowerCase().replace(/[.!?,\s]+$/, '').trim();
   if (t.length > 30) return null;
-  if (/^(?:show (?:me )?the map|show map|open the map)(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'open';
-  if (/^(?:close the map|hide the map)(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'close';
+  if (/^(?:show (?:me )?(?:the )?map|open the map)(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'open';
+  // MAP-HIDE: the whole close FAMILY with the noun — "hide/close/shut [the] map" — is
+  // hide-the-map. (The session-close block separately refuses any utterance containing
+  // "map", so a close word with the noun can NEVER end the session.)
+  if (/^(?:close|shut|hide) (?:the )?map(?:[\s,]+(?:please|mate|now))?$/.test(t)) return 'close';
   return null;
 }
 function toggleMapView() {
@@ -1721,10 +1724,10 @@ function toggleMapView() {
   if (!mw) return;
   if (mw.style.display !== 'none') {
     mw.style.display = 'none';
-    if (btn) btn.textContent = '🗺 Map';
+    if (btn) btn.textContent = '🗺 🎙 Show';
   } else {
     revealMap();
-    if (btn) btn.textContent = '✕ Map';
+    if (btn) btn.textContent = '🗺 🎙 Hide';
     // Fit the pins now the container has real size — a hidden map can't measure.
     if (window._navMap && window._optionFit) {
       try { window._navMap.fitBounds(window._optionFit, { padding: [40,40], maxZoom: 14 }); } catch(e) {}
@@ -5219,7 +5222,7 @@ function resetConversation() {
   const ui = document.getElementById('userInput'); if (ui) ui.value = '';
   document.getElementById('chatArea').innerHTML = '<div class="welcome" id="welcome"></div>';
   const mw = document.getElementById('mapWrap'); if (mw) mw.style.display = 'none';   // map back to wallpaper
-  const mt = document.getElementById('mapToggle'); if (mt) { mt.style.display = 'none'; mt.textContent = '🗺 Map'; }
+  const mt = document.getElementById('mapToggle'); if (mt) { mt.style.display = 'none'; mt.textContent = '🗺 🎙 Show'; }
   window._optionFit = null;
   busy = false;
   document.getElementById('sendBtn').disabled = false;
@@ -5426,8 +5429,10 @@ async function _sendMessageInner(silent){
     return;
   }
 
-  // "Close" / "that's all" — end a conversation session without a round-trip
-  if (/^(close|that'?s all|that is all|i'?m (all )?(done|finished)|finished|stop listening|goodbye|bye|thanks that'?s all)\b/i.test(text)) {
+  // "Close" / "that's all" — end a conversation session without a round-trip.
+  // MAP-HIDE guard: "map" anywhere in the utterance means the map is the subject —
+  // a close-family word can then never end the session (one word, one job).
+  if (/^(close|that'?s all|that is all|i'?m (all )?(done|finished)|finished|stop listening|goodbye|bye|thanks that'?s all)\b/i.test(text) && !/\bmap\b/i.test(text)) {
     inp.value=''; inp.style.height='auto';
     if (Voice.isSessionOpen()) Voice.closeSession('phrase');
     else { const bye = 'Tap to talk.'; addMsg('nav', bye); lastSpoken = bye; speak(bye); }
