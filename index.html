@@ -599,7 +599,7 @@
 <!-- HOME SCREEN (SPEC §10) — greeting · guidance · big mic · trip card · solo -->
 <div id="homeScreen">
   <div class="solo-badge" id="soloBadge">🧍 Solo mode</div>
-  <div class="home-greeting" id="homeGreeting">G'day.</div>
+  <div class="home-greeting" id="homeGreeting">Where are we going?</div>
   <div class="home-guide">
     <div class="home-guide-lead" id="homeGuideLead"><b>Navigator thinks — your sat-nav steers.</b> Ask out loud for what's ahead; I find it, then hand the driving to your sat-nav.</div>
     <div class="home-eg-row">“Find me a campsite within the next hour along my route.”</div>
@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:42 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 11:58 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1142AM"></script>
+<script src="speech.js?v=08Aug2026-1158AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1629,33 +1629,16 @@ function handsFreeTipDueNow(voiceTurn, sessionOpen, canHandsFree, everUsed, show
   return !!(voiceTurn && !sessionOpen && canHandsFree && !everUsed && !shownThisSession);
 }
 
-// ── LIVING GREETING — place, weather, time and name, composed fresh ───────────
+// ── GREETING — your name and the navigator's question, nothing else (driver veto
+// 9 Aug: the scenery/weather colour and the old open-ended question are gone — this
+// app is about going. Translatable words only; the time-of-day word is the ONE variable) ──
 function updateGreeting() {
   const el = document.getElementById('homeGreeting');
   if (!el) return;
   const name = (userName && userName !== 'there') ? userName : '';
   const h = new Date().getHours();
-  const tod = h < 12 ? 'morning' : (h < 17 ? 'arvo' : 'evening');
-  let place = '';
-  if (gpsAddress) place = gpsAddress.replace(' (manual)','').split(',')[0].trim();
-  if (place && /^-?\d/.test(place)) place = ''; // raw coordinates are not a place name
-  const wx = window._wx;
-  const ps = place ? '<span>' + place + '</span>' : '';
-  let msg;
-  if (h < 5) {
-    msg = `Burning the midnight oil${name ? ', ' + name : ''} — what are we planning?`;
-  } else if (wx && place) {
-    if (/rain|drizzle|thunder/i.test(wx.desc)) msg = `Wet one in ${ps} today${name ? ', ' + name : ''} — where are we headed?`;
-    else if (wx.temp >= 33) msg = `Scorcher in ${ps} today${name ? ', ' + name : ''} — what's the plan?`;
-    else if (wx.wind >= 30) msg = `Blowy out in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-    else if (/clear|sun/i.test(wx.desc)) msg = `Another beautiful ${tod} in ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-    else msg = `G'day${name ? ' ' + name : ''} — ${tod} in ${ps}. What are we up to?`;
-  } else if (place) {
-    msg = `Good ${tod} from ${ps}${name ? ', ' + name : ''} — what are we up to?`;
-  } else {
-    msg = `Good ${tod}${name ? ', ' + name : ''} — what are we up to today?`;
-  }
-  el.innerHTML = msg;
+  const tod = h < 12 ? 'Morning' : (h < 17 ? 'Afternoon' : 'Evening');
+  el.textContent = `${tod}${name ? ', ' + name : ''}. Where are we going?`;
 }
 
 // ── HOME / APP-VIEW SWITCHING (SPEC §10 — no idle map, no welcome overlay) ────
