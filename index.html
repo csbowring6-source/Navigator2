@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:26 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 08 Aug 2026, 12:42 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=08Aug2026-1226PM"></script>
+<script src="speech.js?v=08Aug2026-1242PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1729,10 +1729,36 @@ function toggleMapView() {
     revealMap();
     if (btn) btn.textContent = '🗺 🎙 Hide';
     // Fit the pins now the container has real size — a hidden map can't measure.
-    if (window._navMap && window._optionFit) {
+    // MAP-FRAME: a live camps round frames on ITS pins (the choosing happens there);
+    // otherwise today's default fit, unchanged.
+    if (!frameCampRound() && window._navMap && window._optionFit) {
       try { window._navMap.fitBounds(window._optionFit, { padding: [40,40], maxZoom: 14 }); } catch(e) {}
     }
   }
+}
+
+// MAP-FRAME (driver request, 9 Aug): with a camps round active the map's job is
+// choosing between the NUMBERED pins, so the open framing fits the ROUND's sites
+// only — the driver's own position may fall off-screen (they know where they are).
+// Legibility rule: if fitting every pin would land below CAMP_FRAME_MIN_ZOOM (a far
+// outlier dragging the view out until the 28px numbers collide), we hold the floor
+// zoom centred on the cluster and let the outlier slide off — number-legibility
+// beats fitting every pin. Leaflet gives us fitBounds/getBoundsZoom with padding
+// and a maxZoom cap; we compute with getBoundsZoom (40px padding) and place with
+// setView, clamped to [floor 11, cap 14] (14 = the app's existing fit cap).
+const CAMP_FRAME_MIN_ZOOM = 11;
+const CAMP_FRAME_MAX_ZOOM = 14;
+function frameCampRound() {
+  if (!window._navMap || !window.L) return false;
+  if (!(campRound && campRound.sites && campRound.sites.length)) return false;
+  const pts = campRound.sites.filter(s => s.lat && s.lon).map(s => [s.lat, s.lon]);
+  if (!pts.length) return false;
+  try {
+    const b = L.latLngBounds(pts);
+    const fit = window._navMap.getBoundsZoom(b, false, L.point(40, 40));
+    window._navMap.setView(b.getCenter(), Math.max(CAMP_FRAME_MIN_ZOOM, Math.min(fit, CAMP_FRAME_MAX_ZOOM)));
+    return true;
+  } catch(e) { return false; }
 }
 
 // Trip card on home — the live trip with a resume, or hidden (SPEC §10).
