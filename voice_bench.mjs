@@ -37,7 +37,11 @@ class MockSR {
   stop() { H.stopped++; if (this.onend) {/* real engines fire onend async; tests fire it explicitly */} }
   abort() { H.stopped++; }
 }
-class MockUtt { constructor(t) { this.text = t; this.onstart = null; this.onend = null; this.onerror = null; } }
+// CLOSE-ORDER: H.utt is captured at CONSTRUCTION, not at synth.speak — the clip pad
+// defers the hand-off by 250ms (fake time), but the utterance (and its handlers, which
+// tts.start()/tts.end() drive) exists the moment speak() runs. synth.speak stays as a
+// redundant capture for direct-utterance paths (the offers, unlockAudio).
+class MockUtt { constructor(t) { this.text = t; this.onstart = null; this.onend = null; this.onerror = null; H.utt = this; } }
 const synth = {
   _cancels: 0,
   cancel() { this._cancels++; },
@@ -226,6 +230,7 @@ for (const reason of ["tap", "phrase", "silence", "honest"]) {
   fresh();
   Voice.openSession(); rec.onstart();
   Voice.closeSession(reason);
+  if (reason === "phrase" || reason === "silence") { tts.start(); tts.end(); }   // CLOSE-ORDER: words first, then the cue
   check(reason + ": one open cue at start + one close cue + state off", countCue("open") === 1 && countCue("close") === 1 && Voice.state() === "off");
 }
 
@@ -380,6 +385,7 @@ check("session open through the reopen tail, still no close", Voice.isSessionOpe
 to(97.0);                                 // > tts.end(50.1)+tail(0.6)+45s -> honest silence close
 check("closes only after GENUINE driver silence afterwards", kinds().some(k => k === "close:silence"));
 check("session is closed at the end", Voice.isSessionOpen() === false);
+tts.start(); tts.end();   // CLOSE-ORDER: the silence close's sign-off completes → cue last
 check("exactly one close cue for the whole session", countCue("close") === 1);
 check("open cues only at the two turn-starts (session open + the post-reply reopen), none mid-reply", countCue("open") === 2);
 // source-lock the fix: speak() clears BOTH session-lifetime timers as the reply begins
@@ -800,6 +806,7 @@ check("CUES: a repeat close never re-fires the cue (once per session)", cue2("cl
 Voice2.openSession(); await RIG.settle();
 check("CUES: a fresh session earns a fresh open cue (guard re-armed)", cue2("open") === 3 && Voice2.isSessionOpen());
 Voice2.closeSession("phrase");
+tts.start(); tts.end();   // CLOSE-ORDER
 check("CUES: close cue once for the phrase close too (cs.close:phrase logged)", cue2("close") === 2 && kinds2().includes("cs.close:phrase"));
 mockNavigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });   // restore
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
@@ -847,6 +854,7 @@ advance(21000); await RIG.settle();            // the offer nudges again …
 tts.end(); advance(700); await RIG.settle();   // … finishes + tail
 advance(30000); await RIG.settle();            // … and the 45s (from the last speech) runs out
 check("45s of driver silence closed the session with its reason (cs.close:silence)", kinds2().includes("cs.close:silence") && Voice2.isSessionOpen() === false && Voice2.state() === "off");
+tts.start(); tts.end();   // CLOSE-ORDER
 check("CUES: exactly one close cue for the silence close", cue2("close") === closeCuesBefore + 1);
 // voiced-time artefact rule — both ways (a fresh session)
 Voice2.clearLog(); RIG.reset(); delivered2 = 0; rafQueue.length = 0; timers.length = 0;
@@ -1031,6 +1039,7 @@ RIG.transcripts.push("No thanks.");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
 check("cloud: 'No thanks.' to the offer CLOSES the session (cs.close:offer-no, offer:no logged)", kinds2().includes("offer:no") && kinds2().includes("cs.close:offer-no") && !Voice2.isSessionOpen() && Voice2.state() === "off");
 check("cloud: the negative never reached _onTranscript (one delivered turn total)", delivered2 === 1);
+tts.start(); tts.end();   // CLOSE-ORDER
 check("cloud: exactly ONE close cue", cue2("close") === 1);
 check("cloud: the sign-off spoken in the established voice", H.utt && /^Tap to talk\.$/.test(H.utt.text));
 // (b) CLOUD: a SUBSTANTIVE answer to the offer stays a normal turn (the field-good path)
@@ -1061,6 +1070,7 @@ Voice.speak("Cheapest is BP Tully."); tts.start(); tts.end(); advance(700);   //
 advance(20100);                                            // the offer fires
 tts.end(); advance(700);                                   // "Anything else?" done → mic resumes
 rec.onstart(); rec.speech(); rec.final("no"); advance(2800); advance(700);
+tts.start(); tts.end();   // CLOSE-ORDER: the sign-off completes, THEN the cue
 check("convo: 'no' to the offer CLOSES (close:offer-no + offer:no), one cue, sign-off", kinds().includes("offer:no") && kinds().includes("close:offer-no") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text));
 check("convo: the negative never delivered (one turn total)", delivered === 1);
 timers.length = 0; rafQueue.length = 0;
@@ -1070,10 +1080,12 @@ console.log("\n--- 26. wording: cs phrase + silence closes speak the sign-off (c
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
 Voice2.closeSession("phrase");
+tts.start(); tts.end();   // CLOSE-ORDER
 check("cs PHRASE close: cs.close:phrase + ONE cue + the sign-off spoken", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
 advance(45100); await RIG.settle();                       // genuine 45s driver silence
+tts.start(); tts.end();   // CLOSE-ORDER
 check("cs SILENCE close: cs.close:silence + ONE cue + the sign-off spoken", kinds2().includes("cs.close:silence") && cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
@@ -1094,6 +1106,7 @@ Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enab
 Voice2.openSession(); await RIG.settle();
 RIG.transcripts.push("end chat");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+tts.start(); tts.end();   // CLOSE-ORDER
 check("cloud: 'end chat' CLOSES mid-session (cs.close:phrase, one cue, sign-off, not delivered)", kinds2().includes("cs.close:phrase") && cue2("close") === 1 && !Voice2.isSessionOpen() && delivered2 === 0 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 Voice2.clearLog(); RIG.reset(); delivered2 = 0; H.utt = null;
 Voice2.openSession(); await RIG.settle();
@@ -1112,6 +1125,7 @@ Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0;
 Voice.onTranscript(() => { delivered++; });
 Voice.openSession(); rec.onstart();
 rec.speech(); rec.final("end chat"); advance(2800); advance(700);
+tts.start(); tts.end();   // CLOSE-ORDER
 check("convo: 'end chat' CLOSES (close:phrase, one cue, sign-off)", kinds().includes("close:phrase") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text) && delivered === 0);
 fresh(); timers.length = 0;
 Voice.openSession(); rec.onstart();
@@ -1198,6 +1212,7 @@ check("first ✕ still cancels normally (fresh window, session open)", kinds2().
 advance(700); await RIG.settle();
 Voice2.cancelCapture();                                   // second ✕, 0.7s later → OUT
 check("second quick ✕ CLOSES with its own reason (cs.close:x-escape)", kinds2().includes("cs.close:x-escape") && !Voice2.isSessionOpen() && Voice2.state() === "off");
+tts.start(); tts.end();   // CLOSE-ORDER
 check("x-escape: ONE close cue + the sign-off", cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
 check("x-escape: only the FIRST press logged a cancel (no blip spam on the second)", kinds2().filter(k => k === "cancel:tap-session").length === 1);
 // (b) a DELIVERED turn resets the pattern: ✕ → turn delivers → ✕ 2.5s after the first → normal cancel
@@ -1224,6 +1239,7 @@ for (let press = 1; press <= 7; press++) {
   advance(700); await RIG.settle();
 }
 check("field replay: the session closed on the SECOND press", closedAtPress === 2, "closed at press " + closedAtPress);
+tts.start(); tts.end();   // CLOSE-ORDER: press 2's sign-off completes → its cue
 check("field replay: presses 3–7 were harmless no-ops (one close, one cue, no extra logs)", kinds2().filter(k => k.startsWith("cs.close:x-escape")).length === 1 && cue2("close") === 1);
 // (d) CONVO: the shared seam — two quick session-cancels close there too
 Voice.closeSession("tap"); fresh(); timers.length = 0; rafQueue.length = 0; H.utt = null;
@@ -1233,6 +1249,7 @@ Voice.cancelCapture();                                    // first: normal sessi
 check("convo: first ✕ cancels normally (session open)", kinds().includes("cancel:tap-session") && Voice.isSessionOpen());
 advance(700);
 Voice.cancelCapture();                                    // second, 0.7s later
+tts.start(); tts.end();   // CLOSE-ORDER
 check("convo: second quick ✕ closes (close:x-escape, one cue, sign-off)", kinds().includes("close:x-escape") && countCue("close") === 1 && !Voice.isSessionOpen() && /^Tap to talk\.$/.test(H.utt.text));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
@@ -1482,6 +1499,37 @@ Voice2.speak("Done."); tts.start(); tts.end(); advance(700); await RIG.settle();
 RIG.transcripts.push("close");
 await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
 check("bare 'close' still ENDS the session, untouched", kinds2().includes("cs.close:phrase") && !Voice2.isSessionOpen() && delivered2 === 2);
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
+// ── SCENARIO 38: CLOSE-ORDER — words first, the goodbye tone LAST; the clip pad ─
+console.log("\n--- 38. CLOSE-ORDER: no cue until the sign-off completes; tap stays cue-only; the 250ms pad ---");
+Voice2.cancelSpeech();   // clear any pending cue-after-speak from earlier scenarios
+// (a) CLOUD phrase close: the cue waits for the words
+RIG.reset(); RIG.enable(); Voice2.clearLog(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+Voice2.closeSession("phrase");
+check("cloud: sign-off begun, NO cue yet — words first", cue2("close") === 0 && H.utt && /^Tap to talk\.$/.test(H.utt.text), "cues=" + cue2("close"));
+tts.start();
+check("cloud: still no cue mid-speech", cue2("close") === 0);
+tts.end();
+check("cloud: the cue fires only after the words complete — the session's LAST sound", cue2("close") === 1);
+// (b) CLOUD tap close: deliberately wordless — cue immediate, unchanged
+Voice2.clearLog(); RIG.reset(); H.utt = null;
+Voice2.openSession(); await RIG.settle();
+Voice2.closeSession("tap");
+check("cloud: tap close stays CUE-ONLY and immediate (no sign-off to wait for)", cue2("close") === 1 && !(H.utt && /Tap to talk/.test(H.utt.text)));
+// (c) CONVO silence close: same order on the fallback engine
+Voice.closeSession("tap"); fresh(); timers.length = 0;
+Voice.openSession(); rec.onstart();
+Voice.closeSession("silence");
+check("convo: silence close — no cue before the words", countCue("close") === 0 && /^Tap to talk\.$/.test(H.utt.text));
+tts.start(); tts.end();
+check("convo: cue after the words on this engine too", countCue("close") === 1);
+// (d) the clip pad: short standalone padded, ordinary replies immediate (source + shape)
+check("pad: 250ms, applied to short cold-route utterances only (source)", SRC.includes("const TTS_LEAD_PAD_MS = 250") && /clean\.length <= 40 && !synth\.speaking/.test(SRC));
+check("pad: ordinary replies hand off immediately (the else branch)", /\} else \{\s*\n\s*synth\.speak\(utt\);/.test(SRC));
+check("pad: a newer speak/cancel kills the pending padded start", /clearTimeout\(_ttsPadTimer\);\s*\n\s*if \(clean\.length <= 40/.test(SRC) && /_closeCueAfterSpeak = false; clearTimeout\(_ttsNextTimer\); clearTimeout\(_ttsPadTimer\)/.test(SRC));
+check("a driver kill silences the pending goodbye cue too (STAYS-SHUT)", /_closeCueAfterSpeak = false;/.test(SRC.slice(SRC.indexOf("function cancelSpeech"))));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));

@@ -574,7 +574,11 @@ function closeConversation(reason) {
   convoRec = null;                       // fresh instance next session; alive across THIS one
   releaseConvoStream();
   setMicState('off');
-  if (wasActive) convoCloseCue();        // audible close cue
+  // CLOSE-ORDER (field 9 Aug): a SPEAKING close says its words FIRST — the falling cue
+  // is the goodbye, so it plays LAST, after the sign-off completes (_afterSpeak fires
+  // it via _closeCueAfterSpeak). Wordless/other closes keep the immediate cue.
+  const signOff = wasActive && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape');
+  if (wasActive && !signOff) convoCloseCue();
   if (reason === 'honest') {
     const m = "Hands-free listening won't hold on this browser — tap the mic for each question.";
     // On-screen diagnostic — the field phone has no reachable console. Small grey
@@ -591,10 +595,12 @@ function closeConversation(reason) {
       const bub = bubbles[bubbles.length - 1];
       if (bub) { const d = document.createElement('div'); d.textContent = diag; d.style.cssText = 'font-size:11px;opacity:0.6;margin-top:4px;'; bub.appendChild(d); }
     }
-  } else if (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape') {
+  } else if (signOff) {
     const m = 'Tap to talk.';
     _allowSignOff = true;   // the close acknowledgment bypasses the shut-up drop-guard once
-    addMsg('nav', m); lastSpoken = m; speak(m);
+    addMsg('nav', m); lastSpoken = m;
+    if (synth) { _closeCueAfterSpeak = true; speak(m); }   // words → then the goodbye tone
+    else { speak(m); convoCloseCue(); }                    // no TTS on this browser — cue alone
   }
 }
 function convoFailHonestly() { closeConversation('honest'); }
@@ -1338,16 +1344,21 @@ function csCloseSession(reason) {
   try { if (csStream) csStream.getTracks().forEach(t => t.stop()); } catch (e) {} csStream = null;
   try { if (csCtx) csCtx.close(); } catch (e) {} csCtx = null;
   setMicState('off');
-  if (was) convoCloseCue();   // the same falling cue, once per session (convoCued guard), any close reason
+  // CLOSE-ORDER: same rule as the convo engine — a speaking close is words FIRST,
+  // falling cue LAST (fired by _afterSpeak); wordless closes (tap etc.) cue now.
+  const csSignOff = was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape');
+  if (was && !csSignOff) convoCloseCue();   // the same falling cue, once per session (convoCued guard)
   logEvent('cs.close', reason + (was ? '' : ' (noop)'));
-  if (was && (reason === 'phrase' || reason === 'silence' || reason === 'offer-no' || reason === 'x-escape')) {
+  if (csSignOff) {
     // A session ends with a short sign-off, never silently (settled design) — the SAME
     // reasons and line as the convo session. Tap stays line-less (a deliberate close);
     // swap/honest speak their own honest lines. The sign-off is a close ACKNOWLEDGMENT,
     // so it bypasses the shut-up drop-guard exactly once.
     const m = 'Tap to talk.';
     _allowSignOff = true;
-    addMsg('nav', m); lastSpoken = m; speak(m);
+    addMsg('nav', m); lastSpoken = m;
+    if (synth) { _closeCueAfterSpeak = true; speak(m); }
+    else { speak(m); convoCloseCue(); }
   }
 }
 
@@ -1581,6 +1592,14 @@ let _ttsQueue = [];        // texts waiting to speak after the current one
 let _ttsActive = false;    // an utterance is playing (or just handed to synth)
 let _queueReplies = false; // while true, a new speak() ENQUEUES instead of cancelling
 let _ttsNextTimer = null;  // deferred play of the next queued reply
+// CLOSE-ORDER: a speaking close's falling cue waits for the sign-off to finish —
+// the goodbye tone is the LAST sound. Cleared by cancelSpeech (a driver kill
+// silences everything, cue included — STAYS-SHUT).
+let _closeCueAfterSpeak = false;
+// CLOSE-ORDER clip protection: SHORT standalone utterances start this much late so a
+// cold speaker route (Bluetooth/cab audio waking up) can't eat the first word.
+const TTS_LEAD_PAD_MS = 250;
+let _ttsPadTimer = null;   // the pending padded start — cleared by any newer speak/cancel
 function queueReplies(on) { _queueReplies = !!on; }
 
 function speak(text) {
@@ -1641,7 +1660,15 @@ function _speakNow(text) {
   utt.onstart = () => { logEvent('tts.start', ''); setMicState('speaking'); };
   utt.onerror = _afterSpeak;
   utt.onend = _afterSpeak;
-  synth.speak(utt);
+  // CLOSE-ORDER clip pad: short standalone utterances (the sign-off family) on a COLD
+  // route start TTS_LEAD_PAD_MS late; ordinary replies (long, or a warm route mid-flow)
+  // start immediately. The pending start dies with any newer speak/cancel.
+  clearTimeout(_ttsPadTimer);
+  if (clean.length <= 40 && !synth.speaking) {
+    _ttsPadTimer = setTimeout(() => synth.speak(utt), TTS_LEAD_PAD_MS);
+  } else {
+    synth.speak(utt);
+  }
 }
 
 // Reply finished (or TTS failed). If more of OUR OWN replies are queued from the
@@ -1657,6 +1684,8 @@ function _afterSpeak() {
     _ttsNextTimer = setTimeout(() => { if (convoActive) { convoSpeaking = true; convoStopRecogniser(); } if (csActive) csSpeaking = true; _speakNow(_ttsQueue.shift()); }, CONVO_TTS_TAIL_MS);
     return;
   }
+  // CLOSE-ORDER: the sign-off just finished — NOW the falling cue, the session's last sound.
+  if (_closeCueAfterSpeak) { _closeCueAfterSpeak = false; convoCloseCue(); }
   if (csActive) {
     // CLOUD session reply finished: stay shut for the tail (speaker decay + room echo),
     // THEN it's genuinely the driver's turn — fresh window (rising cue via the step-4
@@ -1699,7 +1728,7 @@ function _afterSpeak() {
   if (synth) synth.onvoiceschanged = () => synth.getVoices();
 
   // ── PUBLIC API — the ONLY surface index.html may touch ─────────────────────
-  function cancelSpeech() { _ttsQueue = []; _queueReplies = false; _ttsActive = false; clearTimeout(_ttsNextTimer); try { synth && synth.cancel(); } catch (e) {} }
+  function cancelSpeech() { _ttsQueue = []; _queueReplies = false; _ttsActive = false; _closeCueAfterSpeak = false; clearTimeout(_ttsNextTimer); clearTimeout(_ttsPadTimer); try { synth && synth.cancel(); } catch (e) {} }
   // Full voice shutdown for "start again" (was three lines in resetConversation:
   // cancel TTS, stop the basic recogniser if listening, close any live session).
   function voiceReset() {
@@ -1719,7 +1748,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 01:07 PM AEST',
+    BUILD: '08 Aug 2026, 01:23 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
