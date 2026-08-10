@@ -1530,5 +1530,59 @@ check("CLIP-2: kill during the pad → NOTHING reaches the engine, no goodbye cu
 synth.speak = _origSpeak;
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
+// ── SCENARIO 39: CS-IOS-TRIAL (step 10) — Brian's iPhone gets the same ears ─────
+console.log("\n--- 39. CS-IOS: iOS+kit opens CLOUD; kit-absent iOS keeps Web Speech; suspended-ctx resume-on-tap; flatline swaps honestly ---");
+const IOS_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+const iosWin = (Ctx) => ({ speechSynthesis: synth, webkitSpeechRecognition: MockSR, webkitAudioContext: Ctx, get MediaRecorder() { return mockWindow.MediaRecorder; } });   // webkit prefixes only, kit via the shared rig
+const iosNavMake = (onGum) => ({ userAgent: IOS_UA, maxTouchPoints: 5, mediaDevices: { getUserMedia: async () => { if (onGum) onGum(); return { getTracks: () => [{ stop() {} }] }; } }, permissions: { query: async () => ({ state: "granted" }) } });
+// (a) iOS + full kit → the CLOUD session (capability-gated, webkit-prefixed everything)
+RIG.reset(); RIG.enable(); timers.length = 0; rafQueue.length = 0;
+let gumDoneIOS = false, resumedBeforeGum = null;
+class IOSCtx extends MockAudioCtx { resume() { if (resumedBeforeGum === null) resumedBeforeGum = !gumDoneIOS; return super.resume(); } }
+const VoiceIOS = loader2(iosWin(IOSCtx), mockDocument, iosNavMake(() => { gumDoneIOS = true; }), MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+const kindsIOS = () => VoiceIOS.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+VoiceIOS.setBusyGetter(() => false); VoiceIOS.onTranscript(() => {});
+VoiceIOS.openSession(); await RIG.settle();
+check("iOS + kit: the engine pick is CLOUD, session opens (same ears as Android)", kindsIOS().includes("engine:cloud") && kindsIOS().includes("cs.open:session") && VoiceIOS.isSessionOpen());
+check("RESUME-ON-TAP: the context's resume() was CALLED synchronously, BEFORE getUserMedia settled", resumedBeforeGum === true);
+VoiceIOS.closeSession("tap");
+// (b) kit-absent iOS (no MediaRecorder — an older WebKit) → the Web-Speech session
+RIG.disable(); timers.length = 0; rafQueue.length = 0;
+const VoiceIOSb = loader2(iosWin(MockAudioCtx), mockDocument, iosNavMake(null), MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+const kindsIOSb = () => VoiceIOSb.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+VoiceIOSb.setBusyGetter(() => false); VoiceIOSb.onTranscript(() => {});
+VoiceIOSb.openSession();
+check("iOS WITHOUT the kit: Web Speech exactly as before (engine:webspeech, no cs.*)", kindsIOSb().includes("engine:webspeech") && kindsIOSb().includes("open:session") && !kindsIOSb().some(k => k.startsWith("cs.")));
+VoiceIOSb.closeSession("tap");
+// (c) the SUSPENDED-CONTEXT TRAP at open: resume never promotes → deaf VAD → honest swap
+RIG.reset(); RIG.enable(); timers.length = 0; rafQueue.length = 0; H.utt = null;
+class DeadCtx extends MockAudioCtx { resume() { return Promise.resolve(); } }   // stays 'suspended' — the flatline
+const VoiceIOSc = loader2(iosWin(DeadCtx), mockDocument, iosNavMake(null), MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+const kindsIOSc = () => VoiceIOSc.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+VoiceIOSc.setBusyGetter(() => false); VoiceIOSc.onTranscript(() => {});
+VoiceIOSc.openSession(); await RIG.settle(); for (let i = 0; i < 8; i++) await Promise.resolve();
+check("dead context at open: logged (cs.open:ctx-suspended) + the ONE honest swap (cs.swap:ctx)", kindsIOSc().includes("cs.open:ctx-suspended") && kindsIOSc().includes("cs.swap:ctx"));
+check("…Brian is never stranded: the Web-Speech session is live with the established line", kindsIOSc().includes("open:session") && VoiceIOSc.isSessionOpen() && H.utt && /switching to the phone's own listening/.test(H.utt.text));
+VoiceIOSc.closeSession("tap");
+// (d) MID-SESSION flatline (a phone call / Siri): statechange → one resume try → still dead → swap
+RIG.reset(); RIG.enable(); timers.length = 0; rafQueue.length = 0; H.utt = null;
+let CTXIOS = null, promote = true;
+// the FIRST instance is csCtx — csOpen builds it before the cue player builds its own
+class FlakyCtx extends MockAudioCtx { constructor() { super(); if (!CTXIOS) CTXIOS = this; } resume() { if (promote) this.state = "running"; return Promise.resolve(); } }
+const VoiceIOSd = loader2(iosWin(FlakyCtx), mockDocument, iosNavMake(null), MockUtt, fakeSetTimeout, fakeClearTimeout, fakeRAF, FakeDate, silentConsole);
+const kindsIOSd = () => VoiceIOSd.getLog().map(e => e.kind + (e.detail ? ":" + e.detail : ""));
+VoiceIOSd.setBusyGetter(() => false); VoiceIOSd.onTranscript(() => {});
+VoiceIOSd.openSession(); await RIG.settle();
+check("setup: the flaky-ctx session opened cloud and is running", kindsIOSd().includes("cs.open:session") && CTXIOS.state === "running");
+promote = false; CTXIOS.state = "suspended";                      // the OS pulls the audio session
+CTXIOS.onstatechange && CTXIOS.onstatechange();                    // iOS fires statechange
+for (let i = 0; i < 8; i++) await Promise.resolve();
+check("mid-session flatline: one resume attempt, then cs.fail:ctx-suspended + the honest swap", kindsIOSd().includes("cs.fail:ctx-suspended") && kindsIOSd().includes("cs.swap:ctx"));
+check("…and the exchange continues on Web Speech (never stranded, ONE swap only)", kindsIOSd().includes("open:session") && VoiceIOSd.isSessionOpen() && kindsIOSd().filter(k => k.startsWith("cs.swap")).length === 1);
+VoiceIOSd.closeSession("tap");
+// (e) the pick's source shape: capability-gated, desktop untouched
+check("pick source: Android OR iOS, kit-gated; desktop stays Web Speech", /CS_ENABLED && \(CONVO_ANDROID \|\| CONVO_IOS\) && cloudEarsSupported\(\)/.test(SRC) && /const CONVO_IOS = \/iPad\|iPhone\|iPod\/i/.test(SRC));
+timers.length = 0; rafQueue.length = 0; RIG.disable();
+
 console.log("\n" + (ok ? "ALL PASS" : "FAILURES ABOVE"));
 process.exit(ok ? 0 : 1);

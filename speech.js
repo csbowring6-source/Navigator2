@@ -118,6 +118,10 @@ let convoLastError = '';        // last onerror reason, for the honest-fail log
 const CONVO_MAX_RESTARTS = 3;   // after this many rapid empty reopens, stop + honest fallback
 const CONVO_HEALTHY_MS = 2000;  // an onend later than this = genuine listening (just quiet), not a fail
 const CONVO_ANDROID = /Android/i.test(navigator.userAgent || '');
+// CS-IOS-TRIAL (step 10): iOS joins the cloud trial. Same class of check as the
+// existing mime pick; iPadOS masquerades as Macintosh, so touch points break the tie
+// (a capability signal, not new sniffing). Desktop Safari/Chrome stay untouched.
+const CONVO_IOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '') || (/Macintosh/.test(navigator.userAgent || '') && (navigator.maxTouchPoints || 0) > 1);
 const CONVO_OFFER_MS = 20000;
 const CONVO_CLOSE_MS = 45000;
 
@@ -133,14 +137,15 @@ function toggleConversation() {
 // THE ENGINE PICK, as one predicate — shared by openConversation and the ONE-MIC
 // delegation in toggleVoice (MIC-SIMPLE step 3): Android with the full cloud kit.
 function cloudSessionPick() {
-  return CS_ENABLED && CONVO_ANDROID && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
+  // CS-IOS-TRIAL: Android OR iOS with the full kit — the CAPABILITY check does the
+  // real gating (an old iOS without MediaRecorder falls straight to Web Speech).
+  return CS_ENABLED && (CONVO_ANDROID || CONVO_IOS) && cloudEarsSupported() && !!(window.AudioContext || window.webkitAudioContext);
 }
 function openConversation() {
-  // CS-SEAM (step 7) — THE ENGINE PICK. Android with the full cloud kit present
-  // (MediaRecorder + getUserMedia + AudioContext) gets the CLOUD session; everything
-  // else — including iOS, per the design report — keeps the Web-Speech session exactly
-  // as shipped. CS_ENABLED is LIVE (step 9): Android + full kit sessions run cloud;
-  // every other device falls straight through to openWebSpeechSession.
+  // CS-SEAM (step 7) — THE ENGINE PICK. Android or iOS (CS-IOS-TRIAL, step 10) with
+  // the full cloud kit present (MediaRecorder + getUserMedia + AudioContext) gets the
+  // CLOUD session; everything else — desktop included — keeps the Web-Speech session
+  // exactly as shipped.
   const cloudPick = cloudSessionPick();
   if (CS_ENABLED) logEvent('engine', cloudPick ? 'cloud' : 'webspeech');   // the PICK — the first line of every session in the field log
   if (cloudPick) { csOpen(); return; }
@@ -1109,6 +1114,25 @@ let csCloseAfterDeliver = false;   // TAP-SEMANTICS: a tap during thinking DEFER
 // cloud). The cs side shuts cleanly WITHOUT the close cue — the EXCHANGE continues,
 // only the engine changes (convoCued suppresses it; the convo open re-arms the guard).
 // No fallback engine at all → this IS an ending: honest close, cue, established line.
+// CS-IOS-TRIAL: iOS suspends/interrupts an AudioContext mid-session (a phone call,
+// Siri, a route change). A dead context is a deaf VAD — windows discard forever and
+// no transcribe failure ever ticks the swap counter, the one stranded shape the
+// fail-streak can't catch. Watch statechange: one resume attempt on the spot; still
+// not running → the established honest ONE-swap.
+function csWatchCtx() {
+  if (!csCtx || csCtx._csWatched) return;
+  csCtx._csWatched = true;
+  csCtx.onstatechange = () => {
+    if (!csActive || !csCtx || csCtx.state === 'running') return;
+    let p = null;
+    try { p = csCtx.resume && csCtx.resume(); } catch (e) {}
+    Promise.resolve(p).then(() => {
+      if (csActive && csCtx && csCtx.state !== 'running') { logEvent('cs.fail', 'ctx-' + csCtx.state); csSwapToWebSpeech('ctx'); }
+    }).catch(() => {
+      if (csActive) { logEvent('cs.fail', 'ctx-dead'); csSwapToWebSpeech('ctx'); }
+    });
+  };
+}
 function csSwapToWebSpeech(reason) {
   logEvent('cs.swap', reason);
   const noFallback = !convoSupported();
@@ -1129,6 +1153,13 @@ function csSwapToWebSpeech(reason) {
 
 async function csOpen() {
   if (csActive || convoActive || cloudActive || captureActive) return false;   // one mic owner at a time
+  // CS-IOS-TRIAL: the AudioContext is created and resume() is CALLED synchronously,
+  // inside the opening tap's user activation, BEFORE any await — iOS only resumes a
+  // suspended context inside a gesture, and the getUserMedia permission prompt can
+  // outlive the activation window. Android/desktop: a no-op on a running context.
+  try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !csCtx) csCtx = new Ctx(); } catch (e) { csCtx = null; }
+  try { if (csCtx && csCtx.resume) csCtx.resume(); } catch (e) {}
+  csWatchCtx();   // iOS mid-session suspend/interruption → resume-or-honest-swap
   try {
     csStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
@@ -1138,8 +1169,17 @@ async function csOpen() {
     csSwapToWebSpeech('denied');
     return false;
   }
-  try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx && !csCtx) csCtx = new Ctx(); } catch (e) { csCtx = null; }
-  try { if (csCtx && csCtx.resume) await csCtx.resume(); } catch (e) {}
+  // iOS can re-suspend across the permission prompt. Verify NOW: one more resume, and
+  // if the context still isn't running the VAD would be DEAF — every window a silent
+  // discard, the stranded shape. Honest swap instead; Brian is never stranded.
+  if (csCtx && csCtx.state && csCtx.state !== 'running') {
+    try { await csCtx.resume(); } catch (e) {}
+    if (csCtx.state !== 'running') {
+      logEvent('cs.open', 'ctx-suspended');
+      csSwapToWebSpeech('ctx');
+      return false;
+    }
+  }
   csActive = true;
   convoCued = false;          // re-arm the once-per-session close cue (same guard as the Web-Speech session)
   csSpeaking = false; csHadExchange = false; csOffered = false; csFailStreak = 0; offerAnswerPending = false; csCloseAfterDeliver = false;
@@ -1725,7 +1765,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '08 Aug 2026, 03:35 PM AEST',
+    BUILD: '10 Aug 2026, 04:45 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
