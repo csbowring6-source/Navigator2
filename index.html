@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 02:07 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 03:22 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0207AM"></script>
+<script src="speech.js?v=11Aug2026-0322AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3856,7 +3856,10 @@ function formatCampsAnswer(res) {
     meta,   // {nP, nF, where, wPrefix, osmDown} — for the results filter chips (All | Parks | Free)
     // Cards / ring-around / pins see the SHOWN list (commercial + free, time-ordered, ≤10). Free
     // camps carry source:'osm' so campCardNote gives them the neutral note (never the miss apology).
-    sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
+    // CAMP-DISTANCE-2: anchorKm/anchorName MUST survive this whitelist — cards, the
+    // persisted round and restores all read THIS list (the spoken shape reads `shown`
+    // directly, which is why the field heard the distance but never saw it).
+    sites: shown.map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: verifiedPhone(s), source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '', anchorKm: (s.anchorKm != null ? s.anchorKm : null), anchorName: s.anchorName || '' })),
   };
 }
 // Per-card number/status decision (pure → benchable). A verified number → tap-to-call;
@@ -4837,7 +4840,7 @@ function buildCampCard(s, n) {
   const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
   const hint = (hv && hv.length === 1 && String(hv[0]).length <= 7) ? ' · ' + hv[0] : '';
   const timeSpan = document.createElement('span'); timeSpan.className = 'camp-pin-time';
-  timeSpan.textContent = (t ? '— ' + t : '') + anchorBr + hint;
+  timeSpan.textContent = (t || '') + anchorBr + hint;   // CAMP-DISTANCE-2: no dash — name, time, brackets
   pin.appendChild(timeSpan);
   if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; pin.appendChild(tag); }
   if (s.lat != null && s.lon != null) pin.onclick = () => navigateTo(s.name, s.lat, s.lon);
