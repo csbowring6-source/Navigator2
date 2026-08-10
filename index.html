@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 12:36 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 02:07 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-1236AM"></script>
+<script src="speech.js?v=11Aug2026-0207AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3826,7 +3826,12 @@ function formatCampsAnswer(res) {
   const nP = parks.length, nF = frees.length;
   const where = res.near ? `near ${res.place}` : res.directional ? 'ahead' : 'nearby';
   const wPrefix = res.widened ? 'Nothing inside the hour — ' : '';
-  const timeOf = s => (s.anchorKm != null && s.anchorName) ? `about ${s.anchorKm} km from ${s.anchorName}`   // CAMP-DISTANCE: the anchor distance, spoken the card's way
+  // CAMP-DISTANCE (driver's ruling): destination-anchored sites speak the anchor
+  // distance in plain words — "about 6 k's out of Mission Beach" — once each; a
+  // 0 km site is simply "in Mission Beach". Unstamped (driver-anchored) sites keep
+  // the old time-from-you exactly.
+  const timeOf = s => (s.anchorKm != null && s.anchorName)
+                    ? (s.anchorKm === 0 ? `in ${s.anchorName}` : `about ${s.anchorKm} k's out of ${s.anchorName}`)
                     : s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
   // ── SPOKEN (field 4 Aug) — BOTH counts up front, then the nearest three (colour-blind, the list is
   // mins-sorted and INTERLEAVED), then a remainder that counts ALL unspoken rows regardless of colour.
@@ -4822,17 +4827,17 @@ function buildCampCard(s, n) {
   const nameSpan = document.createElement('span'); nameSpan.className = 'camp-pin-name';
   nameSpan.textContent = '📍 ' + n + '. ' + s.name;
   pin.appendChild(nameSpan);
-  // CAMP-DISTANCE: destination-anchored sites headline their distance from the asked-
-  // about place ("≈4 km from Mission Beach", crow-flies, honest ≈). The drive-time-from-
-  // driver figure gives way — both don't fit the pinned span cleanly beside the name.
-  // Driver-anchored rounds (no anchor stamp) keep the drive time exactly as before.
-  const t = (s.anchorKm != null && s.anchorName) ? ('≈' + s.anchorKm + ' km from ' + s.anchorName)
-          : s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
+  // CAMP-DISTANCE (driver's ruling, 10 Aug): destination-anchored sites add their
+  // crow-flies distance from the asked-about place in BRACKETS after the time —
+  // "— 1 hr 55 (6 km)" — no "from ⟨place⟩" text on the card; people work it out.
+  // Driver-anchored rounds (no anchor stamp) render exactly as before.
+  const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
+  const anchorBr = (s.anchorKm != null && s.anchorName) ? ((t ? ' ' : '') + '(' + s.anchorKm + ' km)') : '';
   // hours hint only where it fits (a single short value); never a whole row, never the "vary" noise
   const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
   const hint = (hv && hv.length === 1 && String(hv[0]).length <= 7) ? ' · ' + hv[0] : '';
   const timeSpan = document.createElement('span'); timeSpan.className = 'camp-pin-time';
-  timeSpan.textContent = (t ? '— ' + t : '') + hint;
+  timeSpan.textContent = (t ? '— ' + t : '') + anchorBr + hint;
   pin.appendChild(timeSpan);
   if (free) { const tag = document.createElement('span'); tag.className = 'camp-free-tag'; tag.textContent = 'FREE'; pin.appendChild(tag); }
   if (s.lat != null && s.lon != null) pin.onclick = () => navigateTo(s.name, s.lat, s.lon);
