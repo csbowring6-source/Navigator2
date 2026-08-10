@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 10 Aug 2026, 04:45 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 12:36 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=10Aug2026-0445PM"></script>
+<script src="speech.js?v=11Aug2026-1236AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3699,6 +3699,11 @@ async function getCampsNear(place, coords) {
   let cands = d.results.filter(s => s.lat && s.lon)
     .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(c.lat, c.lon, s.lat, s.lon) }))
     .sort((a,b) => a.crow - b.crow).slice(0, CAMPS_POOL_MAX);
+  // CAMP-DISTANCE (field 10 Aug): on a DESTINATION-anchored round the choosing number
+  // is each park's distance from the ASKED-ABOUT place, not the drive from the driver.
+  // Crow-flies from the anchor (already computed, no extra lookups) + the anchor's name,
+  // stamped per site so cards, speech, the persisted round and restores all carry it.
+  cands.forEach(s => { s.anchorKm = Math.round(s.crow); s.anchorName = place; });
   // Same rig-fit hard filter as the corridor, but NO ahead/drive-time-window filter.
   const bigRig = currentVehicle === 'caravan' || currentVehicle === 'truck';
   if (bigRig) {
@@ -3821,7 +3826,8 @@ function formatCampsAnswer(res) {
   const nP = parks.length, nF = frees.length;
   const where = res.near ? `near ${res.place}` : res.directional ? 'ahead' : 'nearby';
   const wPrefix = res.widened ? 'Nothing inside the hour — ' : '';
-  const timeOf = s => s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
+  const timeOf = s => (s.anchorKm != null && s.anchorName) ? `about ${s.anchorKm} km from ${s.anchorName}`   // CAMP-DISTANCE: the anchor distance, spoken the card's way
+                    : s.mins == null ? `${Math.round(s.km)} km` : hrsMinsSpoken(s.mins);
   // ── SPOKEN (field 4 Aug) — BOTH counts up front, then the nearest three (colour-blind, the list is
   // mins-sorted and INTERLEAVED), then a remainder that counts ALL unspoken rows regardless of colour.
   // Shape: "<N> parks and <M> free camps near <place>. Nearest: name, time; name, time; name, time.
@@ -4354,7 +4360,7 @@ function startCampRound(place, query, sites, anchor) {
     // FRAME-ANCHOR: the search anchor — the asked-about place's coords + the radius
     // used — so framing can centre on what the driver NAMED, not the pins' middle.
     anchor: (anchor && anchor.lat != null) ? { lat: anchor.lat, lon: anchor.lon, radiusKm: anchor.radiusKm || null } : null,
-    sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '', source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '' })),
+    sites: (sites || []).map(s => ({ id: s.id || '', name: s.name, lat: s.lat, lon: s.lon, km: s.km, mins: s.mins, phone: s.phone || '', source: s.source || '', freeByNature: !!s.freeByNature, hours: s.hours || null, type: s.type || '', anchorKm: (s.anchorKm != null ? s.anchorKm : null), anchorName: s.anchorName || '' })),
     tried: [], calledSite: null, ts: Date.now(),
   };
   campOutcomePending = null;
@@ -4816,7 +4822,12 @@ function buildCampCard(s, n) {
   const nameSpan = document.createElement('span'); nameSpan.className = 'camp-pin-name';
   nameSpan.textContent = '📍 ' + n + '. ' + s.name;
   pin.appendChild(nameSpan);
-  const t = s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
+  // CAMP-DISTANCE: destination-anchored sites headline their distance from the asked-
+  // about place ("≈4 km from Mission Beach", crow-flies, honest ≈). The drive-time-from-
+  // driver figure gives way — both don't fit the pinned span cleanly beside the name.
+  // Driver-anchored rounds (no anchor stamp) keep the drive time exactly as before.
+  const t = (s.anchorKm != null && s.anchorName) ? ('≈' + s.anchorKm + ' km from ' + s.anchorName)
+          : s.mins != null ? hrsMins(s.mins) : (s.km != null ? Math.round(s.km) + ' km' : '');
   // hours hint only where it fits (a single short value); never a whole row, never the "vary" noise
   const hv = (s.hours && (Array.isArray(s.hours) ? s.hours.length : s.hours)) ? (Array.isArray(s.hours) ? s.hours : [String(s.hours)]) : null;
   const hint = (hv && hv.length === 1 && String(hv[0]).length <= 7) ? ' · ' + hv[0] : '';
