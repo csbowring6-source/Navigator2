@@ -349,7 +349,7 @@ function isOfferNo(text) {
 // seam) plus convo's early pre-busy check.
 function isClosePhrase(text) {
   const t = cleanTranscript(text).toLowerCase().replace(/[.!?,\s]+$/, '').trim();
-  return t.length <= 30 && /^(?:that'?s (?:it|all)|that is all|thanks|thank you|cheers|done|all done|i'?m (?:all )?(?:done|finished)|no that'?s it|that will do|bye|goodbye|close|end (?:the )?chat|end (?:the )?conversation|finish(?:ed)?|we'?re finished|stop(?: listening)?|shut down|over and out)(?:[\s,]+(?:mate|thanks?|thank you|cheers|now|please))?$/.test(t);
+  return t.length <= 30 && /^(?:that'?s (?:it|all)|that is all|thanks|thank you|cheers|done|all done|i'?m (?:all )?(?:done|finished)|no that'?s it|that will do|bye|goodbye|close|end|end (?:the )?chat|end (?:the )?conversation|finish(?:ed)?|we'?re finished|stop(?: listening)?|shut down|over and out)(?:[\s,]+(?:mate|thanks?|thank you|cheers|now|please))?$/.test(t);
 }
 // A TRAILING "cancel that" / "scratch that" / "forget that" bins the whole utterance — no reply,
 // no routing. Trailing only (the phrase must END the transcript), so a mid-sentence mention
@@ -1765,7 +1765,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '11 Aug 2026, 03:22 AM AEST',
+    BUILD: '11 Aug 2026, 03:25 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

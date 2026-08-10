@@ -1088,10 +1088,23 @@ RIG.disable(); rafQueue.length = 0; timers.length = 0;
 console.log("\n--- 27. close-words: every phrase closes (both engines); prefixes never do ---");
 // matcher unit sweep — every ticket phrase full-matches; prefixes/embeddings never do
 const closeFn = new Function("cleanTranscript", "return " + exFn("isClosePhrase"))(globalThis.cleanTranscript);
-const CLOSERS = ["close", "end chat", "end the chat", "end conversation", "finish", "finished", "we're finished", "stop", "stop listening", "shut down", "goodbye", "bye", "over and out", "that's all", "done", "Close.", "stop listening, thanks"];
-const NON_CLOSERS = ["which is the closest caravan park", "should I stop at Ingham", "close the chat and find fuel", "stop at the next servo", "finish the route to Tully", "goodbye then take me to Cairns"];
+const CLOSERS = ["close", "end", "End.", "end mate", "end chat", "end the chat", "end conversation", "finish", "finished", "we're finished", "stop", "stop listening", "shut down", "goodbye", "bye", "over and out", "that's all", "done", "Close.", "stop listening, thanks"];
+const NON_CLOSERS = ["which is the closest caravan park", "should I stop at Ingham", "close the chat and find fuel", "stop at the next servo", "finish the route to Tully", "goodbye then take me to Cairns", "end the trip at Cairns", "send it to my phone", "the weekend run"];
 check("matcher: EVERY close phrase full-matches", CLOSERS.every(t => closeFn(t)), CLOSERS.filter(t => !closeFn(t)).join(", "));
 check("matcher: NO prefix/embedded use ever matches ('closest', 'stop at Ingham', …)", NON_CLOSERS.every(t => !closeFn(t)), NON_CLOSERS.filter(t => closeFn(t)).join(", "));
+// GOODBYE: bare "end" closes the CLOUD session like any close word
+Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
+Voice2.openSession(); await RIG.settle();
+RIG.transcripts.push("end");
+await RIG.pump([...Array(8).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+tts.start(); tts.end();   // CLOSE-ORDER
+check("GOODBYE cloud: bare 'end' closes (cs.close:phrase, sign-off, cue after the words)", kinds2().includes("cs.close:phrase") && !Voice2.isSessionOpen() && delivered2 === 0 && cue2("close") === 1 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
+// GOODBYE: bare "end" closes the CONVO session too
+Voice.closeSession("tap"); fresh(); timers.length = 0; H.utt = null;
+Voice.openSession(); rec.onstart();
+rec.speech(); rec.final("end"); advance(2800); advance(700);
+tts.start(); tts.end();   // CLOSE-ORDER
+check("GOODBYE convo: bare 'end' closes (close:phrase, sign-off, one cue)", kinds().includes("close:phrase") && !Voice.isSessionOpen() && countCue("close") === 1 && /^Tap to talk\.$/.test(H.utt.text));
 // CLOUD: "end chat" closes with sign-off + one cue; the negative delivers as a turn
 Voice2.clearLog(); rafQueue.length = 0; timers.length = 0; RIG.reset(); RIG.enable(); delivered2 = 0; H.utt = null;
 Voice2.openSession(); await RIG.settle();
