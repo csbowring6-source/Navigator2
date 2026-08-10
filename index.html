@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 03:25 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 03:54 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0325AM"></script>
+<script src="speech.js?v=11Aug2026-0354AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3819,8 +3819,17 @@ function formatCampsAnswer(res) {
   // list used to render commercial-by-crow then free appended — neither time order nor interleaved).
   // ONE rule, applied here so it flows to the live render, the persisted round, restored rounds and
   // the ring-around alike. Null-mins (no road distance) sort last, tie-broken by km. Then cap.
-  const shown = [...commercial, ...freeCamps]
-    .sort((a, b) => (a.mins == null ? 9e9 : a.mins) - (b.mins == null ? 9e9 : b.mins) || (a.km == null ? 9e9 : a.km) - (b.km == null ? 9e9 : b.km))
+  // SORT-BY-ANCHOR (Shape A, ORDER-REPORT): a DESTINATION round orders by the BRACKET —
+  // anchor distance ascending, free and paid mixed, drive time the tie-break — so card 1
+  // is the park closest to the asked-about place, and the number shown on every card IS
+  // the number the list is ordered by (and the number the spoken "Nearest:" reads off the
+  // top). Driver-anchored rounds (no stamps) keep the drive-time sort byte-identically.
+  const pool = [...commercial, ...freeCamps];
+  const anchored = pool.length > 0 && pool.every(s => s.anchorKm != null && s.anchorName);
+  const shown = pool
+    .sort(anchored
+      ? ((a, b) => a.anchorKm - b.anchorKm || (a.mins == null ? 9e9 : a.mins) - (b.mins == null ? 9e9 : b.mins))
+      : ((a, b) => (a.mins == null ? 9e9 : a.mins) - (b.mins == null ? 9e9 : b.mins) || (a.km == null ? 9e9 : a.km) - (b.km == null ? 9e9 : b.km)))
     .slice(0, CAMPS_SHOWN_MAX);
   const parks = shown.filter(s => !isFreeGroupEligible(s));
   const frees = shown.filter(s =>  isFreeGroupEligible(s));
