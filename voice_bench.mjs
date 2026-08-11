@@ -867,6 +867,15 @@ RIG.transcripts.push("thank you very much");
 await RIG.pump([...Array(20).fill(40), ...Array(32).fill(0)]); await RIG.settle();  // ~1.9s of real speech
 advance(700);
 check("the same stock phrase with REAL voiced time (~1.9s) DELIVERS", delivered2 === 1);
+// ARTEFACT-NUMBERS (field KJCXNTC): the counting-run hallucination is binned LIVE —
+// a short "nine" in noise came back as the whole counting sequence; and the credit line.
+Voice2.speak("ok"); tts.start(); tts.end(); advance(700); await RIG.settle();      // reply → fresh window
+RIG.transcripts.push("Nine, ten, eleven, twelve, thirteen, fourteen, fifteen, sixteen, seventeen, eighteen, nineteen.");
+await RIG.pump([...Array(3).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);   // ~0.2s voiced
+check("ARTEFACT-NUMBERS: the counting run is binned (cs.discard:artefact), NOT answered, session rolls on", kinds2().filter(k => k === "cs.discard:artefact").length >= 1 && delivered2 === 1 && Voice2.isSessionOpen());
+RIG.transcripts.push("Submitted by Acorn Media Mercy");
+await RIG.pump([...Array(3).fill(40), ...Array(32).fill(0)]); await RIG.settle(); advance(700);
+check("ARTEFACT-NUMBERS: the credit line is binned the same way, fresh window, no reply", kinds2().filter(k => k === "cs.discard:artefact").length >= 2 && delivered2 === 1 && Voice2.isSessionOpen());
 Voice2.closeSession("tap");
 RIG.disable(); rafQueue.length = 0; timers.length = 0;
 

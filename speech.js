@@ -823,11 +823,27 @@ const SILENCE_ARTEFACTS = [
   'thank you for watching', 'thanks for listening', 'please subscribe', 'subscribe',
   'like and subscribe', 'the end', 'you', 'music', 'applause', 'silence', 'bleep',
 ];
+// ARTEFACT-NUMBERS (field KJCXNTC): a COUNTING RUN is transcriber fiction — amid noise
+// a single spoken "nine" came back as "nine, ten, eleven… nineteen". An utterance that
+// is ENTIRELY a consecutive ascending run of 3+ numbers is discarded; one or two
+// numbers are ALWAYS real answers ("nine" must get through), and any non-number word
+// in the utterance makes it a sentence, not a run.
+const NUM_WORDS = { zero:0, one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15, sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20 };
+function isCountingRun(t) {
+  const toks = t.split(' ');
+  if (toks.length < 3) return false;
+  const vals = toks.map(w => (w in NUM_WORDS) ? NUM_WORDS[w] : (/^\d+$/.test(w) ? +w : null));
+  if (vals.some(v => v === null)) return false;
+  return vals.every((v, i) => i === 0 || v === vals[i - 1] + 1);
+}
 function isSilenceArtefact(text) {
   const t = cleanTranscript(text).toLowerCase().replace(/[^a-z0-9' ]/g, '').replace(/\s+/g,' ').trim();
   if (!t) return true;
   if (SILENCE_ARTEFACTS.includes(t)) return true;
   if (/^(subtitles?|captions?|transcriptions?|translations?)\b.*\b(by|provided|from)\b/.test(t)) return true;
+  // ARTEFACT-NUMBERS: caption-credit shapes ("submitted by Acorn Media Mercy") + close kin
+  if (/^(?:submitted|subtitled|transcribed|translated|captioned|provided) by\b/.test(t)) return true;
+  if (isCountingRun(t)) return true;
   if (/amara\.?org|subscribe to|www\.|\.com$/.test(t)) return true;
   return false;
 }
@@ -1765,7 +1781,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '11 Aug 2026, 04:37 PM AEST',
+    BUILD: '11 Aug 2026, 08:07 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
