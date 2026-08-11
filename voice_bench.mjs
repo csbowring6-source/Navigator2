@@ -1523,32 +1523,43 @@ Voice.closeSession("silence");
 check("convo: silence close — no cue before the words", countCue("close") === 0 && /^Tap to talk\.$/.test(H.utt.text));
 tts.start(); tts.end();
 check("convo: cue after the words on this engine too", countCue("close") === 1);
-// (d) CLIP-2 cold-route protection: BOTH braces — the raised pad AND the silent primer
-check("CLIP-2: 600ms pad, cold short utterances only (source)", SRC.includes("const TTS_LEAD_PAD_MS = 600") && /const coldShort = clean\.length <= 40 && !synth\.speaking;/.test(SRC));
-check("CLIP-2: the primer is SILENT, brief, and built BEFORE the real utterance", /primer = new SpeechSynthesisUtterance\('\. \. \.'\);\s*\n\s*primer\.volume = 0; primer\.rate = 2;/.test(SRC) && SRC.indexOf("primer = new SpeechSynthesisUtterance") < SRC.indexOf("const utt=new SpeechSynthesisUtterance"));
-check("pad: ordinary replies hand off immediately (the else branch)", /\} else \{\s*\n\s*synth\.speak\(utt\);/.test(SRC));
-check("pad: a newer speak/cancel kills the pending padded start", /clearTimeout\(_ttsPadTimer\);\s*\n\s*if \(coldShort\) \{/.test(SRC) && /_closeCueAfterSpeak = false; clearTimeout\(_ttsNextTimer\); clearTimeout\(_ttsPadTimer\)/.test(SRC));
-check("a driver kill silences the pending goodbye cue too (STAYS-SHUT)", /_closeCueAfterSpeak = false;/.test(SRC.slice(SRC.indexOf("function cancelSpeech"))));
-// (e) CLIP-2 functional: the primer speaks FIRST when the pad elapses; the words follow
+// (d) SILENT-REPLY: NO pending-start gap — the primer is handed over immediately,
+// the words right behind it; a start WATCHDOG rescues the known engine wedge once.
+check("SILENT-REPLY: the pad TIMER is retired (no clearable gap; the primer IS the pad)", !/TTS_LEAD_PAD_MS|_ttsPadTimer/.test(SRC) && /if \(coldShort\) \{ synth\.speak\(primer\); \}\s*\n\s*synth\.speak\(utt\);/.test(SRC));
+check("the primer is SILENT, brief, and built BEFORE the real utterance", /primer = new SpeechSynthesisUtterance\('\. \. \.'\);\s*\n\s*primer\.volume = 0; primer\.rate = 2;/.test(SRC) && SRC.indexOf("primer = new SpeechSynthesisUtterance") < SRC.indexOf("const utt=new SpeechSynthesisUtterance"));
+check("the start WATCHDOG: no tts.start in time → ONE logged retry (source)", SRC.includes("const TTS_START_WATCHDOG_MS = 2500") && /logEvent\('tts\.retry', ''\)/.test(SRC) && /utt\.onstart = \(\) => \{ clearTimeout\(_ttsStartTimer\);/.test(SRC));
+check("a driver kill silences the watchdog AND the pending goodbye cue (STAYS-SHUT)", /_closeCueAfterSpeak = false; clearTimeout\(_ttsNextTimer\); clearTimeout\(_ttsStartTimer\)/.test(SRC));
+// (e) SILENT-REPLY functional: the field replay — deliver on a fresh session straight
+// after a close → the reply reaches the ENGINE at once, every time.
 RIG.reset(); RIG.enable(); Voice2.clearLog(); H.utt = null;
-timers.length = 0; rafQueue.length = 0;   // flush (c)'s own pending pad — the timer queue is shared
+timers.length = 0; rafQueue.length = 0;
 const handed = []; const _origSpeak = synth.speak;
 synth.speak = (u) => { handed.push(u.text); _origSpeak.call(synth, u); };
-Voice2.openSession(); await RIG.settle();
-Voice2.closeSession("phrase");
-check("CLIP-2: nothing handed to the engine during the pad (words safe)", handed.length === 0 && H.utt && /^Tap to talk\.$/.test(H.utt.text));
-advance(650);
-check("CLIP-2: pad elapsed → primer FIRST, then the real words, in one hand-off", handed.length === 2 && handed[0] === ". . ." && handed[1] === "Tap to talk.", handed.join(" | "));
-check("CLIP-2: H.utt is still the AUDIBLE utterance (primer never captured)", /^Tap to talk\.$/.test(H.utt.text));
-tts.start(); tts.end();   // the sign-off completes → CLOSE-ORDER cue
-check("CLOSE-ORDER still holds behind the primer: cue after the words", cue2("close") === 1);
-// (f) CLIP-2: a driver kill DURING the pad = total silence — no primer, no words, no cue
+Voice2.closeSession("tap");
+Voice2.openSession(); await RIG.settle();               // reopened seconds after a close (WGQFJZG shape)
+Voice2.speak("Tap to talk.");                            // a short cold-route reply (the swallowed shape)
+check("SILENT-REPLY: handed to the engine IMMEDIATELY — primer then words, no gap", handed.length === 2 && handed[0] === ". . ." && handed[1] === "Tap to talk.", handed.join(" | "));
+check("H.utt is still the AUDIBLE utterance (primer never captured)", /^Tap to talk\.$/.test(H.utt.text));
+tts.start();
+const handedAtStart = handed.length;
+advance(4000);
+check("tts.start stops the watchdog — NO retry after a healthy start", handed.length === handedAtStart);
+tts.end();
+// the WEDGE: a hand-off the engine never starts → exactly one retry, logged
+handed.length = 0; Voice2.clearLog();
+Voice2.speak("Still here.");                             // handed, but no tts.start follows
+const handedBefore = handed.length;
+advance(2600);
+check("the WATCHDOG rescues a wedged hand-off: one retry, tts.retry logged", handed.length === handedBefore + 1 && kinds2().includes("tts.retry"), handed.join(" | "));
+tts.start(); tts.end();
+// (f) SILENT-REPLY: only the DRIVER can stop a delivered answer — a kill still means silence
 handed.length = 0; Voice2.clearLog(); RIG.reset(); H.utt = null;
 Voice2.openSession(); await RIG.settle();
-Voice2.closeSession("phrase");
-Voice2.cancelSpeech();                                   // the kill lands mid-pad
-advance(1500);
-check("CLIP-2: kill during the pad → NOTHING reaches the engine, no goodbye cue", handed.length === 0 && cue2("close") === 0);
+Voice2.closeSession("phrase");                           // sign-off handed at once now
+const cancelsBefore38 = synth._cancels;
+Voice2.cancelSpeech();                                   // the driver kills it
+advance(4000);
+check("a driver kill: engine cancelled, watchdog dead, NO retry, NO goodbye cue", synth._cancels > cancelsBefore38 && cue2("close") === 0 && !kinds2().includes("tts.retry"));
 synth.speak = _origSpeak;
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 

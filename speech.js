@@ -1617,12 +1617,17 @@ let _ttsNextTimer = null;  // deferred play of the next queued reply
 // the goodbye tone is the LAST sound. Cleared by cancelSpeech (a driver kill
 // silences everything, cue included — STAYS-SHUT).
 let _closeCueAfterSpeak = false;
-// CLIP-2 clip protection: SHORT standalone utterances on a cold speaker route
-// (Bluetooth/cab audio waking up) start this much late AND behind a silent primer
-// utterance, so the wake-up cost can never land on the first word. (250ms of bare
-// delay was not enough in the field — raised, and the primer added.)
-const TTS_LEAD_PAD_MS = 600;
-let _ttsPadTimer = null;   // the pending padded start — cleared by any newer speak/cancel
+// SILENT-REPLY (field WGQFJZG): the CLIP-2 pending-start TIMER is retired — a reply
+// held in a clearable timer was being swallowed by ordinary turn machinery (the app's
+// cancelSpeech at its general-path head cleared the pad, and the answer never reached
+// the engine). Cold-route protection is now the PRIMER ALONE, handed to the engine
+// IMMEDIATELY with the words queued right behind it: the primer's own playback covers
+// the route wake-up, and there is no gap in which anything but a driver kill
+// (cancelSpeech → synth.cancel) can stop a delivered answer.
+// The START WATCHDOG backs it: if the engine never fires tts.start (the known
+// cancel-then-speak wedge), ONE retry re-hands the utterance and logs tts.retry.
+const TTS_START_WATCHDOG_MS = 2500;
+let _ttsStartTimer = null;   // cleared by onstart and by a driver kill
 function queueReplies(on) { _queueReplies = !!on; }
 
 function speak(text) {
@@ -1689,21 +1694,22 @@ function _speakNow(text) {
   if(v) utt.voice=v;
   _currentUttText = clean; _speakStartedAt = Date.now(); _boundariesSeen = false; _spokenCharIndex = 0;   // CARRY-ON position tracking
   utt.onboundary = (e) => { if (e && typeof e.charIndex === 'number') { _spokenCharIndex = e.charIndex; _boundariesSeen = true; } };
-  utt.onstart = () => { logEvent('tts.start', ''); setMicState('speaking'); };
+  utt.onstart = () => { clearTimeout(_ttsStartTimer); logEvent('tts.start', ''); setMicState('speaking'); };
   utt.onerror = _afterSpeak;
   utt.onend = _afterSpeak;
-  // CLIP-2 (field 9 Aug: 250ms of pure delay still clipped to "…auk" — many routes only
-  // wake when AUDIO FLOWS, a delay wakes nothing): cold-route short utterances get BOTH
-  // braces. (1) the raised pad — TTS_LEAD_PAD_MS before anything is handed over; then
-  // (2) the silent PRIMER speaks first, so the wake-up cost lands on silence and the
-  // real words queue behind it on a now-warm route. Ordinary replies (long, or a warm
-  // route mid-flow) start immediately. The pending start dies with any newer speak/cancel.
-  clearTimeout(_ttsPadTimer);
-  if (coldShort) {
-    _ttsPadTimer = setTimeout(() => { synth.speak(primer); synth.speak(utt); }, TTS_LEAD_PAD_MS);
-  } else {
-    synth.speak(utt);
-  }
+  // SILENT-REPLY: hand over IMMEDIATELY — no pending-start gap. On a cold route the
+  // silent primer goes first (its playback IS the pad: routes wake when audio flows);
+  // the words queue right behind it. Then the start watchdog: no tts.start within
+  // TTS_START_WATCHDOG_MS → one retry (the known engine wedge), logged for the field.
+  if (coldShort) { synth.speak(primer); }
+  synth.speak(utt);
+  clearTimeout(_ttsStartTimer);
+  _ttsStartTimer = setTimeout(() => {
+    if (!_ttsActive) return;              // ended/killed meanwhile — nothing to rescue
+    logEvent('tts.retry', '');
+    try { synth.cancel(); } catch (e) {}
+    try { synth.speak(utt); } catch (e) {}
+  }, TTS_START_WATCHDOG_MS);
 }
 
 // Reply finished (or TTS failed). If more of OUR OWN replies are queued from the
@@ -1763,7 +1769,7 @@ function _afterSpeak() {
   if (synth) synth.onvoiceschanged = () => synth.getVoices();
 
   // ── PUBLIC API — the ONLY surface index.html may touch ─────────────────────
-  function cancelSpeech() { _ttsQueue = []; _queueReplies = false; _ttsActive = false; _closeCueAfterSpeak = false; clearTimeout(_ttsNextTimer); clearTimeout(_ttsPadTimer); try { synth && synth.cancel(); } catch (e) {} }
+  function cancelSpeech() { _ttsQueue = []; _queueReplies = false; _ttsActive = false; _closeCueAfterSpeak = false; clearTimeout(_ttsNextTimer); clearTimeout(_ttsStartTimer); try { synth && synth.cancel(); } catch (e) {} }
   // Full voice shutdown for "start again" (was three lines in resetConversation:
   // cancel TTS, stop the basic recogniser if listening, close any live session).
   function voiceReset() {
@@ -1783,7 +1789,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '12 Aug 2026, 06:33 AM AEST',
+    BUILD: '12 Aug 2026, 06:41 AM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
