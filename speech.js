@@ -565,6 +565,7 @@ function closeConversation(reason) {
       if (bub) { const d = document.createElement('div'); d.textContent = diag; d.style.cssText = 'font-size:11px;opacity:0.6;margin-top:4px;'; bub.appendChild(d); }
     }
   } else if (signOff) {
+    if (reason === 'phrase') { try { setPending(null); } catch (e) {} }   // MAP-PRIORITY: a close WORD outranks any waiting question
     const m = 'Tap to talk.';
     _allowSignOff = true;   // the close acknowledgment bypasses the shut-up drop-guard once
     addMsg('nav', m); lastSpoken = m;
@@ -1374,6 +1375,7 @@ function csCloseSession(reason) {
     // reasons and line as the convo session. Tap stays line-less (a deliberate close);
     // swap/honest speak their own honest lines. The sign-off is a close ACKNOWLEDGMENT,
     // so it bypasses the shut-up drop-guard exactly once.
+    if (reason === 'phrase') { try { setPending(null); } catch (e) {} }   // MAP-PRIORITY: a close WORD outranks any waiting question
     const m = 'Tap to talk.';
     _allowSignOff = true;
     addMsg('nav', m); lastSpoken = m;
@@ -1781,7 +1783,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '11 Aug 2026, 08:12 PM AEST',
+    BUILD: '11 Aug 2026, 08:17 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up

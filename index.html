@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 08:12 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 08:17 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0812PM"></script>
+<script src="speech.js?v=11Aug2026-0817PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5595,6 +5595,7 @@ async function _sendMessageInner(silent){
   // a close-family word can then never end the session (one word, one job).
   if ((/^(close|that'?s all|that is all|i'?m (all )?(done|finished)|finished|stop listening|goodbye|bye|thanks that'?s all)\b/i.test(text) || /^end[.!?,\s]*$/i.test(text)) && !/\bmap\b/i.test(text)) {
     inp.value=''; inp.style.height='auto';
+    setPending(null);   // MAP-PRIORITY: closing outranks every question — the waiting question dies with it
     if (Voice.isSessionOpen()) Voice.closeSession('phrase');
     else { const bye = 'Tap to talk.'; addMsg('nav', bye); lastSpoken = bye; speak(bye); }
     return;
@@ -5886,6 +5887,23 @@ async function _sendMessageInner(silent){
         addMsg('nav', msg); lastNavReply = msg; lastSpoken = msg; speak(msg);
       }
       return;
+    }
+    // MAP-PRIORITY (field KJCXNTC): COMMAND WORDS pass THROUGH a waiting question.
+    // The map toggle works mid-question — the question stays waiting, no re-ask, no
+    // miss counted; the driver can look at the map, hide it, then answer. (The
+    // directional show/hide seam and the close words already sit ABOVE this block,
+    // so they outrank every question by position.)
+    if (isMapMention(text)) {
+      inp.value=''; inp.style.height='auto';
+      addMsg('user', text);
+      const mbtn3 = document.getElementById('mapToggle');
+      if (!mbtn3 || mbtn3.style.display === 'none') {
+        const m = 'Nothing on the map yet — ask for camps or fuel first.';
+        addMsg('nav', m); lastSpoken = m; speak(m);
+      } else {
+        toggleMapView();
+      }
+      return;   // the pending is untouched — still waiting
     }
     // UNMATCHED. A clear topic change goes to general routing at once; anything else
     // keeps the held question alive for ONE more turn and re-asks briefly — a second
