@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 06:41 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 07:05 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0641AM"></script>
+<script src="speech.js?v=12Aug2026-0705AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1458,7 +1458,7 @@ function looksLikeBarePlace(text) {
   // some other kind ("I don't know", "cheapest fuel") — let the normal flow have
   // it. Words that DO appear in real town names (Bay, Beach, Springs, Port,
   // Mount, Harbour, Hill, Creek) are deliberately absent from this list.
-  const STOP = /^(i|we|you|he|she|it|they|me|us|my|our|your|and|or|but|a|an|of|for|with|about|to|from|at|in|on|is|am|are|was|were|be|been|being|do|does|did|don'?t|doesn'?t|didn'?t|isn'?t|aren'?t|can'?t|won'?t|not|no|yes|yeah|yep|nah|nope|ok|okay|sure|maybe|dunno|know|knows|think|want|wanna|need|get|got|go|going|goes|went|come|coming|take|give|tell|find|show|look|let|can|could|would|should|will|shall|may|might|must|have|has|had|what|where|when|why|how|who|which|help|stop|cancel|please|thanks|thank|sorry|hello|hi|hey|um|uh|er|home|here|there|back|again|repeat|next|more|less|far|long|much|many|time|today|tomorrow|tonight|now|soon|later|anywhere|somewhere|everywhere|nowhere|something|anything|nothing|everything|cheapest|cheap|nearest|closest|near|close|fuel|petrol|diesel|servo|gas|unleaded|coffee|food|eat|drink|camp|camps|campsite|campsites|caravan|weather|toilet|toilets|map|maps|sos)$/i;
+  const STOP = /^(i|we|you|he|she|it|they|me|us|my|our|your|and|or|but|a|an|of|for|with|about|to|from|at|in|on|is|am|are|was|were|be|been|being|do|does|did|don'?t|doesn'?t|didn'?t|isn'?t|aren'?t|can'?t|won'?t|not|no|yes|yeah|yep|nah|nope|ok|okay|sure|maybe|dunno|know|knows|think|want|wanna|need|get|got|go|going|goes|went|come|coming|take|give|tell|find|show|look|let|can|could|would|should|will|shall|may|might|must|have|has|had|what|where|when|why|how|who|which|help|stop|cancel|please|thanks|thank|sorry|hello|hi|hey|um|uh|er|home|here|there|back|again|repeat|next|more|less|far|long|much|many|time|today|tomorrow|tonight|now|soon|later|anywhere|somewhere|everywhere|nowhere|something|anything|nothing|everything|cheapest|cheap|nearest|closest|near|close|fuel|petrol|diesel|servos?|gas|unleaded|coffee|food|eat|drink|camp|camps|campsite|campsites|caravan|weather|toilet|toilets|map|maps|sos)$/i;
   if (words.some(w => STOP.test(w))) return false;
   return true;
 }
@@ -1555,7 +1555,7 @@ function parseTripIntent(text, state) {
   const isRequest = /\?$/.test(t)
     || /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|do (you|i)|got any|looking for)\b/i.test(t)
     || /\b(nearest|closest|cheapest)\b/i.test(t)
-    || /\b(campsite|camp site|camps?|caravan park|powered site|free camp|dump point|servo|fuel|petrol|diesel|toilet|loo|caf[eé]|coffee|feed|meal|lunch|dinner|breakfast|chemist|pharmacy|gym|pub|atm|weather)\b/i.test(t);
+    || /\b(campsite|camp site|camps?|caravan park|powered site|free camp|dump point|servos?|fuel|petrol|diesel|toilet|loo|caf[eé]|coffee|feed|meal|lunch|dinner|breakfast|chemist|pharmacy|gym|pub|atm|weather)\b/i.test(t);
   if (isRequest) return null;
 
   const NOT_PLACE = new Set(['the','a','an','some','any','somewhere','anywhere','nowhere','here','there','home','nearest','closest','next','town','back','now','today','tomorrow','tonight','way','road','route','trip','it','me','us','go']);
@@ -3061,6 +3061,7 @@ RULES:
 - NEARBY LISTS ARE GROUND TRUTH: Any NEARBY list in context (fuel stations, gyms, cafes, chemists, supermarkets, etc.) is real OpenStreetMap data sorted nearest first. For any nearest/closest request, answer with the first suitable entry from the relevant list — NEVER estimate proximity from your own memory; your geographic recall of small towns is unreliable. If the driver asks for several ("the 3 nearest gyms"), list up to three from the list with distances in one sentence — that is allowed and expected. Never invent policies such as "one result per reply"; no such rule exists. If a list says none found, say so and name the nearest sizeable town.
 - MULTI-ERRAND: If the driver names two errands ("gym then coffee"), name the nearest suitable place for each from their lists in sentence 1, and navigate to the first errand in sentence 2.
 - NEAREST vs CHEAPEST: Two different questions with two different data sources. NEARBY FUEL STATIONS in context is the ground truth for proximity — for any "nearest/closest" question answer with its first entry, never your own guess and never a price-list station. LIVE FUEL PRICES is the ground truth for price — for "cheapest" questions use it and state the distance; if the cheapest confirmed station is more than about 25km away you MUST also name the nearest station from NEARBY FUEL STATIONS with "price unconfirmed" — the driver chooses, not you.
+- A FUEL OR SERVO QUESTION NEVER REQUIRES A TRIP: with no route set, answer with the servos near the driver from the context — never ask for a destination first, never say you need a trip to show servos.
 - SERVOS: The context lists every servo around the driver, nearest first by road, each with its driving time and either a confirmed price or "price unconfirmed". EVERY ONE of these is already pinned on the driver's map — they can see them. Your job is to summarise, not to list. Lead with the cheapest CONFIRMED price and its driving time ("Metro Beaudesert, 25 minutes, $1.54 a litre"). If a different servo is meaningfully closer, offer it as the no-detour alternative by name with its time, saying "price unconfirmed" if that's the case. Never invent a price. Never lump servos together ("three servos at X") — name them. If the driver is AT a servo, say so first.
 - DISTANCE AND TIME: Context gives both road distance and driving time. Lead with whichever a driver would find more useful: for anything nearby (under about 20 minutes) TIME is what matters — "Liberty Beaudesert, 17 minutes, $1.54 a litre". For longer hauls give both — "Gympie, 180 km, about two hours". Never give both for a short hop; it's a mouthful spoken aloud. Round times naturally: "about 20 minutes", "just under an hour", "a bit over two hours". NEVER a decimal hour ("0.1 hours", "2.5 hours") — always hours and minutes, and anything under an hour in minutes ("about six minutes").
 - SPOKEN ALOUD: Your reply is read aloud by a voice. Write distances as words the voice can say properly — "300 metres" not "300m", "20 kilometres" or "20 km" not "20km" jammed together. Same for prices: "$1.54 a litre".
@@ -6101,7 +6102,7 @@ async function _sendMessageInner(silent){
   // nearest first by road, all pinned on the map. No separate paths.
   let fuelCtx = '';
   let stationsCtx = '';
-  const fuelQuery = /\b(?:fuel|petrol|diesel|servo|cheapest|unleaded|e10|9[158])\b/i.test(scanText);   // word-anchored: "innisfuel" must NOT match
+  const fuelQuery = /\b(?:fuel|petrol|diesel|servos?|cheapest|unleaded|e10|9[158])\b/i.test(scanText);   // word-anchored ("innisfuel" must NOT match); SERVO-NEARBY: plural heard too
   if (fuelQuery) {
     fuelCtx = await fetchFuelPrices();
   }
