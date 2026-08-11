@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 08:07 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 08:12 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0807PM"></script>
+<script src="speech.js?v=11Aug2026-0812PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5835,10 +5835,19 @@ async function _sendMessageInner(silent){
       } else if (pa.action === 'get-all') {
         await getNumbersForAll();
       } else if (pa.action === 'num-range') {
-        // An out-of-range position — honest, short, and the question stays live.
-        const m = `There are only ${pa.count} on the list.`;
-        setPending({ type: 'number-which' });
-        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        // An out-of-range position — honest and short. ASK-ONCE: it counts as a FAILED
+        // try; the strike carries so the question can never re-arm itself forever —
+        // the second failure closes politely and drops the pending completely.
+        const strikes = ((pending && pending.misses) || 0) + 1;
+        if (strikes >= 2) {
+          setPending(null);
+          const m = "I'm still not catching it. The list's on screen — ask again when you're ready.";
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        } else {
+          const m = `There are only ${pa.count} on the list.`;
+          setPending({ type: 'number-which', misses: strikes });
+          addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        }
       } else if (pa.action === 'get-one') {
         await getNumberFor(campSite(pa.name));
       } else if (pa.action === 'joy-yes') {
@@ -5888,6 +5897,18 @@ async function _sendMessageInner(silent){
       pending.misses = (pending.misses || 0) + 1;
       setPending(pending);                // re-arm freshness, keep the question
       const m = reaskPending(pending);
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return;
+    }
+    // ASK-ONCE (field KJCXNTC): the NUMBER question never loops. A SECOND failed
+    // answer gets one polite closing statement, the pending dropped COMPLETELY, and
+    // the garbled utterance consumed — the driver's next words are a fresh request,
+    // whatever they are. A genuine topic change still releases to routing as before.
+    if (pending.type === 'number-which' && !isTopicChange(text)) {
+      inp.value=''; inp.style.height='auto';
+      addMsg('user', text);
+      setPending(null);
+      const m = "I'm still not catching it. The list's on screen — ask again when you're ready.";
       addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
       return;
     }
