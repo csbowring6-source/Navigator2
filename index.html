@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 03:54 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 04:37 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0354AM"></script>
+<script src="speech.js?v=11Aug2026-0437PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4448,6 +4448,17 @@ function promptCallOutcome(name) {
   mk('✅ Booked it', 'var(--green)', () => campOutcome(name, 'booked'));
   mk('🚫 No room',   'var(--amber)', () => campOutcome(name, 'noroom'));
   mk('📵 No answer', 'var(--amber)', () => campOutcome(name, 'noanswer'));
+  // RETURN-VIEW (field 11 Aug): the return lands with the PARK TABLE back in frame —
+  // the driver answers "Any joy?" (and picks the next park) looking at the list, not
+  // hunting for it. Runs AFTER the ask's bubble (addMsg scrolls to the bottom; the
+  // last word here wins): the most recent table bubble comes back to the top. The
+  // "no" path keeps its own re-render + scroll exactly as shipped.
+  try {
+    const all = document.querySelectorAll('#chatArea .msg.nav .msg-bubble');
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (all[i].querySelector('.camp-card')) { scrollFirstCardIntoView(all[i]); break; }
+    }
+  } catch (e) {}
 }
 
 // Apply a call outcome (parts 3 + 5). Booked → clear + confirm. Otherwise mark
