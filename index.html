@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 11 Aug 2026, 08:17 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 06:33 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=11Aug2026-0817PM"></script>
+<script src="speech.js?v=12Aug2026-0633AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4704,7 +4704,27 @@ async function getNumbersForAll() {
 // Voice entry point — returns true if it handled the utterance.
 async function handleNumberRequest(text) {
   const req = extractNumberRequest(text);
-  if (!req) return false;
+  if (!req) {
+    // DIAL-ORDINAL (field 11 Aug): a DIAL request carries its own answer — "dial number
+    // two", "ring number five", "call the third one", "dial Tropic Breeze" bind directly
+    // (the same position-binding as every number request) and go straight to the green
+    // button. The clarify fires ONLY when a SHORT dial ask truly names nothing (bare
+    // "dial" — asked once; ASK-ONCE governs its answers). A long sentence that merely
+    // contains call/ring routes normally.
+    if (campRound && campRound.sites.length && /\b(?:dial|ring|call|phone)\b/i.test(text)) {
+      const hit = matchListedSite(text);
+      if (hit && hit.outOfRange) {
+        addMsg('user', text);
+        const m = `There are only ${hit.count} on the list.`;
+        setPending({ type: 'number-which' });
+        addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+        return true;
+      }
+      if (hit && !hit.ambiguous) { addMsg('user', text); await getNumberFor(hit); return true; }
+      if (cleanTranscript(text).split(/\s+/).length <= 6) { addMsg('user', text); askWhichSite(); return true; }
+    }
+    return false;
+  }
   // No round yet. If a trip is committed AND camps are owed (deferred earlier) or the
   // ask anaphorically means "those parks", fetch the DESTINATION's camps first, then
   // serve the numbers from that set. NEVER bail silently to the relay here — that's how
@@ -4735,7 +4755,19 @@ async function handleNumberRequest(text) {
   }
   addMsg('user', text);
   if (req.scope === 'all') { await getNumbersForAll(); return true; }
-  if (req.scope === 'ask') { askWhichSite(); return true; }
+  if (req.scope === 'ask') {
+    // DIAL-ORDINAL: the position may still be IN the request ("dial number two" gates
+    // in via "number" but extracts no name) — bind before ever asking.
+    const hit = matchListedSite(text);
+    if (hit && hit.outOfRange) {
+      const m = `There are only ${hit.count} on the list.`;
+      setPending({ type: 'number-which' });
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return true;
+    }
+    if (hit && !hit.ambiguous) { await getNumberFor(hit); return true; }
+    askWhichSite(); return true;
+  }
   const match = matchListedSite(req.name);
   if (match && match.outOfRange) {
     const m = `There are only ${match.count} on the list.`;
