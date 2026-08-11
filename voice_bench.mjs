@@ -441,7 +441,7 @@ check("the two voice controls are grouped on the left (mic immediately after Han
 check("one-shot mic tap = Voice.toggleCapture", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc));
 check("one-shot mic long-press opens the voice log (_vlAttach voiceBtn)", /_vlAttach\(document\.getElementById\('voiceBtn'\), true\)/.test(indexSrc));
 check("one-shot mic tap target ~44px", /\.voice-btn\{[^}]*width:44px;height:44px/.test(indexSrc));
-check("one-shot capture also reachable from the home mic", /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc));
+check("one-shot capture also reachable from the home mic", /function homeMic\(\)[\s\S]{0,650}toggleCapture\(\)/.test(indexSrc));
 // ── constant-height dock (field 31 Jul: label switches reflowed the row + wrapped the placeholder,
 // growing the dock over the cards). Fix = fixed button width + single-line placeholder. Measured
 // headless @380px: dock height IDENTICAL 73px across Hands-free/Listening/Recording/Speaking/Thinking;
@@ -1479,7 +1479,7 @@ check("non-Android: toggleCapture still starts a one-shot capture, never a sessi
 Voice.toggleCapture(); await Promise.resolve();          // tap-to-send — the one-shot endpoint intact
 check("…and the second tap SENDS (one-shot endpoint unchanged)", !Voice.isCapturing());
 // (f) entry WIRING unchanged — the pick lives behind the API, not in the buttons
-check("wiring pins hold: home mic + round mic → toggleCapture, Hands-free → micTap", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc) && /function homeMic\(\)[\s\S]{0,220}toggleCapture\(\)/.test(indexSrc) && /id="wakeBtn"[^>]*onclick="Voice\.micTap\(\)"/.test(indexSrc));
+check("wiring pins hold: home mic + round mic → toggleCapture, Hands-free → micTap", /id="voiceBtn"[^>]*onclick="Voice\.toggleCapture\(\)"/.test(indexSrc) && /function homeMic\(\)[\s\S]{0,650}toggleCapture\(\)/.test(indexSrc) && /id="wakeBtn"[^>]*onclick="Voice\.micTap\(\)"/.test(indexSrc));
 timers.length = 0; rafQueue.length = 0; RIG.disable();
 
 // ── SCENARIO 37: MAP-OPEN-VOICE — the map phrases pass THROUGH the session, alive ─

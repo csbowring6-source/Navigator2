@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 07:05 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 08:25 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0705AM"></script>
+<script src="speech.js?v=12Aug2026-0825AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1683,7 +1683,12 @@ function backHome() { saveSession(); showHome(); }
 function homeMic() {
   if (_vlLong) { _vlLong = false; return; }   // a long-press opened the voice log — don't also start the mic
   openAppView();
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  // HOME-TO-CHAT: the old gate predated cloud ears — an SR-less browser (an iOS fresh
+  // install with dictation off exposes NO webkitSpeechRecognition) silently skipped
+  // the session. The session needs SR OR the cloud recording kit; only a browser
+  // with neither falls back to typing.
+  if (('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
+      || (window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
     Voice.toggleCapture();
   } else {
     document.getElementById('userInput')?.focus();
@@ -2891,7 +2896,18 @@ function cleanText(t){return t.replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*
 // and calls _onShutUp; the driver's next tap (_onDriverTap) or word (sendMessage) re-arms.
 let suppressReplies = false;
 window._onShutUp = () => { suppressReplies = true; };
-window._onDriverTap = () => { suppressReplies = false; };
+window._onDriverTap = () => {
+  suppressReplies = false;
+  // HOME-TO-CHAT: every session-opening mic tap lands the view where the answers and
+  // tables render. The switch used to live ONLY inside homeMic's own tap handler —
+  // single-homed; now any driver mic tap taken on the home screen brings up the chat
+  // view (idempotent everywhere else; answers render into #chatArea regardless, so
+  // anything produced pre-switch is already there when the view arrives).
+  try {
+    const home = document.getElementById('homeScreen');
+    if (home && !home.classList.contains('hidden')) openAppView();
+  } catch (e) {}
+};
 function addMsg(role,text,spoken){
   if (role === 'nav' && suppressReplies) return;   // a late reply: not shown (speech.js already drops the audio)
   document.getElementById('welcome')?.remove();
