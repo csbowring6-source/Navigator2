@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 08:07 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 13 Aug 2026, 08:44 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0807PM"></script>
+<script src="speech.js?v=13Aug2026-0844AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1720,6 +1720,21 @@ function toggleMapView() {
   } else {
     revealMap();
     if (btn) btn.textContent = '🗺 🎙 Hide';
+    // MAP-PINS (field 13 Aug): the general path clears the option pins on EVERY
+    // AI-routed question ("new question — old pins go"), so an unrelated ask left
+    // the layer empty while the round stayed live — the next open showed a bare
+    // map. The round is the map's subject: opening onto an EMPTY layer with a live
+    // round re-renders the round's pins from the record, through the existing
+    // machinery (numbered, coloured, stalked, framed). Pins already up — a fuel
+    // round that claimed the map — ARE the new round: kept, never clobbered.
+    if (!optionPins.length && campRound && campRound.sites && campRound.sites.length) {
+      const rp = campRound.sites.filter(s => s.lat != null && s.lon != null).map(s => ({ name: s.name, lat: s.lat, lon: s.lon, mins: s.mins }));
+      if (rp.length) {
+        window._pendingPins = rp;
+        if (window._navMap && window.L) showOptionPins(rp);
+        else window._pendingOptionPins = rp;
+      }
+    }
     // Fit the pins now the container has real size — a hidden map can't measure.
     // MAP-FRAME: a live camps round frames on ITS pins (the choosing happens there);
     // otherwise today's default fit, unchanged.
