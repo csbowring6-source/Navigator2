@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 07:27 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 08:07 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0727PM"></script>
+<script src="speech.js?v=12Aug2026-0807PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4688,6 +4688,19 @@ function ordinalIndex(text, max) {
   const v = m[1];
   return /^\d+$/.test(v) ? parseInt(v, 10) : (ORDINAL_WORDS[v] || null);
 }
+// CLOSEST-BIND (field 12 Aug): "which one's closest?" with the list up is the
+// SUPERLATIVE cousin of "number two" — the list is closest-first, so the answer is
+// card number one, from the round, one line. This gate hears only the bare
+// superlative follow-up: other lists' superlatives (servos, coffee) and asks that
+// name a place ("closest one to Tully") route exactly as today.
+function isClosestAsk(text) {
+  const t = (text || '').trim();
+  if (!t || t.split(/\s+/).length > 7) return false;
+  if (/\b(?:servos?|fuel|petrol|diesel|coffee|caf[eé]s?|toilets?|pubs?|supermarkets?|chemists?)\b/i.test(t)) return false;
+  if (/\b(?:in|at|near|around|to|towards?)\s+[A-Z]/.test(t)) return false;
+  return /\b(?:which|what)\b[\s\S]{1,25}\b(?:closest|nearest)\b/i.test(t)
+      || /^(?:the\s+)?(?:closest|nearest)(?:\s+one)?\s*[?.!]*$/i.test(t);
+}
 // Match spoken text to ONE of the sites on screen. Returns a site record, the sentinels
 // {ambiguous:true} / {outOfRange:true, count} (position past the list), or null — caller
 // asks which. POSITION IS TRIED FIRST and WINS over any name in the same utterance;
@@ -4785,6 +4798,20 @@ async function handleNumberRequest(text) {
     // button. The clarify fires ONLY when a SHORT dial ask truly names nothing (bare
     // "dial" — asked once; ASK-ONCE governs its answers). A long sentence that merely
     // contains call/ring routes normally.
+    // CLOSEST-BIND (field 12 Aug): with the list up, "which one's closest?" re-ran
+    // the whole camps answer ("which one" is camps anaphora → answerCamps — all ten
+    // read again). It's ONE line from the round: the top card, its number and its
+    // distance — never a re-search, never the list again, no question back.
+    if (campRound && campRound.sites.length && isClosestAsk(text)) {
+      addMsg('user', text);
+      const s = campRound.sites[0];
+      const dist = (s.anchorKm != null && s.anchorName)
+        ? (s.anchorKm === 0 ? `in ${s.anchorName}` : s.anchorKm === 1 ? `about a k out of ${s.anchorName}` : `about ${s.anchorKm} k's out of ${s.anchorName}`)
+        : (s.mins != null ? `${hrsMinsSpoken(s.mins)} away` : (s.km != null ? `${Math.round(s.km)} km away` : ''));
+      const m = `Number one — ${s.name}${dist ? ', ' + dist : ''}.`;
+      addMsg('nav', m); lastNavReply = m; lastSpoken = m; speak(m);
+      return true;
+    }
     if (campRound && campRound.sites.length && /\b(?:dial|ring|call|phone)\b/i.test(text)) {
       const hit = matchListedSite(text);
       if (hit && hit.outOfRange) {
