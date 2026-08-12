@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 01:09 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 01:57 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0109PM"></script>
+<script src="speech.js?v=12Aug2026-0157PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -4372,8 +4372,24 @@ function resumeCampRoundIfPersisted() {
   try { const raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); if (raw.mode) tripMode = raw.mode; if (!currentRunDest && raw.dest) currentRunDest = raw.dest; } catch (e) {}
   loadCommittedDest();
   if (!campRound) loadCampRound();
+  // PAIR-RESTORE (T3, field MU2JRUU): the missing quadrant — a LIVE round with NO trip
+  // record rebuilds its journey FROM the round itself: the asked-about place, its
+  // coordinates and the radius are already stored on the round (FRAME-ANCHOR), so the
+  // rebuild needs ZERO lookups. An expired round never reaches here (loadCampRound
+  // bins it), and a legacy anchor-less round stays honest-fresh as before. The normal
+  // 'round' path below then runs unchanged — same announcement, same silent re-render.
+  let rebuiltFromRound = false;
+  if (!currentRunDest && !savedTripDest() && campRound && campRound.place && campRound.anchor && campRound.anchor.lat != null) {
+    currentRunDest = campRound.place.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    committedDest = { name: currentRunDest, lat: campRound.anchor.lat, lon: campRound.anchor.lon };
+    try {
+      localStorage.setItem('navigator_last_trip_raw', JSON.stringify({ dest: currentRunDest }));
+      localStorage.setItem(COMMITTED_KEY, JSON.stringify(committedDest));
+    } catch (e) {}
+    rebuiltFromRound = true;
+  }
   const rm = resumeMode();
-  logResume(rm === 'round' ? 'round' : rm === 'trip-only' ? 'trip' : 'none');
+  logResume(rm === 'round' ? (rebuiltFromRound ? 'round-from-round' : 'round') : rm === 'trip-only' ? 'trip' : 'none');
   if (rm !== 'round') return;   // trip-only → the confirm opener fires on the first query; fresh → nothing
   // (1) Silent restore: OWN the camps display cleanly. State (messages, run) already came
   // back from restoreSession; we replace only the visual it couldn't rebuild. No questions.
