@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 08:25 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 12:19 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0825AM"></script>
+<script src="speech.js?v=12Aug2026-1219PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3958,7 +3958,7 @@ function isTopicChange(text) {
   return /\?\s*$/.test(t)
     || /^(?:where|what|when|how|which|find|show|give me|is there|are there|can (?:you|i))\b/i.test(t)
     || isCampsQuery(t)
-    || /\b(?:fuel|petrol|diesel|servo|unleaded|coffee|toilet|weather)\b/i.test(t);
+    || /\b(?:fuel|petrol|diesel|servos?|unleaded|coffee|toilet|weather)\b/i.test(t);
 }
 // A brief re-ask for a held question that got a fumbled (unmatched) answer. For a
 // two-candidate offer it names BOTH, so "yes" to an either/or is answered with the
@@ -4190,7 +4190,13 @@ function matchPendingAnswer(text, pending, tripModeOverride) {
       return { action: 'restate', dest: rnt.dest, origin: rnt.origin || null, orig: text };
     if (/\b(?:yes|yeah|yep|yup|still|keep|same|carry on|resume|stay on|on it|leave it|that one|correct|still on it)\b/.test(t) && !isTopicChange(t))
       return { action: 'trip-keep', dest: pending.dest, ask: pending.ask || '' };   // carry the request that triggered the confirm
-    return { action: 'trip-fresh' };
+    // CONFIRM-ANSWERS-ONLY (T1, field MU2JRUU): only an EXPLICIT no drops the trip.
+    if (/^(?:no|nah|nope|no thanks?|not (?:any ?more|now)|no longer|fresh|start fresh|new trip|drop (?:it|that|the trip)|forget (?:it|that|the trip)|scrap (?:it|that|the trip)|done with (?:it|that))\b/.test(t) && !isTopicChange(t))
+      return { action: 'trip-fresh' };
+    // Anything else — a garble, or the driver's actual request — is NOT an answer:
+    // the trip stays (nothing here clears it), and the unmatched machinery releases
+    // the words to normal routing. The old catch-all treated all of this as "no".
+    return null;
   }
   if (pending.type === 'trip-scale-confirm') {
     // "That's N km — really heading to X — yes or no?" — a yes commits the distant
