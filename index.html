@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:21 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:34 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0421PM"></script>
+<script src="speech.js?v=12Aug2026-0434PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -5216,19 +5216,23 @@ function copyFuelCsv() {
 }
 
 // ── NEARBY ACCOMMODATION — hotels, motels, backpackers (OSM) ─────────────────
-async function fetchAccom() {
-  if (!gps) return '';
+async function fetchAccom(at) {
+  // ACCOM-DEST: `at` = {lat, lon, name} anchors the lookup at the trip destination
+  // (the caller decides, matching the TRIP DESTINATION instruction). No `at` →
+  // today's near-the-driver behaviour, unchanged.
+  const anc = at || gps;
+  if (!anc) return '';
   try {
-    const r = await fetch(`${API_URL}accom?lat=${gps.lat}&lon=${gps.lon}&radius=30`);
+    const r = await fetch(`${API_URL}accom?lat=${anc.lat}&lon=${anc.lon}&radius=30`);
     const d = await r.json();
     if (d.results && d.results.length) {
       const cands = d.results
         .filter(s => s.lat && s.lon)
-        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(gps.lat, gps.lon, s.lat, s.lon) }))
+        .map(s => ({ ...s, lat: +s.lat, lon: +s.lon, crow: distKm(anc.lat, anc.lon, s.lat, s.lon) }))
         .sort((a,b) => a.crow - b.crow)
         .slice(0, 6);
       if (!cands.length) return '';
-      const roads = await roadDistances(gps.lat, gps.lon, cands);
+      const roads = await roadDistances(anc.lat, anc.lon, cands);
       cands.forEach((c,i) => {
         c.km   = (roads[i] && roads[i].km != null) ? roads[i].km : c.crow;
         c.mins = roads[i] ? roads[i].mins : null;
@@ -5237,7 +5241,9 @@ async function fetchAccom() {
       notePlaces(cands.map(s => s.name));
       addPendingPins(cands.map(s => ({ name: s.name, price: null, km: s.km, mins: s.mins, lat: s.lat, lon: s.lon })));
       const list = cands.map(s => `${s.name} — ${distTime(s)} (${s.type}${s.stars ? ', ' + s.stars + ' star' : ''})`).join('; ');
-      return `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
+      return at
+        ? `ACCOMMODATION AT THE DESTINATION — ${at.name} (real places, nearest first by ROAD from ${at.name}, all pinned on the driver's map; no live prices or vacancy): ${list}.`
+        : `NEARBY ACCOMMODATION (real places, nearest first by ROAD, all pinned on the driver's map; no live prices or vacancy): ${list}.`;
     }
   } catch(e) {
     return `LOOKUP FAILED — ${navigator.onLine ? 'the map data service isn\'t responding; tell the driver it\'s the service playing up, not their signal, and it usually comes good in a minute' : 'the phone has lost internet; tell the driver you\'ll help once they\'re back in range'}. Could not check accommodation. Name nothing, invent nothing.`;
@@ -6188,10 +6194,19 @@ async function _sendMessageInner(silent){
   if (/hotel|motel|hostel|backpacker|resort|accommodation|a room|cabin|b ?& ?b|bnb|luxury|treat ourselves|somewhere (nice|comfortable|to sleep)|stay tonight|overnight/i.test(scanText)) {
     const namedElsewhereA = scanText.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/);
     const currentTownA = (gpsAddress || '').split(',')[0].trim().toLowerCase();
-    if (namedElsewhereA && namedElsewhereA[1].toLowerCase() !== currentTownA) {
+    // ACCOM-DEST: on a journey the DATA anchors on the destination — matching the
+    // TRIP DESTINATION instruction below. "Near me / around here", or naming the
+    // current town, keeps the driver's position, exactly as that instruction says;
+    // naming the destination itself is the destination ask, never "elsewhere".
+    const tnAccom = tripNow();
+    const accomDestName = (currentRunDest && tnAccom && tnAccom.lat != null) ? tnAccom.committedName : '';
+    const saysHereA = /\b(?:near me|around here)\b/i.test(scanText) || !!(namedElsewhereA && namedElsewhereA[1].toLowerCase() === currentTownA);
+    const accomAnchor = (accomDestName && !saysHereA) ? { lat: tnAccom.lat, lon: tnAccom.lon, name: accomDestName } : null;
+    if (namedElsewhereA && namedElsewhereA[1].toLowerCase() !== currentTownA
+        && namedElsewhereA[1].toLowerCase() !== accomDestName.toLowerCase()) {
       accomCtx = ` NOTE: the driver asked about accommodation "in ${namedElsewhereA[1]}" but is currently nowhere near there — say plainly you can only check places near their CURRENT position right now, and name ${namedElsewhereA[1]} back to them so they know you understood. Do not invent or guess anything about ${namedElsewhereA[1]}.`;
     } else {
-      accomCtx = await fetchAccom();
+      accomCtx = await fetchAccom(accomAnchor);
     }
   }
   // Everyday places? Ground-truth up to two categories per question
