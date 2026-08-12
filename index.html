@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 13 Aug 2026, 08:44 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 13 Aug 2026, 09:05 AM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=13Aug2026-0844AM"></script>
+<script src="speech.js?v=13Aug2026-0905AM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1521,8 +1521,12 @@ function formatDayBrief(dest, origin, route, vehicle, headOverride) {
 function parseTripIntent(text, state) {
   state = state || {};
   const cur = (state.currentDest || '').trim();
-  const t = (text || '').trim();
+  let t = (text || '').trim();
   if (!t) return null;
+  // DECLARE-TRIP: "going to DRIVE UP to Wallaby Creek" — the going-to is an
+  // auxiliary; the real movement verb rides inside. Collapse the chain so the
+  // trip-verb pattern below sees the plain "going to Wallaby Creek".
+  t = t.replace(/\b(going|gonna|heading|off)\s+to\s+(?:drive|head|go|travel|run|shoot|get)\s+(?:(?:up|down|over|out|across|back)\s+)?(?:to|towards?)\s+/i, '$1 to ');
 
   // A question, or a request for something NEARBY (even if it names a town),
   // is not a trip statement — "find me a campsite in Bowen" stays a camps query.
@@ -1530,7 +1534,22 @@ function parseTripIntent(text, state) {
     || /^(where|what|when|how|which|find|show|is there|are there|can (you|i)|do (you|i)|got any|looking for)\b/i.test(t)
     || /\b(nearest|closest|cheapest)\b/i.test(t)
     || /\b(campsite|camp site|camps?|caravan park|powered site|free camp|dump point|servos?|fuel|petrol|diesel|toilet|loo|caf[eé]|coffee|feed|meal|lunch|dinner|breakfast|chemist|pharmacy|gym|pub|atm|weather)\b/i.test(t);
-  if (isRequest) return null;
+  if (isRequest) {
+    // DECLARE-TRIP (field 13 Aug, CAV6MBN): a going-to DECLARATION embedded in a
+    // request changes the trip too — "We're going to drive up to Wallaby Creek,
+    // can you find me some campsites" anchored the search but left the trip on
+    // yesterday's town. Cut the request clause; if what remains is a clean trip
+    // declaration (trip verbs, no request words left), parse THAT — one sentence,
+    // both jobs, same commit machinery. A named place WITHOUT the verbs
+    // ("caravan parks in Tully") strips to nothing new and stays a search anchor.
+    const head = t
+      .replace(/(?:[,;]\s*(?:and\s+|then\s+)?|\s+(?:and|then)\s+)?(?:can|could|will|would)\s+(?:you|we|i)\b[\s\S]*$/i, '')
+      .replace(/(?:[,;]\s*(?:and\s+|then\s+)?|\s+(?:and|then)\s+)(?:find|show|pull|grab|get|give|plan|identify|what|where|is there|are there|any)\b[\s\S]*$/i, '')
+      .replace(/[,;]\s*$/, '').trim();
+    if (head && head !== t && /\b(?:going|gonna|heading|head|driving|drive|travelling|traveling|bound|off)\b/i.test(head))
+      return parseTripIntent(head, state);
+    return null;
+  }
 
   const NOT_PLACE = new Set(['the','a','an','some','any','somewhere','anywhere','nowhere','here','there','home','nearest','closest','next','town','back','now','today','tomorrow','tonight','way','road','route','trip','it','me','us','go']);
   const cleanPlace = s => (s||'')
@@ -1552,8 +1571,9 @@ function parseTripIntent(text, state) {
       && isPlace(m[1]) && isPlace(m[2])) {
     origin = cleanPlace(m[1]); dest = cleanPlace(m[2]);
   }
-  // B) trip verb + destination ("going back to Canungra", "heading to Airlie")
-  else if ((m = t.match(/\b(?:going|heading|head|driving|drive|travelling|traveling|travel|bound|we'?re|we are|off)\s+(?:back\s+)?(?:to|for|off to)\s+([A-Za-z][A-Za-z'’\- ]{2,28}?)(?=\s+(?:for|today|tomorrow|tonight|this|next|and|now|please|then|via)\b|[.,!?]|$)/i))) {
+  // B) trip verb + destination ("going back to Canungra", "heading to Airlie").
+  // DECLARE-TRIP: direction fillers ride along — "driving up to", "heading down to".
+  else if ((m = t.match(/\b(?:going|heading|head|driving|drive|travelling|traveling|travel|bound|we'?re|we are|off)\s+(?:(?:back|up|down|over|out|across)\s+)?(?:to|for|off to)\s+([A-Za-z][A-Za-z'’\- ]{2,28}?)(?=\s+(?:for|today|tomorrow|tonight|this|next|and|now|please|then|via)\b|[.,!?]|$)/i))) {
     dest = cleanPlace(m[1]);
   }
   // C) explicit lead-ins ("back to X", "take me to X", "plan a trip to X")
