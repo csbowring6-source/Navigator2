@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 01:57 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 02:12 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0157PM"></script>
+<script src="speech.js?v=12Aug2026-0212PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -1175,9 +1175,16 @@ function collapseNearbyDuplicates(list) {
 }
 // The offer to make, or null: a single 'did you mean', a two-way choice, or a
 // which-state question when the same name sits in several states.
+// PLACE-GUESS (field HRH6EFQ): the did-you-mean fires ONLY for something genuinely
+// place-shaped. The scores separate cleanly: a real near-miss is tight ("Mosman" →
+// Mossman −0.75) while ordinary words rank far ("see friends" → Isisford 1.25) —
+// beyond this bound the phonetic list is noise, not a suggestion, and the caller
+// falls to its honest "I heard …" re-ask, which names no towns.
+const PLACE_SUGGEST_MAX_SCORE = 0.5;
 function decideOffer(candidate, state) {
   const m = matchTowns(candidate, state); if (!m.length) return null;
   const best = m[0];
+  if (best.score > PLACE_SUGGEST_MAX_SCORE) return null;   // not place-shaped — never a town suggestion
   let close = m.filter(x => x.score - best.score < 0.75).slice(0, 4);
   close = collapseNearbyDuplicates(close);   // suburb-of-a-town near-dups -> the plain town
   const top = close[0];
@@ -1223,46 +1230,13 @@ function respondToUnresolved(candidate, orig) {
     : `I heard "${candidate}" — I don't think I caught that right. Say just the town name, nice and clearly.`;
 }
 
-// The driver REJECTED the offered town(s). Never re-run the identical strategy (the
-// dead-loop bug: same transcript -> same wrong offer). Accumulate the rejected names,
-// then escalate: (a) a state-constrained geocode of the raw transcript, ONCE; (b) a
-// WIDENED phonetic search offering up to three NEW candidates only; (c) an honest
-// "can't place it — type it". A rejected name is NEVER re-offered, and the rejected
-// pool only grows, so the sequence always terminates. Sets the next pending; returns
-// the message.
+// The driver REJECTED the offered town(s): the open question, nothing else.
 async function escalateAfterRejection(p) {
-  const rejected = [ ...(p.rejected || []), ...((p.towns || []).map(t => t.name)) ];
-  const place = p.place || '';
-  const given = p.state || '';                          // a state the driver actually SAID
-  const eff = p.effState || given || driverState();
-  const isRej = name => rejected.some(r => (r || '').toLowerCase() === (name || '').toLowerCase());
-  const nextBase = { type: 'dest-suggest', orig: p.orig, place, state: given, effState: eff, rejected };
-  // (a) state-constrained geocode of the raw transcript — ONCE, only if a state was said
-  if (given && !p.stateTried && place) {
-    let v = null; try { v = await resolveDestination(place, given); } catch (e) {}
-    if (v && (v.verdict === 'ok' || v.verdict === 'confirm') && v.name && !isRej(v.name)) {
-      setPending({ ...nextBase, stateTried: true, widened: p.widened, towns: [{ name: v.name, lat: v.lat, lon: v.lon, st: given }] });
-      return `Did you mean ${v.name} — yes or no?`;
-    }
-  }
-  // (b) widened phonetic (edit distance up to 3) — NEW candidates only, up to three,
-  // ONE round only (a short key matches many weak sound-alikes; trawling them all is
-  // just a slower loop). After the widened offer is rejected, give up honestly.
-  if (!p.widened) {
-    const wide = matchTowns(place, eff, 3).filter(t => !isRej(t.name));
-    const fresh = collapseNearbyDuplicates(wide).slice(0, 3);
-    if (fresh.length) {
-      setPending({ ...nextBase, stateTried: true, widened: true, towns: fresh });
-      const names = fresh.map(t => t.name);
-      const list = names.length === 1 ? names[0]
-        : names.length === 2 ? `${names[0]} or ${names[1]}`
-        : `${names[0]}, ${names[1]} or ${names[2]}`;
-      return `Then maybe ${list}?`;
-    }
-  }
-  // (c) honest — end the loop, never re-offer a rejected name
+  // PLACE-GUESS (field HRH6EFQ): a "no" to any did-you-mean gets the ONE honest open
+  // question and NOTHING else. The old escalation's widened phonetic pass invented
+  // towns from nothing ("Then maybe Sassafras, Scarness or Barwon Heads?") — retired.
   setPending({ type: 'destination' });
-  return `I still can't place that town from what I'm hearing — best to type it in so I get it exactly right.`;
+  return `Where to, then?`;
 }
 
 // Re-resolve a name PREFERRING somewhere near the driver — used when they insist
@@ -3065,6 +3039,7 @@ RULES:
 - OFF THE MAPPED ROAD: If the context says the driver is off the mapped road network, tell them clearly and early — something like "you're a fair way off the mapped roads here, so these times are rough." Still give them the options, but say the distances are approximate, and suggest asking again once they're back on a proper road for accurate figures. Do not pretend the numbers are precise.
 - TOILETS: A practical, urgent need — treat it matter-of-factly, no coyness. The list includes public toilets AND servos, cafés and pubs (all of which have toilets and are far better mapped). Give the NEAREST one, whatever kind it is — nobody cares whether it's a park or a servo when they need to go. Say what it is ("the servo at X, 4 minutes"). In Solo mode, prefer staffed or well-lit places over isolated spots.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
+- NEVER suggest or guess town names the driver hasn't said — no offering places they might have meant. If the destination isn't clear, ask plainly where they're headed. Naming candidate towns is the app's own machinery's job, and only from real matches.
 - NEVER say you have no route or trip plan. If the driver asks about something ahead or "along my route" and no trip is set, do not refuse — offer to plan it ("Want me to set a trip to [place]?" if they named one, otherwise "Where are you headed — I'll set the trip") and answer with what's nearby meanwhile.
 - PHONE NUMBERS (hard rule): only ever state a phone number you are certain of from a verified source. If you are not certain of the exact digits, say you couldn't find a verified number and offer to keep looking — NEVER guess, approximate, or reconstruct a number. A wrong number sent to a driver at the wheel is worse than no number.
 - NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
