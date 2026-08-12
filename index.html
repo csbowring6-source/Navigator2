@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:11 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:16 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0411PM"></script>
+<script src="speech.js?v=12Aug2026-0416PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2404,6 +2404,33 @@ function drawTripRoute() {
 // recompute from the live fix first, and if that hasn't produced numbers yet the
 // context carries NO number and tells the AI the route is still being worked out.
 // (Fix A: a stale origin was feeding "55km" for an ~90km trip.)
+// TRIP-IS-THE-TOPIC: the ONE trip lookup — the consolidated committed-trip facts
+// (currentRunDest → committed record → the persisted raw record), NEVER the wipeable
+// prose string. TRIP-HEADER consumes it now; TRIP-LOOKUP moves the deterministic
+// paths onto it next. Null when no trip is committed.
+function tripNow() {
+  if (!committedDest || committedDest.lat == null) loadCommittedDest();
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}'); } catch (e) {}
+  const dest = currentRunDest || (committedDest && committedDest.name) || raw.dest || '';
+  if (!dest) return null;
+  const cc = (committedDest && committedDest.lat != null) ? committedDest : null;
+  return {
+    dest,
+    lat: cc ? cc.lat : null, lon: cc ? cc.lon : null,
+    mode: tripMode || raw.mode || '',
+    origin: raw.origin || '',
+    routeDrawn: !!(window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2),
+  };
+}
+// TRIP-HEADER: the standing first line of every AI turn while a trip is committed.
+// ("committed" without a date — the stored records carry no commit timestamp, and
+// the header never claims what it can't know.)
+function tripHeaderLine() {
+  const tn = tripNow();
+  if (!tn) return '';
+  return `CURRENT TRIP: ${tn.origin ? tn.origin + ' to ' : 'to '}${tn.dest}${tn.mode ? ', ' + tn.mode : ''}, committed — all requests relate to this trip unless the driver changes it.`;
+}
 async function buildRouteCtx() {
   if (!currentRunDest || !gps) return '';
   let tr = window._tripRoute;
@@ -3049,6 +3076,7 @@ RULES:
 - TOILETS: A practical, urgent need — treat it matter-of-factly, no coyness. The list includes public toilets AND servos, cafés and pubs (all of which have toilets and are far better mapped). Give the NEAREST one, whatever kind it is — nobody cares whether it's a park or a servo when they need to go. Say what it is ("the servo at X, 4 minutes"). In Solo mode, prefer staffed or well-lit places over isolated spots.
 - ANSWER THE QUESTION ASKED. If the driver asks for food, do not tell them about toilets. If a lookup failed, say so — do NOT substitute a different category you happen to have information about.
 - NEVER suggest or guess town names the driver hasn't said — no offering places they might have meant. If the destination isn't clear, ask plainly where they're headed. Naming candidate towns is the app's own machinery's job, and only from real matches.
+- While CURRENT TRIP is in the context, NEVER ask where the driver is headed and never say no trip is set — the trip IS set; answer every request relative to it unless the driver names somewhere new.
 - NEVER say you have no route or trip plan. If the driver asks about something ahead or "along my route" and no trip is set, do not refuse — offer to plan it ("Want me to set a trip to [place]?" if they named one, otherwise "Where are you headed — I'll set the trip") and answer with what's nearby meanwhile.
 - PHONE NUMBERS (hard rule): only ever state a phone number you are certain of from a verified source. If you are not certain of the exact digits, say you couldn't find a verified number and offer to keep looking — NEVER guess, approximate, or reconstruct a number. A wrong number sent to a driver at the wheel is worse than no number.
 - NEVER mention your context, lists, data, sources, or tools. Don't narrate what you can see — banned phrases: "on the map", "on your map", "already on your map", "your list", "in your list", "my data", "the data shows". BUT you MAY say "the others are pinned — tap any one to go there" when you've named fewer options than are showing. That's helping the driver, not narrating.
@@ -6216,6 +6244,7 @@ async function _sendMessageInner(silent){
     ? `TRIP DESTINATION: ${committedDest.name} (${(+committedDest.lat).toFixed(5)}, ${(+committedDest.lon).toFixed(5)}). This stay/camps/parks/numbers question is about the DESTINATION — answer for ${committedDest.name}, NOT the current GPS location, unless the driver explicitly says "near me" or "around here".`
     : '';
   const ctx=[
+    tripHeaderLine(),   // TRIP-HEADER: the trip is the topic — first line, every turn it exists
     destAnchorCtx,
     gpsAddress?`Current location: ${gpsAddress} (${gps?.lat?.toFixed(5)}, ${gps?.lon?.toFixed(5)})`:'NO LOCATION FIX — do not name or guess specific nearby places; ask the driver to tap the 📍 pin to set their location first.',
     offRoadCtx,
