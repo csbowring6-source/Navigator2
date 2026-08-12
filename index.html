@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 02:12 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:11 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0212PM"></script>
+<script src="speech.js?v=12Aug2026-0411PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2345,12 +2345,14 @@ function drawCommittedRoute(name) {
   ensureCommittedDest(name).then(c => { if (c) plotTripRoute(name); }).catch(() => {});
 }
 
+// ROUTE-SANS-MAP (lab 12 Aug: fuel went trip-blind in a voice-only session): COMPUTING
+// the route — the OSRM fetch and _tripRoute, the numbers and corridor path every DATA
+// consumer reads (fuel's journey branch, buildRouteCtx, the corridor filters) — needs
+// NO map and now runs whenever a trip is committed. DRAWING stays map-gated exactly
+// as before; a computed-but-undrawn route queues itself for the moment the map exists.
 async function plotTripRoute(dest) {
   if (!dest) return;
-  if (!gps || !window._navMap || !window.L) {
-    window._pendingRouteDest = dest; // map not ready yet — draw when it is
-    return;
-  }
+  if (!gps) { window._pendingRouteDest = dest; return; }   // no fix yet — compute once there is one
   // Where is the destination? ONLY from the committed record — the trip was
   // resolved once at commit time and every step reuses those coords. No cold-
   // cache fall-through to a fresh geocode (that's how the route drifted off the
@@ -2373,18 +2375,25 @@ async function plotTripRoute(dest) {
       originLat: gps.lat, originLon: gps.lon,
       dlat: dlat, dlon: dlon,
     };
-    const latlngs = rd.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
     // Keep the road geometry so "cheapest fuel ahead" can filter to the corridor
     window._tripRoute.path = rd.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lon: c[0] }));
-    if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
-    if (routeDestMarker) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
-    routeLine = L.polyline(latlngs, { color: '#F5A623', weight: 4, opacity: 0.85 }).addTo(window._navMap);
-    routeDestMarker = L.marker([dlat, dlon], { icon: L.divIcon({
-      html: '<div style="width:14px;height:14px;background:#2ECC71;border:3px solid #0A1628;border-radius:50%;box-shadow:0 0 0 3px rgba(46,204,113,0.3);"></div>',
-      className: '', iconSize: [14,14], iconAnchor: [7,7],
-    })}).addTo(window._navMap);
-    window._navMap.fitBounds(routeLine.getBounds(), { padding: [20,20] });
+    drawTripRoute();   // map-gated — queues itself if the map isn't up yet
   } catch(e) {}
+}
+// The DRAWING half — everything Leaflet, byte-equivalent to the old body's tail.
+function drawTripRoute() {
+  const tr = window._tripRoute;
+  if (!tr || !tr.path || !tr.path.length) return;
+  if (!window._navMap || !window.L) { window._pendingRouteDest = tr.dest; return; }   // draw when the map arrives (the init hook re-plots)
+  const latlngs = tr.path.map(p => [p.lat, p.lon]);
+  if (routeLine) { window._navMap.removeLayer(routeLine); routeLine = null; }
+  if (routeDestMarker) { window._navMap.removeLayer(routeDestMarker); routeDestMarker = null; }
+  routeLine = L.polyline(latlngs, { color: '#F5A623', weight: 4, opacity: 0.85 }).addTo(window._navMap);
+  routeDestMarker = L.marker([tr.dlat, tr.dlon], { icon: L.divIcon({
+    html: '<div style="width:14px;height:14px;background:#2ECC71;border:3px solid #0A1628;border-radius:50%;box-shadow:0 0 0 3px rgba(46,204,113,0.3);"></div>',
+    className: '', iconSize: [14,14], iconAnchor: [7,7],
+  })}).addTo(window._navMap);
+  window._navMap.fitBounds(routeLine.getBounds(), { padding: [20,20] });
 }
 
 // Build the AI's route-distance line. ONLY a freshly-computed route for the
