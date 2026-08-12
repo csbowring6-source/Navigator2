@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:16 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:21 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0416PM"></script>
+<script src="speech.js?v=12Aug2026-0421PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -2417,6 +2417,7 @@ function tripNow() {
   const cc = (committedDest && committedDest.lat != null) ? committedDest : null;
   return {
     dest,
+    committedName: cc ? cc.name : '',
     lat: cc ? cc.lat : null, lon: cc ? cc.lon : null,
     mode: tripMode || raw.mode || '',
     origin: raw.origin || '',
@@ -3289,7 +3290,11 @@ async function fetchFuelPrices() {
   if (!gps) return '';
   try {
     const code = FUEL_CODE[selectedFuel] || 'U91';
-    const onJourney = !!(currentRunDest && window._tripRoute && window._tripRoute.path && window._tripRoute.path.length > 2);
+    // TRIP-LOOKUP: the journey test reads the ONE lookup. routeDrawn is the identical
+    // _tripRoute.path check as before; a drawn route only ever exists for a committed
+    // trip, so the answers are unchanged — one source of truth.
+    const tnFuel = tripNow();
+    const onJourney = !!(tnFuel && tnFuel.routeDrawn && currentRunDest);
     // FUEL-FAR-END: a committed journey ask also asks at the DESTINATION end — the
     // GPS query's 100km cap can never reach a far corridor end (field 07 Aug:
     // Cairns→Mission Beach is ~112km crow; six priced servos sat at that end unfetched).
@@ -4864,11 +4869,15 @@ function campsAnchor(scanText) {
   let named = (namedMatch && !alongWay) ? namedMatch[1] : null;
   let anchorCoords = null;
   if (!named && !alongWay) {
-    if (!committedDest || committedDest.lat == null) loadCommittedDest();
-    let tripName = currentRunDest;
-    if (!tripName) { try { tripName = (JSON.parse(localStorage.getItem('navigator_last_trip_raw') || '{}').dest) || ''; } catch (e) {} }
-    if (committedDest && committedDest.lat != null) { named = committedDest.name; anchorCoords = { lat: committedDest.lat, lon: committedDest.lon }; }
-    else if (tripName) named = tripName;   // name-only trip — getCampsNear geocodes it
+    // TRIP-LOOKUP: the chain this block embodied (committed record → currentRunDest →
+    // the persisted raw record) is now read from the ONE lookup, behaviour-identical:
+    // committed coords → anchor there under the committed name; a name-only trip →
+    // named only (getCampsNear geocodes it).
+    const tn = tripNow();
+    if (tn) {
+      if (tn.lat != null) { named = tn.committedName; anchorCoords = { lat: tn.lat, lon: tn.lon }; }
+      else named = tn.dest;
+    }
   }
   return { named, anchorCoords };
 }
@@ -6240,8 +6249,11 @@ async function _sendMessageInner(silent){
   // origin. Fuel/weather/etc. asks don't match stayParksAsk, so their GPS anchoring is
   // untouched. This is the backstop; points above route most such asks to answerCamps.
   const stayParksAsk = /\b(?:parks?|sites?|camps?|campsites?|caravan|numbers?|stay|staying|overnight|accommodation|motel|hotel|cabin)\b/i.test(scanText);
-  const destAnchorCtx = (currentRunDest && committedDest && committedDest.lat != null && stayParksAsk)
-    ? `TRIP DESTINATION: ${committedDest.name} (${(+committedDest.lat).toFixed(5)}, ${(+committedDest.lon).toFixed(5)}). This stay/camps/parks/numbers question is about the DESTINATION — answer for ${committedDest.name}, NOT the current GPS location, unless the driver explicitly says "near me" or "around here".`
+  // TRIP-LOOKUP: the stay/accommodation guard reads the ONE lookup (same fields, same
+  // condition shape — currentRunDest plus the committed coords — same words out).
+  const tnStay = tripNow();
+  const destAnchorCtx = (currentRunDest && tnStay && tnStay.lat != null && stayParksAsk)
+    ? `TRIP DESTINATION: ${tnStay.committedName} (${(+tnStay.lat).toFixed(5)}, ${(+tnStay.lon).toFixed(5)}). This stay/camps/parks/numbers question is about the DESTINATION — answer for ${tnStay.committedName}, NOT the current GPS location, unless the driver explicitly says "near me" or "around here".`
     : '';
   const ctx=[
     tripHeaderLine(),   // TRIP-HEADER: the trip is the topic — first line, every turn it exists
