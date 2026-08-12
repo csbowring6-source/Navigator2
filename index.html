@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 04:34 PM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 12 Aug 2026, 07:27 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=12Aug2026-0434PM"></script>
+<script src="speech.js?v=12Aug2026-0727PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -3932,7 +3932,21 @@ function campCardNote(s) {
 // ALWAYS takes the deterministic /camps path (getCorridorCamps handles no-GPS),
 // so a phone number is never AI-composed and the answer never comes back empty.
 function isCampsQuery(text) {
-  return /\b(?:campgrounds?|campsites?|camp ?sites?|camping|camps?|caravan ?parks?|van ?parks?|holiday ?parks?|tourist ?parks?|caravan ?sites?|powered ?sites?|free ?camps?|dump ?points?|showgrounds?|somewhere to (?:stay|camp)|(?:stay|camp) tonight|overnight (?:stops?|stays?|spots?|parks?))\b/i.test(text);
+  return /\b(?:campgrounds?|campsites?|camp ?sites?|camping|camps?|caravan ?parks?|van ?parks?|holiday ?parks?|tourist ?parks?|caravan ?sites?|powered ?sites?|free ?camps?|dump ?points?|showgrounds?|somewhere to (?:stay|camp)|(?:stay|camp) tonight|overnight (?:stops?|stays?|spots?|parks?))\b/i.test(text)
+    || isCampsMishear(text);
+}
+// CAMPS-EARS (field 12 Aug): the app's own advertised word must always be heard.
+// "Say camps" came back as "Kemps"/"hemps" and got treated as a place. A BARE short
+// utterance (two words or fewer) whose content word is a close phonetic neighbour
+// of "camps" IS the camps request — fillers stripped, so "camps please" / "um camps"
+// count. Longer sentences never match, and the second word must be a filler, so
+// genuine places ("Kemps Creek", "caravan parks in Kempsey") route as places.
+function isCampsMishear(text) {
+  let t = (text || '').trim().toLowerCase().replace(/[.!?,]+$/, '');
+  if (!t || t.split(/\s+/).length > 2) return false;
+  t = t.replace(/^(?:um|uh|er|the|some|any|find|show)\s+/, '')
+       .replace(/\s+(?:please|thanks|mate|cheers|now|then|eh|ok|okay)$/, '');
+  return /^(?:camps?|kemps|kamps|hemps)$/.test(t);
 }
 // ANAPHORA — references to an ALREADY-in-play camps set: "those parks", "the sites",
 // "which one", "their numbers". Deliberately NOT part of isCampsQuery: bare "parks" /

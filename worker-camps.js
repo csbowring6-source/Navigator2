@@ -704,7 +704,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 08 Aug 2026, 12:48 PM AEST (MAP-EARS: the /transcribe hint gains the short command vocabulary — map words, carry on, close words, offer answers)";
+const WORKER_BUILD = "Navigator Worker — 12 Aug 2026, 07:23 PM AEST (CAMPS-EARS: the /transcribe hint gains 'camps' — the app's own advertised keyword joins the command vocabulary)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -726,7 +726,9 @@ const PLACE_HINT = [
   "showground, big rig, drive-through site, annexe, jockey wheel, servo, diesel.",
   // MAP-EARS: the short command vocabulary — the field mishears ("Hold map",
   // "Hide mat", "This is MEP") were Whisper reaching for words it had no bias toward.
-  "Commands: map, show the map, hide the map, carry on, close, that's all,",
+  // CAMPS-EARS: "camps" is the app's own advertised keyword — bare "camps" came
+  // back as "Kemps"/"hemps" (the Towns list biases toward Kempsey).
+  "Commands: map, show the map, hide the map, camps, carry on, close, that's all,",
   "stop listening, yes, no, none, all of them, number one, number two, number three.",
 ].join(" ");
 
