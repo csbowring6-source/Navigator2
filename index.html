@@ -620,7 +620,7 @@
   </div>
   <div class="home-foot">
     <button class="home-edit" onclick="openSetup(true)">⚙ Edit setup</button>
-    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 13 Aug 2026, 09:05 AM AEST</div>
+    <div class="build-stamp" id="buildStamp" title="Last updated">✓ v 13 Aug 2026, 02:18 PM AEST</div>
   </div>
 </div>
 
@@ -849,7 +849,7 @@
 <!-- Voice subsystem — CLASSIC script, loaded BEFORE the app so window.Voice exists
      when the app wires it. ?v= carries the build stamp (bumped with #buildStamp);
      a stale module is also caught by the Voice.BUILD check at INIT. -->
-<script src="speech.js?v=13Aug2026-0905AM"></script>
+<script src="speech.js?v=13Aug2026-0218PM"></script>
 <script>
 // API calls go through the Navigator relay (Cloudflare Worker) — ALL keys
 // (Anthropic, NSW fuel, weather) live ONLY in the Worker's encrypted settings.
@@ -6643,6 +6643,20 @@ restoreSession();
 loadCampRound();
 resumeCampRoundIfPersisted();   // trip+round → silent re-render of the camps answer, no questions (field QAKH2GZ)
 checkCampReturn();
+// GREETING-VOICE (Brian, 13 Aug): once boot settles, SPEAK the greeting already on
+// screen — the very words in #homeGreeting, out loud. One voice per boot: a resume
+// boot has spoken "Back to your X trip." and a restored mid-session carries its own
+// lastSpoken — both skip. The ear does NOT open: Voice.speakGreeting is TTS-only,
+// one attempt, no retry — a platform that gates speech behind the first gesture
+// stays silent with NOTHING queued to fire at the driver's first tap.
+function bootGreeting() {
+  const home = document.getElementById('homeScreen');
+  if (!home || home.classList.contains('hidden')) return;   // setup interview or a restored view — no greeting on screen
+  if (lastSpoken) return;                                   // something already spoke this boot — one greeting, never two
+  const line = document.getElementById('homeGreeting')?.textContent || '';
+  if (line) Voice.speakGreeting(line);
+}
+setTimeout(bootGreeting, 800);   // after the boot sequence settles
 setInterval(fetchWeather,600000);
 checkVersion();
 setInterval(checkVersion, 900000);

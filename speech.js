@@ -1663,6 +1663,28 @@ function speak(text) {
   _speakNow(text);
 }
 
+// GREETING-VOICE (Brian, 13 Aug): the boot greeting — spoken ONCE, best-effort,
+// TTS only: no session, no mic, no state machine, so the ear stays shut. Platforms
+// that gate speech behind the first user gesture (iOS WebKit always; Android
+// Chrome without user activation) must end SILENT with nothing left behind — a
+// blocked utterance parked in the engine queue would fire at the driver's first
+// tap, on top of their real request. So: ONE attempt, no retry; on an error, or
+// no start within the watchdog window, the engine queue is flushed and the
+// greeting is dropped for this boot.
+function speakGreeting(text) {
+  if (!synth || !text) return;
+  if (synth.speaking || _ttsActive) return;   // never talk over anything real
+  let started = false;
+  const utt = new SpeechSynthesisUtterance(String(text).replace(/\s*[—–]\s*/g, ', '));
+  const guard = setTimeout(() => {
+    if (!started) { try { synth.cancel(); } catch (e) {} logEvent('greet.blocked', 'no-start'); }
+  }, TTS_START_WATCHDOG_MS);
+  utt.onstart = () => { started = true; logEvent('greet.spoken', ''); };
+  utt.onend = () => { clearTimeout(guard); };
+  utt.onerror = () => { clearTimeout(guard); if (!started) { try { synth.cancel(); } catch (e) {} logEvent('greet.blocked', 'error'); } };
+  try { synth.speak(utt); } catch (e) { clearTimeout(guard); }
+}
+
 function _speakNow(text) {
   _ttsActive = true;
   parkedAnswer = null;   // a NEW utterance supersedes any parked one (CARRY-ON release rule)
@@ -1789,7 +1811,7 @@ function _afterSpeak() {
   }
 
   return {
-    BUILD: '13 Aug 2026, 09:05 AM AEST',
+    BUILD: '13 Aug 2026, 02:18 PM AEST',
     // sessions + capture
     openSession:  openConversation,
     requestSession: requestSession,   // gated SELF-open (the after-call reopen) — never overrides a shut-up
@@ -1800,6 +1822,7 @@ function _afterSpeak() {
     reset:        voiceReset,
     // speech out
     speak:        speak,
+    speakGreeting: speakGreeting,   // GREETING-VOICE: boot greeting — one attempt, no retry, never queued
     resumeSpeech: resumeSpeech,   // CARRY-ON: continue-words re-speak a freshly-cut answer (true = handled)
     queueReplies: queueReplies,   // app-sequential replies queue (don't self-interrupt)
     cancelSpeech: cancelSpeech,
