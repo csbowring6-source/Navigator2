@@ -1,7 +1,32 @@
 const ALLOWED_ORIGIN = "https://csbowring6-source.github.io";
 
+// ═══ ORIGIN GATE (SECURE) ═══
+// Every route except /version and GET /log/<id> is reachable ONLY from the app's
+// own origin (GitHub Pages) or a local dev server. Anything else — a different
+// origin, or NO Origin header (curl, scripts, a pasted URL) — gets a 403 before any
+// paid service (Anthropic, OpenAI, Places, the fuel feeds) is touched. CORS headers
+// echo the matched origin (never "*"), so localhost on any port works for testing.
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+function allowedOrigin(request) {
+  const o = request.headers.get("Origin") || "";
+  return (o === ALLOWED_ORIGIN || LOCAL_ORIGIN.test(o)) ? o : null;
+}
+// Exempt from the gate: read-only, free, and opened as a plain navigation (no Origin).
+function originExempt(request, url) {
+  if (url.pathname === "/version") return true;
+  return request.method === "GET" && url.pathname.startsWith("/log/");
+}
+// Stamp the matched origin onto a handler's response (all responses here are built
+// with `new Response`, so a copy with mutable headers is cheap and safe).
+function withOrigin(res, origin) {
+  const out = new Response(res.body, res);
+  out.headers.set("Access-Control-Allow-Origin", origin);
+  out.headers.set("Vary", "Origin");
+  return out;
+}
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,   // default; withOrigin() overrides per request
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "content-type, x-api-key, anthropic-version",
 };
@@ -575,48 +600,6 @@ async function handleWeather(request, env) {
   return new Response(r.body, { status: r.status, headers: { ...corsHeaders, "content-type": "application/json" } });
 }
 
-// ═══ TEMPORARY — /places-probe  (REMOVE AT PHASE 4) ══════════════════════════
-// A raw window onto Google Places Text Search so a REAL regional-town query can be
-// run with the EXACT production field mask and the result inspected before the
-// Places-sourced camps architecture (phase 1) is built. Returns Google's JSON
-// UNMODIFIED, no caching. Uses the GOOGLE_PLACES_KEY already configured.
-//   GET /places-probe?q=caravan parks in Cardwell QLD        (text only)
-//   GET /places-probe?q=caravan parks&lat=-18.26&lon=146.03  (adds a locationBias)
-// The field mask below MUST stay identical to production: id, displayName,
-// formattedAddress, location, nationalPhoneNumber, regularOpeningHours — no
-// ratings/reviews/photos/editorial (those are a further SKU).
-// >>> Listed for removal at phase 4 of the camps-architecture change. <<<
-const PLACES_PROBE_FIELD_MASK =
-  "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours";
-async function handlePlacesProbe(request, env) {
-  const u = new URL(request.url);
-  const q = u.searchParams.get("q") || "";
-  if (!q) return jsonResp({ error: "q required — e.g. ?q=caravan parks in Cardwell QLD" }, 400);
-  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "GOOGLE_PLACES_KEY not configured" }, 500);
-  const lat = parseFloat(u.searchParams.get("lat"));
-  const lon = parseFloat(u.searchParams.get("lon"));
-  const body = { textQuery: q };
-  if (!isNaN(lat) && !isNaN(lon)) body.locationBias = { circle: { center: { latitude: lat, longitude: lon }, radius: 15000 } };
-  try {
-    const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY,
-        "X-Goog-FieldMask": PLACES_PROBE_FIELD_MASK,
-      },
-      body: JSON.stringify(body),
-    });
-    // Google's response, byte-for-byte, no caching, no wrapping.
-    return new Response(r.body, {
-      status: r.status,
-      headers: { ...corsHeaders, "content-type": "application/json", "cache-control": "no-store" },
-    });
-  } catch (e) {
-    return jsonResp({ error: "probe fetch failed", detail: String((e && e.message) || e) }, 502);
-  }
-}
-
 // ═══ Nominatim THROUGH the Worker — proper UA + bounded retry/backoff ════════
 // The frontend used to call Nominatim direct from the browser, so a driver retrying
 // got their PHONE rate-limited (~1 req/s per IP) and every lookup then failed. Here
@@ -704,7 +687,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 12 Aug 2026, 07:23 PM AEST (CAMPS-EARS: the /transcribe hint gains 'camps' — the app's own advertised keyword joins the command vocabulary)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:29 AM AEST (SECURE: origin gate on every route but /version and GET /log/<id>; /places-probe removed)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -826,8 +809,23 @@ async function handleLogGet(id, env) {
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
     const url = new URL(request.url);
+    const origin = allowedOrigin(request);
+    // Preflight: the browser asks before a JSON POST. Answer only for an allowed origin.
+    if (request.method === "OPTIONS") {
+      if (!origin) return new Response(null, { status: 403 });
+      return new Response(null, { status: 204, headers: { ...corsHeaders, "Access-Control-Allow-Origin": origin, "Access-Control-Max-Age": "86400", "Vary": "Origin" } });
+    }
+    // The gate — before any route runs, so a refused caller never reaches a paid service.
+    if (!origin && !originExempt(request, url)) {
+      return new Response(JSON.stringify({ error: "forbidden — this Worker only serves the Navigator app" }), { status: 403, headers: { "content-type": "application/json" } });
+    }
+    const res = await route(request, env, url);
+    return origin ? withOrigin(res, origin) : res;
+  },
+};
+
+async function route(request, env, url) {
     // GET /log/<id> — dynamic path, so it can't sit in the exact-match table below.
     if (url.pathname.startsWith("/log/")) return handleLogGet(url.pathname.slice(5), env);
     const routes = {
@@ -842,7 +840,6 @@ export default {
       "/transcribe": () => handleTranscribe(request, env),
       "/geocode": () => handleGeocode(request, env),
       "/reverse-geocode": () => handleReverseGeocode(request, env),
-      "/places-probe": () => handlePlacesProbe(request, env),   // TEMPORARY — still slated for removal (left in place; not in the phase-4 ticket)
       "/log": () => handleLogPost(request, env),                // share a voice log; GET /log/<id> handled above
       "/version": () => handleVersion(),
     };
@@ -864,5 +861,4 @@ export default {
       status: upstream.status,
       headers: { ...corsHeaders, "content-type": "application/json" },
     });
-  },
-};
+}
