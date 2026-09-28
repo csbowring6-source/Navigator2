@@ -393,20 +393,17 @@ async function handleCamps(request, env) {
 // a higher SKU and are forbidden.
 const CAMPS2_FIELD_MASK =
   "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.regularOpeningHours";
-async function handleCamps2(request, env) {
-  const u = new URL(request.url);
-  const lat = parseFloat(u.searchParams.get("lat"));
-  const lon = parseFloat(u.searchParams.get("lon"));
-  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
-  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
-  if (!env.GOOGLE_PLACES_KEY) return jsonResp({ error: "places camps not configured — no GOOGLE_PLACES_KEY", unavailable: true }, 503);
+// The lookup itself, shared by /camps2 and /stay (STAY): returns { results, cached } or
+// { errResp } — the exact error Response the route has always sent. One KV cache.
+async function placesCamps(lat, lon, radiusKm, env) {
+  if (!env.GOOGLE_PLACES_KEY) return { errResp: jsonResp({ error: "places camps not configured — no GOOGLE_PLACES_KEY", unavailable: true }, 503) };
 
   // KV cache keyed on ROUNDED coords (~1km) + radius, 30-day TTL — caravan parks don't
   // move. Distinct "camps2:" prefix so it never collides with the OSM "camps:" cache.
   const kv = env && env.PLACES_KV;
   const ckey = `camps2:${lat.toFixed(2)},${lon.toFixed(2)}:${radiusKm}`;
   if (kv) {
-    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return jsonResp({ source: "places", radiuskm: radiusKm, cached: true, results: c.results }); } catch (e) {}
+    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return { results: c.results, cached: true }; } catch (e) {}
   }
 
   // Places (New) Text Search, biased to a circle around the driver. maxResultCount 20
@@ -429,13 +426,13 @@ async function handleCamps2(request, env) {
     });
     if (!r.ok) {
       let detail = ""; try { const e = await r.json(); detail = (e && e.error && e.error.message) || ""; } catch (_) {}
-      return jsonResp({ error: "places camps lookup failed", status: r.status, detail, unavailable: true }, 502);
+      return { errResp: jsonResp({ error: "places camps lookup failed", status: r.status, detail, unavailable: true }, 502) };
     }
-    try { d = await r.json(); } catch (e) { return jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502); }
+    try { d = await r.json(); } catch (e) { return { errResp: jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502) }; }
   } catch (e) {
-    return jsonResp({ error: "couldn't reach Places", detail: String((e && e.message) || e), unavailable: true }, 503);
+    return { errResp: jsonResp({ error: "couldn't reach Places", detail: String((e && e.message) || e), unavailable: true }, 503) };
   }
-  if (!d || typeof d !== "object") return jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502);
+  if (!d || typeof d !== "object") return { errResp: jsonResp({ error: "places sent back something unreadable", unavailable: true }, 502) };
 
   // Zero results is a valid, honest answer (Places returns {} — no `places`), NOT an
   // error. Normalise each place; drop any without a usable location or name.
@@ -461,7 +458,17 @@ async function handleCamps2(request, env) {
   }).filter(Boolean).sort((a, b) => a.km - b.km).map(({ km, ...rec }) => rec);   // nearest first, km not emitted (mirrors /camps)
 
   if (kv) { try { await kv.put(ckey, JSON.stringify({ results, ts: Date.now() }), { expirationTtl: 30 * 24 * 3600 }); } catch (e) {} }
-  return jsonResp({ source: "places", radiuskm: radiusKm, cached: false, results });
+  return { results, cached: false };
+}
+async function handleCamps2(request, env) {
+  const u = new URL(request.url);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
+  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
+  const r = await placesCamps(lat, lon, radiusKm, env);
+  if (r.errResp) return r.errResp;
+  return jsonResp({ source: "places", radiuskm: radiusKm, cached: r.cached, results: r.results });
 }
 
 // ═══ /camps2-osm — FILTERED OSM CAMPS (camps architecture, phase 2 — ADDITIVE) ═══
@@ -516,19 +523,25 @@ function osmAddress(t) {
   return [((t["addr:housenumber"] ? t["addr:housenumber"] + " " : "") + (t["addr:street"] || "")).trim(), (t["addr:city"] || t["addr:suburb"] || "").trim()]
     .filter(Boolean).join(", ");
 }
-async function handleCamps2Osm(request, env) {
-  const u = new URL(request.url);
-  const lat = parseFloat(u.searchParams.get("lat"));
-  const lon = parseFloat(u.searchParams.get("lon"));
-  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
-  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
-
+// STAY: the facility tags /stay reads off an OSM record — kept on the cached record (a
+// short whitelist, never the whole tag bag) so the shared cache serves both routes.
+// /camps2-osm strips them on output, so its shape is unchanged.
+const OSM_FACILITY_TAGS = ["fee", "charge", "power_supply", "shower", "toilets", "swimming_pool", "pool", "internet_access"];
+function facilityTags(t) {
+  const out = {};
+  OSM_FACILITY_TAGS.forEach((k) => { if (t && t[k] != null && t[k] !== "") out[k] = String(t[k]); });
+  return out;
+}
+// The lookup itself, shared by /camps2-osm and /stay: { results, cached } or { errResp }.
+// Caches up to 40 nearest (was 12) so a corridor anchor isn't starved; the route still
+// presents 12. Older cached entries (≤12, no tags) stay valid — tags default to none.
+async function osmCamps(lat, lon, radiusKm, env) {
   // KV cache FIRST — a hit serves WITHOUT hitting Overpass. Distinct "camps2-osm:"
   // prefix so it never collides with the "camps:" or "camps2:" caches. 7-day TTL.
   const kv = env && env.PLACES_KV;
   const ckey = `camps2-osm:${lat.toFixed(2)},${lon.toFixed(2)}:${radiusKm}`;
   if (kv) {
-    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return jsonResp({ source: "osm", radiuskm: radiusKm, cached: true, results: c.results }); } catch (e) {}
+    try { const c = await kv.get(ckey, { type: "json" }); if (c && c.results) return { results: c.results, cached: true }; } catch (e) {}
   }
 
   // Same camp/caravan selectors as /camps, PLUS rest areas — the free-stop category.
@@ -538,12 +551,12 @@ async function handleCamps2Osm(request, env) {
   const res = await overpass(q);
   if (res.error) {
     // A fresh KV hit would have returned above — honest error, never a crash.
-    return jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503);
+    return { errResp: jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503) };
   }
   const elements = (res.data && res.data.elements) || [];   // malformed/empty upstream -> [] (honest zero), not a crash
   const results = osmPlacesNearest(elements, "", lat, lon, 200)   // parse + nearest-first (big cap; we filter next)
     .filter((p) => isNonCommercialCamp(p.tags))                   // NON-COMMERCIAL only — the category Places lacks
-    .slice(0, 12)                                                 // same presentation cap as /camps
+    .slice(0, 40)                                                 // cache cap (the route presents 12, as always)
     .map((p) => ({
       id: p.osmid,                                                // stable OSM id (phase-3 merge/dedup key)
       name: p.name,
@@ -553,9 +566,267 @@ async function handleCamps2Osm(request, env) {
       phone: p.tags.phone || p.tags["contact:phone"] || "",       // where a tag exists, else ""
       hours: p.tags.opening_hours ? [p.tags.opening_hours] : null, // OSM single string -> array; mirrors /camps2 hours shape
       source: "osm",
+      tags: facilityTags(p.tags),                                 // STAY facilities — stripped by /camps2-osm
     }));
   if (kv && !res.cached) { try { await kv.put(ckey, JSON.stringify({ results, ts: Date.now() }), { expirationTtl: 7 * 24 * 3600 }); } catch (e) {} }
-  return jsonResp({ source: "osm", radiuskm: radiusKm, cached: !!res.cached, results });
+  return { results, cached: !!res.cached };
+}
+async function handleCamps2Osm(request, env) {
+  const u = new URL(request.url);
+  const lat = parseFloat(u.searchParams.get("lat"));
+  const lon = parseFloat(u.searchParams.get("lon"));
+  const radiusKm = Math.min(parseInt(u.searchParams.get("radius") || "40"), 100);
+  if (isNaN(lat) || isNaN(lon)) return jsonResp({ error: "lat and lon required" }, 400);
+  const r = await osmCamps(lat, lon, radiusKm, env);
+  if (r.errResp) return r.errResp;
+  // Same 12-record presentation, same record shape (no `tags`) as before STAY.
+  const results = r.results.slice(0, 12).map(({ tags, ...rec }) => rec);
+  return jsonResp({ source: "osm", radiuskm: radiusKm, cached: r.cached, results });
+}
+
+// ═══ GET /stay — "SOMEWHERE TO STAY" as finished data, code only, no AI (STAY) ═══
+// lat,lng (the van) · dlat,dlng (the destination) · window 1|2 (hours ahead, default 1)
+// · kind both|paid|free (default both). Road route from OSRM (the app's routing source),
+// parks from the Places lookup + free camps / rest areas from the OSM lookup around
+// anchors spaced along the ahead stretch, merged with the app's dedupe rules, then kept
+// only if AHEAD on the route, inside the drive-time window and within STAY_CORRIDOR_KM
+// of the road. Three nearest ahead, with the nearest free camp guaranteed a slot when
+// kind=both and one qualifies.
+//
+// CORRIDOR: 5 km crow-flies from the nearest route vertex. Why 5: a highway town is
+// ~3 km across, so 5 km takes in a caravan park on the far side of town, but leaves out a
+// beach camp 20 minutes down a side road — whose detour our along-route drive_time
+// wouldn't include, so quoting it would understate the time. (The app's own corridor
+// filters use 10 km for servos and 15 km for camps; both quote time-from-GPS by road,
+// which absorbs the detour. This endpoint doesn't, so it's tighter.)
+const STAY_CORRIDOR_KM = 5;
+const STAY_ANCHOR_RADIUS_KM = 40;    // each lookup circle (the Places bias cap is 50 km)
+const STAY_ANCHOR_SPACING_KM = 50;   // along-route spacing — circles overlap by ~30 km
+const STAY_ANCHOR_GRID = 0.2;        // anchors snap to a ~20 km grid so a moving van re-hits the same KV keys
+const STAY_MAX_ANCHORS = 6;
+const STAY_RESULTS = 3;
+
+// Durations are ALWAYS hours-and-minutes (the app's locked convention, ported verbatim
+// from index.html hrsMins): "1 hr 35" · "2 hr" · "28 min" — never decimals, never "95 minutes".
+function hrsMins(totalMins) {
+  const t = Math.max(0, Math.round(totalMins));
+  if (t < 60) return `${t} min`;
+  const h = Math.floor(t / 60), m = t % 60;
+  return m ? `${h} hr ${String(m).padStart(2, "0")}` : `${h} hr`;
+}
+
+// OSRM route with per-segment annotations, so every vertex carries cumulative km and
+// seconds from the start. In-memory cache (1 h, 2-decimal coords) — free source, but a
+// 1000 km route is a big JSON and the same pair is asked again as the van rolls.
+const routeCache = new Map();
+const ROUTE_TTL = 60 * 60 * 1000;
+async function osrmRoute(lat, lng, dlat, dlng) {
+  const key = `${lat.toFixed(2)},${lng.toFixed(2)}>${dlat.toFixed(2)},${dlng.toFixed(2)}`;
+  const hit = routeCache.get(key);
+  if (hit && Date.now() - hit.ts < ROUTE_TTL) return hit.data;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${lng},${lat};${dlng},${dlat}?overview=full&geometries=geojson&annotations=distance,duration`,
+      { headers: { "User-Agent": "NavigatorApp/1.0 (Australian road travel assistant)" }, signal: ctrl.signal });
+    if (!r.ok) return { error: "HTTP " + r.status };
+    const d = await r.json();
+    const rt = d && d.routes && d.routes[0];
+    if (!rt || !rt.geometry || !rt.legs || !rt.legs[0] || !rt.legs[0].annotation) return { error: "no route" };
+    const pts = rt.geometry.coordinates.map((c) => ({ lat: c[1], lon: c[0] }));
+    const segKm = rt.legs[0].annotation.distance, segS = rt.legs[0].annotation.duration;
+    const cumKm = [0], cumS = [0];
+    for (let i = 0; i < segKm.length; i++) { cumKm.push(cumKm[i] + segKm[i] / 1000); cumS.push(cumS[i] + segS[i]); }
+    const data = { pts, cumKm, cumS, km: rt.distance / 1000, secs: rt.duration };
+    if (routeCache.size > 50) routeCache.clear();
+    routeCache.set(key, { data, ts: Date.now() });
+    return data;
+  } catch (e) {
+    return { error: e && e.name === "AbortError" ? "timeout" : "error" };
+  } finally { clearTimeout(timer); }
+}
+
+// Nearest route vertex to a point, searched only over the ahead stretch [from, to]. A
+// coarse stride first (≤ ~600 checks), then a fine pass around the best — a 2 h stretch
+// can be thousands of vertices and there may be a hundred candidates.
+function nearestVertex(route, lat, lon, from, to) {
+  const n = to - from + 1;
+  const stride = Math.max(1, Math.floor(n / 600));
+  let best = from, bestKm = Infinity;
+  for (let i = from; i <= to; i += stride) {
+    const dk = hav(lat, lon, route.pts[i].lat, route.pts[i].lon);
+    if (dk < bestKm) { bestKm = dk; best = i; }
+  }
+  for (let i = Math.max(from, best - stride); i <= Math.min(to, best + stride); i++) {
+    const dk = hav(lat, lon, route.pts[i].lat, route.pts[i].lon);
+    if (dk < bestKm) { bestKm = dk; best = i; }
+  }
+  return { idx: best, km: bestKm };
+}
+
+// Ported from index.html sharesNameToken / fetchMergedCamps / dedupeCampSites — the
+// same rules the app applies, so /stay and the app never disagree about what's one site.
+function sharesNameToken(a, b) {
+  const GEN = /^(park|parks|caravan|van|camp|camps|camping|tourist|holiday|site|sites|free|powered|beach|creek|river|point|rest|area|reserve|road|highway|big4|discovery|top)$/;
+  const toks = (s) => new Set((s || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !GEN.test(w)));
+  const A = toks(a), B = toks(b);
+  for (const t of A) if (B.has(t)) return true;
+  return false;
+}
+function verifiedPhone(s) {
+  const p = (s && s.phone) || "";
+  return (p.replace(/[^\d]/g, "").length >= 6) ? p.trim() : null;
+}
+// Twin rule: an OSM record within ~100 m of a Places result sharing a distinctive name
+// token is the SAME site. A numbered Places twin wins (and carries the free NATURE); an
+// unnumbered Places twin adds nothing — keep the OSM record instead.
+function mergeCamps(places, osm) {
+  const merged = places.slice();
+  for (const o of osm) {
+    const twin = places.find((p) => hav(p.lat, p.lon, o.lat, o.lon) <= 0.1 && sharesNameToken(p.name, o.name));
+    if (!twin) { merged.push(o); continue; }
+    if (verifiedPhone(twin)) { twin.freeByNature = true; continue; }
+    const mi = merged.indexOf(twin); if (mi !== -1) merged.splice(mi, 1);
+    merged.push(o);
+  }
+  return merged;
+}
+// Same-site dedupe: within 250 m AND one name a substring of the other (punctuation
+// stripped). Places beats OSM; otherwise the longer name wins; a dropped free twin
+// stamps its nature onto the survivor. Fields are never merged between records.
+function isFreeNature(s) { return !!(s && (s.source === "osm" || s.freeByNature)); }
+function dedupeCampSites(sites) {
+  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const out = [];
+  for (const s of sites) {
+    const sn = norm(s.name);
+    const j = out.findIndex((o) => { const on = norm(o.name); return hav(s.lat, s.lon, o.lat, o.lon) <= 0.25 && (sn.includes(on) || on.includes(sn)); });
+    if (j === -1) { out.push(s); continue; }
+    const cur = out[j];
+    const preferNew = (s.source === "places" && cur.source !== "places") ? true
+                    : (cur.source === "places" && s.source !== "places") ? false
+                    : sn.length > norm(cur.name).length;
+    const winner = preferNew ? s : cur, loser = preferNew ? cur : s;
+    if (isFreeNature(loser)) winner.freeByNature = true;
+    if (preferNew) out[j] = s;
+  }
+  return out;
+}
+const FREE_CAMP_NAME = /\b(rest area|free camp|rv free camp)\b/i;   // a Places-only free camp, by name (app rule)
+function stayKind(s) { return (isFreeNature(s) || FREE_CAMP_NAME.test(s.name || "") || FREE_CAMP_NAME.test(s.type || "")) ? "free" : "park"; }
+
+// Facilities: three states, straight from OSM tags — "yes" / "no" only when the tag says
+// exactly that, otherwise "unknown". A Places record has no tags → all unknown. Never guessed.
+function stayFacilities(tags) {
+  const t = tags || {};
+  const yn = (v) => (v === "yes" ? "yes" : v === "no" ? "no" : "unknown");
+  const w = String(t.internet_access || "").toLowerCase();
+  return {
+    powered: yn(t.power_supply),
+    showers: yn(t.shower),
+    toilets: yn(t.toilets),
+    pool: yn(t.swimming_pool || t.pool),
+    wifi: /^(wlan|yes|wired|terminal)$/.test(w) ? "yes" : w === "no" ? "no" : "unknown",
+  };
+}
+function stayPrice(tags) {
+  const t = tags || {};
+  const fee = String(t.fee || "").toLowerCase();
+  if (fee === "no" || fee === "none" || fee === "free" || fee === "0") return "free";
+  if (t.charge) return String(t.charge);
+  return "unknown";
+}
+
+async function handleStay(request, env) {
+  const u = new URL(request.url);
+  const num = (k) => parseFloat(u.searchParams.get(k));
+  const lat = num("lat"), lng = num("lng"), dlat = num("dlat"), dlng = num("dlng");
+  if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
+  const windowH = u.searchParams.get("window") === "2" ? 2 : 1;
+  const kind = ["both", "paid", "free"].includes(u.searchParams.get("kind")) ? u.searchParams.get("kind") : "both";
+  const windowLabel = windowH === 1 ? "1 hour" : "2 hours";
+  const nothing = { window_hours: windowH, kind, corridor_km: STAY_CORRIDOR_KM };
+
+  // 1. The road route, with cumulative km/seconds at every vertex.
+  const route = await osrmRoute(lat, lng, dlat, dlng);
+  if (route.error) return jsonResp({ ...nothing, error: "couldn't get the road route", detail: route.error, unavailable: true }, 502);
+  const routeOut = { km: Math.round(route.km), drive_time: hrsMins(route.secs / 60) };
+
+  // The ahead stretch: from the start vertex to the last vertex inside the window (plus
+  // a little slack so a site just past it still gets measured, then filtered honestly).
+  const windowS = windowH * 3600;
+  let endIdx = 0;
+  while (endIdx + 1 < route.pts.length && route.cumS[endIdx + 1] <= windowS * 1.1) endIdx++;
+
+  // 2. Lookup anchors along the stretch, snapped to a grid (cache re-hits), deduped.
+  const snap = (v) => Math.round(v / STAY_ANCHOR_GRID) * STAY_ANCHOR_GRID;
+  const anchors = []; const seenA = new Set();
+  const stretchKm = route.cumKm[endIdx];
+  for (let k = Math.min(20, stretchKm); ; k += STAY_ANCHOR_SPACING_KM) {
+    const target = Math.min(k, stretchKm);
+    let i = 0; while (i + 1 <= endIdx && route.cumKm[i + 1] <= target) i++;
+    const a = { lat: +snap(route.pts[i].lat).toFixed(2), lon: +snap(route.pts[i].lon).toFixed(2) };
+    const ak = `${a.lat},${a.lon}`;
+    if (!seenA.has(ak)) { seenA.add(ak); anchors.push(a); }
+    if (target >= stretchKm || anchors.length >= STAY_MAX_ANCHORS) break;
+  }
+  const lookups = await Promise.all(anchors.map(async (a) => {
+    const [p, o] = await Promise.all([placesCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env), osmCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env)]);
+    return { places: p.errResp ? null : p.results, osm: o.errResp ? null : o.results };
+  }));
+  const placesOk = lookups.some((l) => l.places), osmOk = lookups.some((l) => l.osm);
+  if (!placesOk && !osmOk) return jsonResp({ ...nothing, error: "camp lookups failed", unavailable: true }, 503);
+  // Pool by stable id across anchors (overlapping circles return the same sites).
+  const byId = (arr, key) => { const m = new Map(); arr.forEach((r) => { if (r && r.id && !m.has(r.id)) m.set(r.id, { ...r }); }); return [...m.values()]; };
+  const places = byId(lookups.flatMap((l) => l.places || []));
+  const osm = byId(lookups.flatMap((l) => l.osm || []));
+
+  // 3. Merge with the app's rules, then keep AHEAD + in-window + inside the corridor.
+  const merged = dedupeCampSites(mergeCamps(places, osm));
+  const startIdx = nearestVertex(route, lat, lng, 0, Math.min(endIdx, 50)).idx;   // the van's own vertex (OSRM snaps the start, so ~0)
+  const qualifying = [];
+  for (const s of merged) {
+    if (s.lat == null || s.lon == null) continue;
+    const nv = nearestVertex(route, s.lat, s.lon, startIdx, endIdx);
+    if (nv.km > STAY_CORRIDOR_KM) continue;                        // too far off the road
+    const kmAhead = route.cumKm[nv.idx] - route.cumKm[startIdx];
+    if (nv.idx <= startIdx || kmAhead < 0.5) continue;              // behind us, or underfoot
+    const secs = route.cumS[nv.idx] - route.cumS[startIdx];
+    if (secs > windowS) continue;                                   // past the window
+    qualifying.push({ s, kmAhead, secs, kmToDest: route.km - route.cumKm[nv.idx], kindOf: stayKind(s) });
+  }
+  qualifying.sort((a, b) => a.kmAhead - b.kmAhead);
+  const wanted = kind === "both" ? qualifying : qualifying.filter((q) => q.kindOf === (kind === "free" ? "free" : "park"));
+
+  // 4. Three nearest ahead; with kind=both the nearest free camp takes the last slot if
+  // none made it on distance alone.
+  let picked = wanted.slice(0, STAY_RESULTS);
+  if (kind === "both" && !picked.some((q) => q.kindOf === "free")) {
+    const firstFree = wanted.find((q) => q.kindOf === "free");
+    if (firstFree) { picked = [...picked.slice(0, STAY_RESULTS - 1), firstFree].sort((a, b) => a.kmAhead - b.kmAhead); }
+  }
+  const results = picked.map(({ s, kmAhead, secs, kmToDest, kindOf }) => ({
+    name: s.name, kind: kindOf, lat: s.lat, lng: s.lon,
+    phone: verifiedPhone(s),
+    km_ahead: Math.round(kmAhead), drive_time: hrsMins(secs / 60),
+    km_from_destination: Math.round(kmToDest),
+    facilities: stayFacilities(s.tags),
+    price: stayPrice(s.tags),
+    source: s.source,
+  }));
+  let message = null;
+  if (!results.length) {
+    const what = kind === "free" ? "free camps" : kind === "paid" ? "parks" : "parks or free camps";
+    message = `No ${what} within ${windowLabel} ahead`;
+  }
+  const notes = [];
+  if (!placesOk) notes.push("couldn't check caravan parks just now");
+  if (!osmOk) notes.push("couldn't check free camps just now");
+  return jsonResp({
+    ...nothing, route: routeOut, found: wanted.length, results, message,
+    sources: { places: placesOk ? "ok" : "failed", osm: osmOk ? "ok" : "failed", anchors: anchors.length },
+    ...(notes.length ? { note: notes.join("; ") } : {}),
+  });
 }
 
 async function handleStations(request) {
@@ -687,7 +958,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:29 AM AEST (SECURE: origin gate on every route but /version and GET /log/<id>; /places-probe removed)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:41 AM AEST (STAY: GET /stay — three places ahead on the route as finished data, no AI)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -834,6 +1105,7 @@ async function route(request, env, url) {
       "/camps": () => handleCamps(request, env),   // fallback-only: the frontend's Places-down safety net (phase 4)
       "/camps2": () => handleCamps2(request, env),   // Places-backed camps — LIVE (phase 3 merge)
       "/camps2-osm": () => handleCamps2Osm(request, env),   // filtered OSM non-commercial camps — LIVE (phase 3 merge)
+      "/stay": () => handleStay(request, env),   // STAY: three places ahead on the route, as finished data (no AI)
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
