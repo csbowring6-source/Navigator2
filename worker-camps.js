@@ -1111,11 +1111,17 @@ async function handleRoute(request) {
   if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
   const route = await osrmRoute(lat, lng, dlat, dlng);
   if (route.error) return jsonResp({ error: "couldn't get the road route", detail: route.error, unavailable: true }, 502);
-  return jsonResp({ km: Math.round(route.km), drive_time: hrsMins(route.secs / 60), mins: Math.round(route.secs / 60) });
+  // MAP: the route's line for the app's map — evenly sampled to at most 500 points, first
+  // and last always kept. Same cached route; nothing else here changes.
+  const n = route.pts.length, step = Math.max(1, Math.ceil((n - 1) / 499));
+  const line = [];
+  for (let i = 0; i < n; i += step) line.push([+route.pts[i].lat.toFixed(5), +route.pts[i].lon.toFixed(5)]);
+  const last = route.pts[n - 1]; if (line.length && (line[line.length - 1][0] !== +last.lat.toFixed(5) || line[line.length - 1][1] !== +last.lon.toFixed(5))) line.push([+last.lat.toFixed(5), +last.lon.toFixed(5)]);
+  return jsonResp({ km: Math.round(route.km), drive_time: hrsMins(route.secs / 60), mins: Math.round(route.secs / 60), line });
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 12:11 PM AEST (STAYLIST: /stay returns up to 10 places, phone back-fill on the first 3; GET /stay-phone looks up one place's number on request)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 01:22 PM AEST (MAP: /route also returns the route line, sampled to at most 500 points, from the same cached route)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",

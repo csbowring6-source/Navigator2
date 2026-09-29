@@ -78,6 +78,18 @@
   .ph{flex:0 0 56px;width:56px;height:56px;min-height:56px;margin:0;padding:0;border-radius:10px;background:var(--green);border-color:var(--green);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center}
   .ph.off{background:var(--grey);border-color:var(--grey)}
   .slim{min-height:44px;font-size:16px;padding:8px 12px;margin:8px 0}
+  /* MAP view (Stay screen): replaces the list in the same space; pins are numbered like the rows. */
+  #mapWrap{display:none;position:relative;height:50vh;min-height:300px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);margin-top:8px}
+  #map{height:100%;width:100%;background:#E8E4DA}
+  #mapMsg{display:none;position:absolute;inset:0;align-items:center;justify-content:center;padding:16px;text-align:center;font-weight:600;color:var(--muted);background:var(--card)}
+  #mapMsg.on{display:flex}
+  .pin{width:28px;height:28px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'Public Sans',sans-serif}
+  .pin.park{background:var(--green)} .pin.free{background:#9A4A00}
+  .pin.here{width:18px;height:18px;background:#1E88E5;border:3px solid #fff}
+  .pin.dest{width:16px;height:16px;background:var(--ink);border-radius:3px;border:2px solid #fff}
+  .leaflet-tooltip.dest-name{font:600 13px 'Public Sans',sans-serif}
+  #pinRow{margin-top:6px}
+  #s3.mapmode #results{display:none} #s3.mapmode #mapWrap{display:block}
   .notice{border:2px solid var(--brown);color:var(--brown-text);background:var(--card);border-radius:10px;padding:10px 12px;font-weight:600;font-size:15px;margin:6px 0 8px}
   .quiet{color:var(--muted);font-size:16px}
   .stamp{color:var(--muted);font-size:14px;text-align:center;margin-top:30px}
@@ -124,12 +136,16 @@
   <div class="row seg when" id="segWhen"><button data-v="soon" class="sel">Soon</button><button data-v="1">Within 1 hr</button><button data-v="2">Within 2 hrs</button><button data-v="stop" id="atStopBtn">At …</button></div>
   <div class="row seg" id="segKind"><button data-v="both" class="sel">Both</button><button data-v="paid">Paid</button><button data-v="free">Free</button></div>
   <div id="stayNotice"></div>
+  <div class="row seg" id="segView"><button data-v="list" class="sel">List</button><button data-v="map">Map</button></div>
+  <!-- MAP: for choosing, not navigating. Same results as the list; the driver's own map app does the driving. -->
+  <div id="mapWrap"><div id="map"></div><div id="mapMsg"></div></div>
+  <div id="pinRow"></div>
   <div id="results"></div>
 </section>
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 01:03 PM AEST';
+const BUILD = 'new v 29 Sep 2026, 01:22 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -302,11 +318,11 @@ async function openMain() {
   $('routeLine').textContent = 'Working out the route…'; $('routeLine').style.fontSize = ''; $('posHelp2').innerHTML = '';
   if (!pos) { if (posFailed) showNoPosition(); else $('routeLine').textContent = 'Waiting for your GPS position…'; return; }   // onFix() redraws this screen when the fix lands
   const r = await api('route', { lat: pos.lat, lng: pos.lng, dlat: trip.dest.lat, dlng: trip.dest.lng }, 12000);
-  if (r.ok && r.data && r.data.km != null) $('routeLine').textContent = `${r.data.drive_time} · ${r.data.km} km left`;
+  if (r.ok && r.data && r.data.km != null) { $('routeLine').textContent = `${r.data.drive_time} · ${r.data.km} km left`; if (Array.isArray(r.data.line)) routeLines[trip.dest.name] = r.data.line; }
   else $('routeLine').textContent = navigator.onLine ? "Couldn't get the route just now." : 'No signal — distance unavailable.';
   if (trip.stop) {
     const rs = await api('route', { lat: pos.lat, lng: pos.lng, dlat: trip.stop.lat, dlng: trip.stop.lng }, 12000);
-    if (rs.ok && rs.data && rs.data.km != null) $('stopLine').textContent = `Stopping at ${trip.stop.name} — ${rs.data.drive_time} · ${rs.data.km} km`;
+    if (rs.ok && rs.data && rs.data.km != null) { $('stopLine').textContent = `Stopping at ${trip.stop.name} — ${rs.data.drive_time} · ${rs.data.km} km`; if (Array.isArray(rs.data.line)) routeLines[trip.stop.name] = rs.data.line; }
   }
 }
 
@@ -338,6 +354,8 @@ async function search() {
   const tgt = target();
   const seq = ++searchSeq;
   $('results').innerHTML = '<p class="quiet">Searching…</p>'; $('stayNotice').innerHTML = ''; lastShown = null;   // old cards gone the moment a button is tapped
+  $('pinRow').innerHTML = ''; if (mapLayer) { mapLayer.remove(); mapLayer = null; }                              // and the old pins with them
+  if (view === 'map') { const m = $('mapMsg'); m.textContent = 'Searching…'; m.classList.add('on'); }
   const params = pos ? { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng, when, kind } : null;
   const r = params ? await api('stay', params, 25000) : { ok: false, status: 0, data: null };
   if (seq !== searchSeq) return;   // superseded by a newer tap
@@ -360,8 +378,38 @@ async function search() {
     $('results').innerHTML = `<p class="notice">${esc(why)} ${!pos ? 'Give it a moment.' : 'Try again when you have coverage.'}</p>`;
   }
 }
+// One compact row — used by the list AND by the map's tapped-pin row (MAP).
+function buildRow(r, i, ans, short, calls) {
+  const free = r.kind === 'free';
+  const row = document.createElement('div'); row.className = 'rowi' + (free ? ' free' : '');
+  const line2 = ans.when === 'stop'
+    ? `${r.dist_from_stop_km} km from ${esc(short)} · ${esc(r.drive_time)} away`
+    : `${r.km_ahead} km ahead · ${esc(r.drive_time)} · ${r.km_from_destination} km to ${esc(short)}`;
+  const fac = facLine(r);
+  row.innerHTML = `<div class="txt"><div class="nm">${i + 1}. ${esc(r.name)}${free ? '<span class="badge">FREE</span>' : ''}</div>
+    <div class="ln2">${line2}</div>${fac ? `<div class="fac">${esc(fac)}</div>` : ''}
+    ${calls[r.name] ? `<div class="called">Called at ${timeLabel(calls[r.name])}</div>` : ''}</div>`;
+  row.onclick = () => takeMeThere(r.lat, r.lng);   // the ROW is the map handover
+  if (r.phone) {
+    const a = document.createElement('a'); a.className = 'btn ph'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
+    a.textContent = '📞'; a.setAttribute('aria-label', `Call ${r.name} on ${r.phone}`);
+    a.onclick = (e) => { e.stopPropagation(); noteCalled(r.name); };
+    row.appendChild(a);
+  } else if (!free) {
+    // No number yet. The first three were already looked up by the Worker (nothing found);
+    // rows beyond that look up ON TAP — a paid lookup only when the driver actually wants it.
+    const looked = i < 3 || r.phoneLookedUp;
+    const b = document.createElement('button'); b.className = 'btn ph' + (looked ? ' off' : ''); b.textContent = '📞';
+    b.setAttribute('aria-label', looked ? `No phone number found for ${r.name}` : `Look up the number for ${r.name}`);
+    b.onclick = (e) => { e.stopPropagation(); if (!looked) lookupPhone(r, row, b); };
+    row.appendChild(b);
+    if (looked) { const n = document.createElement('div'); n.className = 'nonum'; n.textContent = 'No phone number found'; row.querySelector('.txt').appendChild(n); }
+  }
+  return row;
+}
 function renderStay(ans, tgtName, notice) {
   lastShown = { ans, tgtName, notice };
+  $('pinRow').innerHTML = '';
   const box = $('results'); box.innerHTML = '';
   $('stayNotice').innerHTML = notice ? `<div class="notice">${esc(notice)}</div>` : '';
   if (ans.note) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = cap(ans.note) + '.'; box.appendChild(n); }
@@ -369,35 +417,9 @@ function renderStay(ans, tgtName, notice) {
   const calls = (round && round.calls) || {};
   const short = shortName({ name: tgtName });
   const list = document.createElement('div'); list.className = 'rows';
-  ans.results.forEach((r, i) => {
-    const free = r.kind === 'free';
-    const row = document.createElement('div'); row.className = 'rowi' + (free ? ' free' : '');
-    const line2 = ans.when === 'stop'
-      ? `${r.dist_from_stop_km} km from ${esc(short)} · ${esc(r.drive_time)} away`
-      : `${r.km_ahead} km ahead · ${esc(r.drive_time)} · ${r.km_from_destination} km to ${esc(short)}`;
-    const fac = facLine(r);
-    row.innerHTML = `<div class="txt"><div class="nm">${i + 1}. ${esc(r.name)}${free ? '<span class="badge">FREE</span>' : ''}</div>
-      <div class="ln2">${line2}</div>${fac ? `<div class="fac">${esc(fac)}</div>` : ''}
-      ${calls[r.name] ? `<div class="called">Called at ${timeLabel(calls[r.name])}</div>` : ''}</div>`;
-    row.onclick = () => takeMeThere(r.lat, r.lng);   // the ROW is the map handover
-    if (r.phone) {
-      const a = document.createElement('a'); a.className = 'btn ph'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
-      a.textContent = '📞'; a.setAttribute('aria-label', `Call ${r.name} on ${r.phone}`);
-      a.onclick = (e) => { e.stopPropagation(); noteCalled(r.name); };
-      row.appendChild(a);
-    } else if (!free) {
-      // No number yet. The first three were already looked up by the Worker (nothing found);
-      // rows beyond that look up ON TAP — a paid lookup only when the driver actually wants it.
-      const looked = i < 3 || r.phoneLookedUp;
-      const b = document.createElement('button'); b.className = 'btn ph' + (looked ? ' off' : ''); b.textContent = '📞';
-      b.setAttribute('aria-label', looked ? `No phone number found for ${r.name}` : `Look up the number for ${r.name}`);
-      b.onclick = (e) => { e.stopPropagation(); if (!looked) lookupPhone(r, row, b); };
-      row.appendChild(b);
-      if (looked) { const n = document.createElement('div'); n.className = 'nonum'; n.textContent = 'No phone number found'; row.querySelector('.txt').appendChild(n); }
-    }
-    list.appendChild(row);
-  });
+  ans.results.forEach((r, i) => list.appendChild(buildRow(r, i, ans, short, calls)));
   box.appendChild(list);
+  if (view === 'map') drawMap(ans, tgtName);   // the map shows the SAME results — no search of its own
   // Only under a "Soon" list: widen to the one-hour mark. (The other modes have their own point.)
   if (ans.when === 'soon') {
     const b = document.createElement('button'); b.className = 'brown slim'; b.textContent = 'Search further (within 1 hr)';
@@ -429,6 +451,77 @@ function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 function noteCalled(name) { if (!round) return; round.calls = round.calls || {}; round.calls[name] = Date.now(); store.set('nav2_round', round); }
 function onReturn() { if (lastShown && document.querySelector('#s3.on')) renderStay(lastShown.ans, lastShown.tgtName, lastShown.notice); }
 
+// ── MAP (Stay screen) — Leaflet 1.9.4 + OpenStreetMap tiles, loaded only when the driver
+// first taps "Map", so the List never depends on it. Names go into the map as TEXT NODES
+// only (tooltips via setContent(element)), pin labels are digits; nothing is inserted as HTML.
+let view = 'list';
+const LEAFLET_VER = '1.9.4';
+const LEAFLET = {
+  js:  { url: `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.js`,  sri: 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH' },
+  css: { url: `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css`, sri: 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H' },
+};
+let leafletLoad = null;
+function ensureLeaflet() {
+  if (window.L && window.L.map) return Promise.resolve();
+  if (leafletLoad) return leafletLoad;
+  const blocked = new URLSearchParams(location.search).get('nomap') === '1';   // test hook: behave as if the library can't load
+  leafletLoad = new Promise((resolve, reject) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = blocked ? '/blocked/leaflet.css' : LEAFLET.css.url; css.integrity = LEAFLET.css.sri; css.crossOrigin = 'anonymous';
+    document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = blocked ? '/blocked/leaflet.js' : LEAFLET.js.url; s.integrity = LEAFLET.js.sri; s.crossOrigin = 'anonymous';
+    const timer = setTimeout(() => reject(new Error('timeout')), 12000);
+    s.onload = () => { clearTimeout(timer); (window.L && window.L.map) ? resolve() : reject(new Error('no L')); };
+    s.onerror = () => { clearTimeout(timer); reject(new Error('load failed')); };
+    document.head.appendChild(s);
+  }).catch((e) => { leafletLoad = null; throw e; });
+  return leafletLoad;
+}
+function setView(v) {
+  view = v === 'map' ? 'map' : 'list';
+  $('segView').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === view));
+  $('s3').classList.toggle('mapmode', view === 'map');
+  $('pinRow').innerHTML = '';
+  if (view === 'map' && lastShown) drawMap(lastShown.ans, lastShown.tgtName);
+}
+const routeLines = {};   // target name → [[lat,lng],…] from /route (the Worker samples it to ≤500 points)
+let mapObj = null, mapLayer = null;
+async function drawMap(ans, tgtName) {
+  const msg = $('mapMsg'); msg.textContent = ''; msg.classList.remove('on');
+  try { await ensureLeaflet(); }
+  catch (e) { msg.textContent = 'Map not available right now'; msg.classList.add('on'); return; }
+  if (view !== 'map') return;
+  const tgt = target(); if (!tgt) return;
+  // The route line (fetched once per target; openMain usually has it already).
+  if (!routeLines[tgt.name] && pos) {
+    const r = await api('route', { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng }, 12000);
+    if (r.ok && r.data && Array.isArray(r.data.line)) routeLines[tgt.name] = r.data.line;
+    if (view !== 'map') return;
+  }
+  if (!mapObj) {
+    mapObj = L.map('map', { zoomControl: true, attributionControl: true, scrollWheelZoom: false });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(mapObj);
+  }
+  if (mapLayer) { mapLayer.remove(); }
+  mapLayer = L.layerGroup().addTo(mapObj);
+  const pts = [];
+  const line = routeLines[tgt.name];
+  if (line && line.length > 1) L.polyline(line, { color: '#1E6B47', weight: 4, opacity: 0.8 }).addTo(mapLayer);
+  if (pos) { L.marker([pos.lat, pos.lng], { icon: L.divIcon({ className: '', html: '<div class="pin here"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false }).addTo(mapLayer); if (ans.when !== 'stop') pts.push([pos.lat, pos.lng]); }
+  // Destination / stop: a square marker with its name as a text-node tooltip.
+  const dm = L.marker([tgt.lat, tgt.lng], { icon: L.divIcon({ className: '', html: '<div class="pin dest"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(mapLayer);
+  const nameEl = document.createElement('span'); nameEl.textContent = shortName(tgt);
+  dm.bindTooltip(L.tooltip({ permanent: true, direction: 'right', offset: [8, 0], className: 'dest-name' }).setContent(nameEl));
+  if (ans.when === 'stop') pts.push([tgt.lat, tgt.lng]);   // fit: position + pins (soon/1/2), or the stop + its pins (At); the route line may run off the edge
+  const short = shortName({ name: tgtName }), calls = (round && round.calls) || {};
+  (ans.results || []).forEach((r, i) => {
+    if (r.lat == null || r.lng == null) return;
+    const m = L.marker([r.lat, r.lng], { icon: L.divIcon({ className: '', html: `<div class="pin ${r.kind === 'free' ? 'free' : 'park'}">${i + 1}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(mapLayer);
+    m.on('click', () => { const pr = $('pinRow'); pr.innerHTML = ''; pr.appendChild(buildRow(r, i, ans, short, calls)); });
+    pts.push([r.lat, r.lng]);
+  });
+  setTimeout(() => { mapObj.invalidateSize(); if (pts.length) mapObj.fitBounds(pts, { padding: [24, 24], maxZoom: 14 }); }, 50);
+}
+
 // ── Wiring ─────────────────────────────────────────────────────────────────────
 $('goBtn').onclick = onGo;
 $('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
@@ -449,6 +542,8 @@ $('stayBtn').onclick = () => {
 $('backBtn').onclick = openMain;
 segInit('segWhen', (v) => { when = v; });
 segInit('segKind', (v) => { kind = v; });
+// List | Map: a VIEW switch only — never a search. Both show the same results.
+$('segView').querySelectorAll('button').forEach((b) => b.onclick = () => { setView(b.dataset.v); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onReturn(); });
 window.addEventListener('pageshow', onReturn);
 $('stamp').textContent = BUILD;
