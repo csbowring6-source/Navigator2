@@ -32,6 +32,7 @@
   button:disabled,.btn.off{background:var(--grey);color:#5c5c5c;border-color:var(--grey);cursor:default}
   .row{display:flex;gap:10px} .row>*{flex:1}
   .seg button{margin:0} .seg button.sel{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .seg.when{flex-wrap:wrap;gap:8px;margin-bottom:10px} .seg.when button{flex:1 1 45%;font-size:19px;padding:10px 8px}   /* 2×2 so "At Rockhampton" never truncates */
   .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:18px}
   .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
@@ -78,7 +79,7 @@
 <section id="s3" class="screen">
   <button class="link" id="backBtn">‹ Back</button>
   <h1>Somewhere to stay</h1>
-  <div class="row seg" id="segWindow"><button data-v="1" class="sel">Within 1 hour</button><button data-v="2">Within 2 hours</button></div>
+  <div class="row seg when" id="segWhen"><button data-v="soon" class="sel">Soon</button><button data-v="1">In 1 hr</button><button data-v="2">In 2 hrs</button><button data-v="stop" id="atStopBtn">At …</button></div>
   <div class="row seg" id="segKind"><button data-v="both" class="sel">Both</button><button data-v="paid">Paid</button><button data-v="free">Free</button></div>
   <button class="primary" id="searchBtn">Search</button>
   <div id="stayNotice"></div>
@@ -87,7 +88,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 10:32 AM AEST';
+const BUILD = 'new v 29 Sep 2026, 10:54 AM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -232,7 +233,9 @@ async function openMain() {
 }
 
 // ── SCREEN 3 ───────────────────────────────────────────────────────────────────
-let windowH = 1, kind = 'both';
+let when = 'soon', kind = 'both';   // WHEN to stop: soon · 1 · 2 (hours ahead) · stop (at the planned stop / destination)
+function shortName(p) { return (p && p.name || '').split(',')[0].trim(); }
+function labelAtStop() { const t = target(); $('atStopBtn').textContent = t ? `At ${shortName(t)}` : 'At stop'; }
 function segInit(id, onPick) {
   $(id).querySelectorAll('button').forEach((b) => b.onclick = () => {
     $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b)); onPick(b.dataset.v);
@@ -251,7 +254,7 @@ async function search() {
   const tgt = target();
   $('results').innerHTML = '<p class="quiet">Searching ahead…</p>'; $('stayNotice').innerHTML = '';
   $('searchBtn').disabled = true;
-  const params = pos ? { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng, window: windowH, kind } : null;
+  const params = pos ? { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng, when, kind } : null;
   const r = params ? await api('stay', params, 25000) : { ok: false, status: 0, data: null };
   $('searchBtn').disabled = false;
   if (r.ok && r.data && Array.isArray(r.data.results)) {
@@ -285,8 +288,9 @@ function renderStay(ans, tgtName, notice) {
     c.className = 'card' + (free ? ' free' : '');
     c.innerHTML = `<h3>${i + 1}. ${esc(r.name)}</h3>
       <div class="kind">${free ? 'Free camp' : 'Caravan park'}</div>
-      <div class="meta"><b>${r.km_ahead} km ahead · ${esc(r.drive_time)}</b></div>
-      <div class="meta">${r.km_from_destination} km from ${esc(tgtName)}</div>
+      ${ans.when === 'stop'
+        ? `<div class="meta"><b>${r.dist_from_stop_km} km from ${esc(shortName({ name: tgtName }))}</b></div><div class="meta">${r.km_ahead} km ahead · ${esc(r.drive_time)}</div>`
+        : `<div class="meta"><b>${r.km_ahead} km ahead · ${esc(r.drive_time)}</b></div><div class="meta">${r.km_from_destination} km from ${esc(tgtName)}</div>`}
       <div class="fac">${esc(facLine(r))}</div>`;
     if (!free && r.phone) {
       const a = document.createElement('a'); a.className = 'btn primary'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
@@ -298,9 +302,10 @@ function renderStay(ans, tgtName, notice) {
     box.appendChild(c);
   });
   // One button at the bottom of every list: widen to two hours (already at two hours → nothing further to offer).
-  if (windowH === 1) {
-    const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (2 hours)';
-    b.onclick = () => { windowH = 2; $('segWindow').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === '2')); search(); };
+  // Only under a "Soon" list: widen to the one-hour mark. (The other modes have their own point.)
+  if (ans.when === 'soon') {
+    const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (in 1 hr)';
+    b.onclick = () => { when = '1'; $('segWhen').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === '1')); search(); };
     box.appendChild(b);
   }
 }
@@ -317,10 +322,10 @@ $('goBtn').onclick = onGo;
 $('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('stop').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('changeBtn').onclick = () => { renderRecent(); show('s1'); };
-$('stayBtn').onclick = () => { show('s3'); if (round && round.sites && round.sites.length) { const last = store.get('nav2_last_stay', null); renderStay(last && last.target === round.target ? last.answer : { results: round.sites }, round.target, last ? `Showing your answer from ${timeLabel(last.ts)}. Tap Search for fresh results.` : ''); } else search(); };
+$('stayBtn').onclick = () => { show('s3'); labelAtStop(); if (round && round.sites && round.sites.length) { const last = store.get('nav2_last_stay', null); renderStay(last && last.target === round.target ? last.answer : { results: round.sites }, round.target, last ? `Showing your answer from ${timeLabel(last.ts)}. Tap Search for fresh results.` : ''); } else search(); };
 $('backBtn').onclick = openMain;
 $('searchBtn').onclick = search;
-segInit('segWindow', (v) => { windowH = +v; });
+segInit('segWhen', (v) => { when = v; });
 segInit('segKind', (v) => { kind = v; });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onReturn(); });
 window.addEventListener('pageshow', onReturn);

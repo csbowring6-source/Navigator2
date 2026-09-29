@@ -587,7 +587,7 @@ async function handleCamps2Osm(request, env) {
 }
 
 // ═══ GET /stay — "SOMEWHERE TO STAY" as finished data, code only, no AI (STAY) ═══
-// lat,lng (the van) · dlat,dlng (the destination) · window 1|2 (hours ahead, default 1)
+// lat,lng (the van) · dlat,dlng (the destination) · when soon|1|2|stop (default soon; STAYWHEN)
 // · kind both|paid|free (default both). Road route from OSRM (the app's routing source),
 // parks from the Places lookup + free camps / rest areas from the OSM lookup around
 // anchors spaced along the ahead stretch, merged with the app's dedupe rules, then kept
@@ -602,6 +602,7 @@ async function handleCamps2Osm(request, env) {
 // filters use 10 km for servos and 15 km for camps; both quote time-from-GPS by road,
 // which absorbs the detour. This endpoint doesn't, so it's tighter.)
 const STAY_CORRIDOR_KM = 5;
+const STAY_STOP_RADIUS_KM = 15;      // STAYWHEN when=stop: "in town" = within 15 km of the centre
 const STAY_ANCHOR_RADIUS_KM = 40;    // each lookup circle (the Places bias cap is 50 km)
 // STAYGAP speed guard: Overpass gets ~6 s per anchor here (one mirror pair, no second
 // round) instead of the routes' 13 s, so a slow mirror can't hold a cold request past
@@ -799,33 +800,60 @@ async function handleStay(request, env) {
   const num = (k) => parseFloat(u.searchParams.get(k));
   const lat = num("lat"), lng = num("lng"), dlat = num("dlat"), dlng = num("dlng");
   if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
-  const windowH = u.searchParams.get("window") === "2" ? 2 : 1;
+  // STAYWHEN — WHEN the driver wants to stop decides WHERE we look:
+  //   soon : nearest ahead, inside the first hour of road (the original behaviour)
+  //   1 | 2: the three places FURTHEST ahead that are still inside that driving time — so the
+  //          driver keeps going as long as possible and still stops in time (listed nearest
+  //          first). Nothing inside the time → the nearest place beyond it, with a plain note.
+  //   stop : around the destination passed in (the planned stop), within 15 km of its centre
+  const whenRaw = (u.searchParams.get("when") || "soon").toLowerCase();
+  const when = ["soon", "1", "2", "stop"].includes(whenRaw) ? whenRaw : "soon";
+  const hoursAhead = when === "1" ? 1 : when === "2" ? 2 : 0;
   const kind = ["both", "paid", "free"].includes(u.searchParams.get("kind")) ? u.searchParams.get("kind") : "both";
-  const windowLabel = windowH === 1 ? "1 hour" : "2 hours";
-  const nothing = { window_hours: windowH, kind, corridor_km: STAY_CORRIDOR_KM };
+  const nothing = { when, kind, corridor_km: when === "stop" ? STAY_STOP_RADIUS_KM : STAY_CORRIDOR_KM };
 
   // 1. The road route, with cumulative km/seconds at every vertex.
   const route = await osrmRoute(lat, lng, dlat, dlng);
   if (route.error) return jsonResp({ ...nothing, error: "couldn't get the road route", detail: route.error, unavailable: true }, 502);
   const routeOut = { km: Math.round(route.km), drive_time: hrsMins(route.secs / 60) };
+  const lastIdx = route.pts.length - 1;
+  const idxAtKm = (km) => { let i = 0; while (i + 1 <= lastIdx && route.cumKm[i + 1] <= km) i++; return i; };
 
-  // The ahead stretch: from the start vertex to the last vertex inside the window (plus
-  // a little slack so a site just past it still gets measured, then filtered honestly).
-  const windowS = windowH * 3600;
-  let endIdx = 0;
-  while (endIdx + 1 < route.pts.length && route.cumS[endIdx + 1] <= windowS * 1.1) endIdx++;
+  // "In 2 hrs" on a 1-hour trip: the point is past the destination — say so, plainly.
+  if (hoursAhead && route.secs < hoursAhead * 3600) {
+    return jsonResp({ ...nothing, route: routeOut, found: 0, results: [], message: `Your destination is less than ${hoursAhead === 1 ? "1 hour" : "2 hours"} away`, sources: { places: "skipped", osm: "skipped", anchors: 0, phone_lookups: 0 } });
+  }
+
+  // The stretch of road we search, and the point results are ranked from.
+  let stretchStartKm = 0, stretchEndKm, pointKm = 0;
+  if (when === "soon") {
+    let e = 0; while (e + 1 <= lastIdx && route.cumS[e + 1] <= 3600 * 1.1) e++;   // the first hour (+ slack; the time filter below is exact)
+    stretchEndKm = route.cumKm[e];
+  } else if (hoursAhead) {
+    let p = 0; while (p + 1 <= lastIdx && route.cumS[p] < hoursAhead * 3600) p++;   // first vertex at/after N hours of driving
+    pointKm = route.cumKm[p];
+    stretchEndKm = Math.min(route.km, pointKm + STAY_ANCHOR_RADIUS_KM);   // the whole N hours, plus one circle beyond for the "nearest beyond" fallback
+  } else {
+    stretchStartKm = route.km; stretchEndKm = route.km; pointKm = route.km;   // the stop itself
+  }
+  const endIdx = idxAtKm(stretchEndKm);
+  const stretchKm = stretchEndKm;
 
   // 2. Lookup anchors along the stretch, snapped to a grid (cache re-hits), deduped.
+  //    "stop" is ONE circle on the town centre (the destination coordinates as given).
   const snap = (v) => Math.round(v / STAY_ANCHOR_GRID) * STAY_ANCHOR_GRID;
   const anchors = []; const seenA = new Set();
-  const stretchKm = route.cumKm[endIdx];
-  for (let k = Math.min(20, stretchKm); ; k += STAY_ANCHOR_SPACING_KM) {
-    const target = Math.min(k, stretchKm);
-    let i = 0; while (i + 1 <= endIdx && route.cumKm[i + 1] <= target) i++;
-    const a = { lat: +snap(route.pts[i].lat).toFixed(2), lon: +snap(route.pts[i].lon).toFixed(2) };
+  const addAnchor = (plat, plon, atKm) => {
+    const a = { lat: +snap(plat).toFixed(2), lon: +snap(plon).toFixed(2), atKm: Math.round(atKm) };
     const ak = `${a.lat},${a.lon}`;
-    if (!seenA.has(ak)) { seenA.add(ak); a.atKm = Math.round(target); anchors.push(a); }   // atKm: where on the route this circle sits (for the honest per-stretch note)
-    if (target >= stretchKm || anchors.length >= STAY_MAX_ANCHORS) break;
+    if (!seenA.has(ak)) { seenA.add(ak); anchors.push(a); }
+  };
+  if (when === "stop") addAnchor(dlat, dlng, route.km);
+  else for (let k = Math.min(stretchStartKm + 20, stretchEndKm); ; k += STAY_ANCHOR_SPACING_KM) {
+    const target = Math.min(k, stretchEndKm);
+    const i = idxAtKm(target);
+    addAnchor(route.pts[i].lat, route.pts[i].lon, target);
+    if (target >= stretchEndKm || anchors.length >= STAY_MAX_ANCHORS) break;
   }
   const lookups = await Promise.all(anchors.map(async (a) => {
     const [p, o] = await Promise.all([placesCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env), osmCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env, { deadlineMs: STAY_OSM_DEADLINE_MS })]);
@@ -843,29 +871,44 @@ async function handleStay(request, env) {
   const places = byId(lookups.flatMap((l) => l.places || []));
   const osm = byId(lookups.flatMap((l) => l.osm || []));
 
-  // 3. Merge with the app's rules, then keep AHEAD + in-window + inside the corridor.
+  // 3. Merge with the app's rules, then keep what fits the mode, ranked from its point:
+  //    soon/1/2 — AHEAD of the van, within the corridor of the road (soon: also inside the hour);
+  //    rank = km ahead (soon), or for 1/2: furthest-inside-the-time first, then anything beyond
+  //    the time nearest first (used only when nothing is inside).
+  //    stop — within 15 km of the town centre, ranked by distance from the centre; km_ahead
+  //    is still measured to the nearest point of the route (for the card's second line).
   const merged = dedupeCampSites(mergeCamps(places, osm));
-  const startIdx = nearestVertex(route, lat, lng, 0, Math.min(endIdx, 50)).idx;   // the van's own vertex (OSRM snaps the start, so ~0)
+  const startIdx = nearestVertex(route, lat, lng, 0, Math.min(lastIdx, 50)).idx;   // the van's own vertex (OSRM snaps the start, so ~0)
   const qualifying = [];
   for (const s of merged) {
     if (s.lat == null || s.lon == null) continue;
-    const nv = nearestVertex(route, s.lat, s.lon, startIdx, endIdx);
-    if (nv.km > STAY_CORRIDOR_KM) continue;                        // too far off the road
+    let distFromStop = null, rank;
+    if (when === "stop") {
+      distFromStop = hav(dlat, dlng, s.lat, s.lon);
+      if (distFromStop > STAY_STOP_RADIUS_KM) continue;              // not in the town
+      rank = distFromStop;
+    }
+    const nv = nearestVertex(route, s.lat, s.lon, startIdx, when === "stop" ? lastIdx : endIdx);
     const kmAhead = route.cumKm[nv.idx] - route.cumKm[startIdx];
-    if (nv.idx <= startIdx || kmAhead < 0.5) continue;              // behind us, or underfoot
     const secs = route.cumS[nv.idx] - route.cumS[startIdx];
-    if (secs > windowS) continue;                                   // past the window
-    qualifying.push({ s, kmAhead, secs, kmToDest: route.km - route.cumKm[nv.idx], kindOf: stayKind(s) });
+    if (when !== "stop") {
+      if (nv.km > STAY_CORRIDOR_KM) continue;                        // too far off the road
+      if (nv.idx <= startIdx || kmAhead < 0.5) continue;              // behind us, or underfoot
+      if (when === "soon" && secs > 3600) continue;                   // soon = inside the hour
+      if (hoursAhead && kmAhead < stretchStartKm) continue;           // well short of the N-hour point — not "in N hours"
+      rank = when === "soon" ? kmAhead : Math.abs(kmAhead - pointKm);
+    }
+    qualifying.push({ s, kmAhead, secs, kmToDest: route.km - route.cumKm[nv.idx], distFromStop, rank, kindOf: stayKind(s) });
   }
-  qualifying.sort((a, b) => a.kmAhead - b.kmAhead);
+  qualifying.sort((a, b) => a.rank - b.rank);
   const wanted = kind === "both" ? qualifying : qualifying.filter((q) => q.kindOf === (kind === "free" ? "free" : "park"));
 
-  // 4. Three nearest ahead; with kind=both the nearest free camp takes the last slot if
-  // none made it on distance alone.
+  // 4. Three nearest (to the mode's point); with kind=both the nearest free camp takes the
+  // last slot if none made it on distance alone.
   let picked = wanted.slice(0, STAY_RESULTS);
   if (kind === "both" && !picked.some((q) => q.kindOf === "free")) {
     const firstFree = wanted.find((q) => q.kindOf === "free");
-    if (firstFree) { picked = [...picked.slice(0, STAY_RESULTS - 1), firstFree].sort((a, b) => a.kmAhead - b.kmAhead); }
+    if (firstFree) { picked = [...picked.slice(0, STAY_RESULTS - 1), firstFree].sort((a, b) => a.rank - b.rank); }
   }
   // STAYGAP: back-fill numbers for the shown PARKS only (never free camps), in parallel.
   let phoneLookups = 0; const phoneOutcomes = [];   // outcomes are reported (cache/found/not-found/mismatch/error …) so a silent miss is diagnosable
@@ -876,11 +919,12 @@ async function handleStay(request, env) {
     phoneOutcomes.push(`${q.s.name}: ${r.from}`);
     if (r.phone) q.s = { ...q.s, phone: r.phone };
   }));
-  const results = picked.map(({ s, kmAhead, secs, kmToDest, kindOf }) => ({
+  const results = picked.map(({ s, kmAhead, secs, kmToDest, distFromStop, kindOf }) => ({
     name: s.name, kind: kindOf, lat: s.lat, lng: s.lon,
     phone: verifiedPhone(s),
     km_ahead: Math.round(kmAhead), drive_time: hrsMins(secs / 60),
     km_from_destination: Math.round(kmToDest),
+    ...(when === "stop" ? { dist_from_stop_km: Math.round(distFromStop) } : {}),
     facilities: stayFacilities(s.tags),
     price: stayPrice(s.tags),
     source: s.source,
@@ -888,14 +932,16 @@ async function handleStay(request, env) {
   let message = null;
   if (!results.length) {
     const what = kind === "free" ? "free camps" : kind === "paid" ? "parks" : "parks or free camps";
-    message = `No ${what} within ${windowLabel} ahead`;
+    message = when === "stop" ? `No ${what} within ${STAY_STOP_RADIUS_KM} km of the stop`
+            : when === "soon" ? `No ${what} within 1 hour ahead`
+            : `No ${what} around the ${hoursAhead === 1 ? "1 hour" : "2 hour"} mark ahead`;
   }
   const notes = [];
   if (!placesOk) notes.push("couldn't check caravan parks just now");
   if (!osmOk) notes.push("couldn't check free camps just now");
   else if (osmPartial) notes.push(`free camps couldn't be checked for the stretch ${osmFailed.map(stretchOf).join(" and ")} — the parks shown for it are complete, the free camps are not`);
   return jsonResp({
-    ...nothing, route: routeOut, found: wanted.length, results, message,
+    ...nothing, route: routeOut, ...(hoursAhead ? { point_km_ahead: Math.round(pointKm) } : {}), found: wanted.length, results, message,
     sources: { places: placesOk ? "ok" : "failed", osm: !osmOk ? "failed" : osmPartial ? "partial" : "ok", anchors: anchors.length,
                ...(osmFailed.length ? { free_camps_unchecked: osmFailed.map(stretchOf) } : {}), phone_lookups: phoneLookups, ...(phoneOutcomes.length ? { phone_outcomes: phoneOutcomes } : {}) },
     ...(notes.length ? { note: notes.join("; ") } : {}),
@@ -1045,7 +1091,7 @@ async function handleRoute(request) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:17 AM AEST (STAYAPP: GET /route — km and drive time to the destination, same OSRM call and cache as /stay)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:54 AM AEST (STAYWHEN: /stay takes when=soon|1|2|stop — nearest ahead, around the N-hour point, or within 15 km of the stop)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
