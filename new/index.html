@@ -95,6 +95,7 @@
   .hl{background:var(--brown);color:#fff;border-radius:10px;padding:10px 12px;font-size:16px;line-height:1.35;margin:8px 0}
   .hl .hl-cheap{font-weight:700;margin-bottom:4px} .hl .hl-last{font-weight:400;font-size:15px}
   .badge.cheap{background:var(--green)}
+  .nm .price{font-weight:700;margin-left:8px} .more{text-align:left;font-weight:600;color:var(--muted);background:transparent;border-style:dashed}
   .ln3{font-size:14px;color:var(--ink);margin-top:2px;line-height:1.3}
   .rowi.dim{opacity:.6} .rowi .beyond{display:inline-block;font-size:12px;font-weight:700;color:var(--brown-text);margin-bottom:2px}
   /* FUELTOWNS: a stop's servos, shown under its row when tapped */
@@ -168,7 +169,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 03:18 PM AEST';
+const BUILD = 'new v 29 Sep 2026, 04:20 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -524,13 +525,18 @@ function servoList(stop, fuel) {
   });
   return box;
 }
+// CHEAPFIRST: a PRICED stop row — "[n]. Town  $price" (price bold) / km · time / servo · open · checked n hr ago.
+// An unpriced stop keeps the FUELTOWNS row (k servos · open · diesel status).
 function stopRow(s, i, ans, extra) {
   const wrap = document.createElement('div');
-  const row = buildRow(s, i, ans, '', {}, { line2: `${s.km_from_you} km from you · ${esc(s.drive_time)}`, line3: fuelLine3(s), noPhone: true, ...(extra || {}),
+  const c = s.cheapest;
+  const opts = c
+    ? { line2: `${s.km_from_you} km from you · ${esc(s.drive_time)}`, line3: `${esc(c.name)} · ${esc(s.open)} · checked ${c.age_h < 1 ? 'under 1' : c.age_h} hr ago`, noPhone: true }
+    : { line2: `${s.km_from_you} km from you · ${esc(s.drive_time)}`, line3: fuelLine3(s), noPhone: true };
+  const row = buildRow(s, i, ans, '', {}, { ...opts, ...(extra || {}),
     onTap: () => { const open = wrap.querySelector('.servos'); if (open) open.remove(); else wrap.appendChild(servoList(s, ans.fuel)); } });
-  // The stop holding the cheapest price in range gets a CHEAPEST badge after its name.
-  const c = ans.cheapest_in_range;
-  if (c && s.cheapest && s.cheapest.name === c.name && s.cheapest.price === c.price) { const b = document.createElement('span'); b.className = 'badge cheap'; b.textContent = 'CHEAPEST'; row.querySelector('.nm').appendChild(b); }
+  if (c) { const p = document.createElement('span'); p.className = 'price'; p.textContent = `$${c.price.toFixed(2)}`; row.querySelector('.nm').appendChild(p); }
+  if (extra && extra.cheapest) { const b = document.createElement('span'); b.className = 'badge cheap'; b.textContent = 'CHEAPEST'; row.querySelector('.nm').appendChild(b); }
   wrap.appendChild(row);
   return wrap;
 }
@@ -544,8 +550,20 @@ function renderFuel(ans, notice) {
   box.appendChild(hl);
   if (ans.note) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = cap(ans.note) + '.'; box.appendChild(n); }
   const list = document.createElement('div'); list.className = 'rows';
-  (ans.results || []).forEach((s, i) => list.appendChild(stopRow(s, i, ans)));
-  if (ans.beyond_range) list.appendChild(stopRow(ans.beyond_range, (ans.results || []).length, ans, { dim: true, label: `Beyond your ${ans.range_km} km` }));
+  // CHEAPFIRST: leave out the driver's own town (≤10 km, as the headline does); priced stops CHEAPEST
+  // FIRST (a tie → the nearer), up to 10; the unpriced collapsed under one row, nearest first when opened.
+  const ahead = (ans.results || []).filter((s) => s.km_from_you > 10);
+  const priced = ahead.filter((s) => s.cheapest).sort((a, b) => a.cheapest.price - b.cheapest.price || a.km_from_you - b.km_from_you).slice(0, 10);
+  const unpriced = ahead.filter((s) => !s.cheapest);
+  priced.forEach((s, i) => list.appendChild(stopRow(s, i, ans, i === 0 ? { cheapest: true } : {})));
+  if (unpriced.length) {
+    const more = document.createElement('button'); more.className = 'slim more'; more.textContent = `${unpriced.length} more town${unpriced.length === 1 ? '' : 's'} with no price`;
+    const holder = document.createElement('div');
+    more.onclick = () => { if (holder.childElementCount) { holder.innerHTML = ''; return; } unpriced.forEach((s, i) => holder.appendChild(stopRow(s, priced.length + i, ans))); };
+    list.appendChild(more); list.appendChild(holder);
+  }
+  if (!priced.length && !unpriced.length && !ans.beyond_range) { const p = document.createElement('p'); p.className = 'quiet'; p.textContent = 'No stops ahead within this range.'; list.appendChild(p); }
+  if (ans.beyond_range) list.appendChild(stopRow(ans.beyond_range, priced.length + unpriced.length, ans, { dim: true, label: `Beyond your ${ans.range_km} km` }));
   box.appendChild(list);
 }
 $('fuelBtn').onclick = () => {

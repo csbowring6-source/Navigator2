@@ -1395,16 +1395,10 @@ async function handleFuelAhead(request, env) {
   const pick = (stops) => { let c = null; for (const st of stops) for (const v of st.servos) if (v.price != null && (!c || v.price < c.price || (v.price === c.price && v.km_from_you < c.km_from_you))) c = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h }; return c; };
   const cheapestInRange = pick(withinAll.filter((st) => st._km > 10));
   const cheapestStop = cheapestInRange ? withinAll.find((st) => st.cheapest && st.cheapest.name === cheapestInRange.name && st.cheapest.price === cheapestInRange.price) : null;
-  // Nearest first, up to 10 — plus the LAST stop inside the range and the CHEAPEST stop, each kept in
-  // its place by distance if the cut would have dropped it (so up to 12 may show) — FUELLIST.
-  let within = withinAll.slice(0, FUEL_RESULTS);
-  if (withinAll.length > FUEL_RESULTS) {
-    const keep = new Set(within);
-    keep.add(withinAll[withinAll.length - 1]);
-    if (cheapestStop) keep.add(cheapestStop);
-    within = withinAll.filter((st) => keep.has(st));
-  }
-  within = within.map(strip);
+  // CHEAPFIRST: EVERY stop within range is returned, nearest first — the app orders them (cheapest
+  // first, the unpriced collapsed), so no cap here can hide the stop the headline names.
+  const within = withinAll.map(strip);
+  void cheapestStop;
   const beyondRaw = stopsOut.find((s) => s._km > range);               // the first STOP after the last within range
   const beyond = beyondRaw ? strip(beyondRaw) : null;
 
@@ -1441,7 +1435,7 @@ async function handleFuelAhead(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 04:16 PM AEST (FUELLIST: the cheapest stop is always in the list (up to 12 stops); a servo name never repeats its town, even spelt differently)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 04:20 PM AEST (CHEAPFIRST: /fuelahead returns every stop within range, nearest first — the app lists them cheapest first)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
