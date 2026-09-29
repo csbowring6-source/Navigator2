@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Navigator — Somewhere to stay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ── Look: warm off-white, dark text, green actions, orange-brown for free camps + warnings ── */
+  :root{
+    --bg:#F4F1EA; --ink:#1B1F1D; --green:#1E6B47; --brown:#9A4A00; --card:#FFFFFF;
+    --muted:#4A514D; --line:#1B1F1D; --grey:#C9C6BE;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Public Sans',system-ui,sans-serif;font-size:19px;line-height:1.35}
+  body{padding:16px 16px 40px;max-width:520px;margin:0 auto}
+  h1,h2,h3{font-family:'Barlow Semi Condensed',sans-serif;font-weight:700;margin:0 0 10px;line-height:1.1}
+  h1{font-size:34px} h2{font-size:28px} h3{font-size:24px}
+  p{margin:0 0 12px}
+  .screen{display:none} .screen.on{display:block}
+  .top{font-size:20px;color:var(--muted);margin-bottom:18px}
+  label{display:block;font-weight:600;margin:16px 0 6px}
+  input[type=text]{width:100%;min-height:60px;font:inherit;font-size:22px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+  input[type=text]:focus{outline:3px solid var(--green);outline-offset:1px}
+  button,.btn{display:block;width:100%;min-height:56px;font:inherit;font-size:21px;font-weight:700;padding:12px 16px;border-radius:12px;border:2px solid var(--line);
+    background:#fff;color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;margin:10px 0}
+  .primary{background:var(--green);color:#fff;border-color:var(--green)}
+  .brown{background:var(--brown);color:#fff;border-color:var(--brown)}
+  .ghost{background:transparent}
+  .link{background:none;border:none;color:var(--green);text-decoration:underline;font-size:19px;min-height:44px;width:auto;display:inline-block;padding:8px 0;margin:0}
+  button:disabled,.btn.off{background:var(--grey);color:#5c5c5c;border-color:var(--grey);cursor:default}
+  .row{display:flex;gap:10px} .row>*{flex:1}
+  .seg button{margin:0} .seg button.sel{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:18px}
+  .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
+  .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
+  .card.free{border-color:var(--brown)} .card.free .kind{color:var(--brown)}
+  .card.tried{opacity:.55} .card.next{outline:4px solid var(--green);outline-offset:2px}
+  .card h3{font-size:26px} .kind{font-weight:700;color:var(--green);margin-bottom:6px}
+  .meta{margin:4px 0} .fac{color:var(--muted);font-size:18px;margin:8px 0}
+  .tag{display:inline-block;font-size:16px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--ink);color:#fff;margin-left:8px;vertical-align:middle}
+  .notice{border:2px solid var(--brown);color:var(--brown);background:#fff;border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 14px}
+  .quiet{color:var(--muted);font-size:17px}
+  .stamp{color:var(--muted);font-size:14px;text-align:center;margin-top:30px}
+  .trips button{text-align:left}
+</style>
+</head>
+<body>
+
+<!-- ═══ SCREEN 1: WHERE ARE YOU HEADING ═══ -->
+<section id="s1" class="screen">
+  <div class="top" id="youAreAt">Finding where you are…</div>
+  <h1>Where are you heading?</h1>
+  <label for="dest">Destination</label>
+  <input type="text" id="dest" placeholder="Town, e.g. Yalboroo" autocomplete="off" enterkeyhint="go">
+  <label for="stop">Stopping on the way? (optional)</label>
+  <input type="text" id="stop" placeholder="Town" autocomplete="off" enterkeyhint="go">
+  <button class="primary" id="goBtn">Go</button>
+  <div id="confirm"></div>
+  <div class="trips" id="recent"></div>
+</section>
+
+<!-- ═══ SCREEN 2: MAIN ═══ -->
+<section id="s2" class="screen">
+  <div class="panel">
+    <h2 id="heading">Heading to …</h2>
+    <div class="big" id="routeLine">Working out the route…</div>
+    <div id="stopLine"></div>
+    <button class="link" id="changeBtn">Change</button>
+  </div>
+  <button class="primary" id="stayBtn">Somewhere to stay</button>
+  <button class="btn off" disabled>Fuel — Coming next</button>
+  <div class="stamp" id="stamp"></div>
+</section>
+
+<!-- ═══ SCREEN 3: SOMEWHERE TO STAY ═══ -->
+<section id="s3" class="screen">
+  <button class="link" id="backBtn">‹ Back</button>
+  <h1>Somewhere to stay</h1>
+  <div class="row seg" id="segWindow"><button data-v="1" class="sel">Within 1 hour</button><button data-v="2">Within 2 hours</button></div>
+  <div class="row seg" id="segKind"><button data-v="both" class="sel">Both</button><button data-v="paid">Paid</button><button data-v="free">Free</button></div>
+  <button class="primary" id="searchBtn">Search</button>
+  <div id="stayNotice"></div>
+  <div id="results"></div>
+</section>
+
+<!-- ═══ SCREEN 4: AFTER THE CALL ═══ -->
+<section id="s4" class="screen">
+  <h1 id="calledLine">You called …</h1>
+  <p>Did you get a site?</p>
+  <button class="primary" id="bookedBtn">Booked</button>
+  <button id="fullBtn">Full</button>
+  <button id="noAnswerBtn">No answer</button>
+</section>
+
+<script>
+'use strict';
+const BUILD = 'new v 29 Sep 2026, 10:17 AM AEST';
+const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
+const $ = (id) => document.getElementById(id);
+const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
+                     'Tasmania':'TAS', 'Northern Territory':'NT', 'Australian Capital Territory':'ACT' };
+
+// ── Storage (all on the phone) ─────────────────────────────────────────────────
+const store = {
+  get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+let trip  = store.get('nav2_trip', null);      // { dest:{name,lat,lng}, stop:{name,lat,lng}|null }
+let round = store.get('nav2_round', null);     // { sites:[...], tried:[names], called:name|null, calledAt, target, params }
+let pos   = null;                              // { lat, lng }
+let posLabel = '';
+
+// ── Durations: ALWAYS hours-and-minutes (ported from the old app's hrsMins) ────
+function hrsMins(totalMins) {
+  const t = Math.max(0, Math.round(totalMins));
+  if (t < 60) return `${t} min`;
+  const h = Math.floor(t / 60), m = t % 60;
+  return m ? `${h} hr ${String(m).padStart(2, '0')}` : `${h} hr`;
+}
+function timeLabel(ts) { return new Date(ts).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }); }
+
+// ── Worker calls (ported from the old app's geoFetch / revGeoFetch: 'failed' ≠ 'empty') ──
+async function api(path, params, timeoutMs) {
+  const q = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), timeoutMs || 15000);
+  try {
+    const r = await fetch(`${API_URL}${path}?${q}`, { signal: ctrl.signal });
+    clearTimeout(to);
+    const j = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, data: j };
+  } catch (e) { clearTimeout(to); return { ok: false, status: 0, data: null, offline: !navigator.onLine || true }; }
+}
+async function geocode(q) {
+  const r = await api('geocode', { q: `${q}, Australia`, addr: 1 });
+  if (!r.ok || !r.data || !Array.isArray(r.data.data)) return { status: 'failed' };
+  if (!r.data.data.length) return { status: 'empty' };
+  const h = r.data.data[0], a = h.address || {};
+  const town = a.town || a.city || a.village || a.hamlet || a.suburb || a.municipality || a.county || (h.display_name || '').split(',')[0].trim() || q;
+  const st = STATE_ABBR[a.state] || a.state || '';
+  return { status: 'ok', place: { name: st ? `${town}, ${st}` : town, lat: +h.lat, lng: +h.lon } };
+}
+async function reverseGeocode(lat, lng) {
+  const r = await api('reverse-geocode', { lat, lon: lng });   // default zoom — a coarser zoom drops small places (Boyland is a city_district)
+  const a = r.ok && r.data && r.data.data && r.data.data.address;
+  if (!a) return '';
+  const town = a.town || a.village || a.suburb || a.city_district || a.locality || a.city || a.hamlet || a.municipality || a.county || '';
+  const st = STATE_ABBR[a.state] || a.state || '';
+  return town ? (st ? `${town}, ${st}` : town) : '';
+}
+
+// ── Map-app handover (ported from the old app's openInMap: coordinates, never a name search) ──
+function mapUrl(lat, lng) {
+  const iOS = /iPhone|iPad|iPod/i.test(navigator.userAgent), android = /Android/i.test(navigator.userAgent);
+  if (iOS) return `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`;
+  if (android) return `google.navigation:q=${lat},${lng}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+function takeMeThere(lat, lng) { window.location.href = mapUrl(lat, lng); }
+
+// ── Screens ────────────────────────────────────────────────────────────────────
+function show(id) { document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('on', s.id === id)); window.scrollTo(0, 0); }
+function target() { return trip && (trip.stop || trip.dest); }   // a set stop is searched towards first
+
+// ── Position: ?at=LAT,LNG for laptop testing, otherwise GPS ────────────────────
+async function initPosition() {
+  const at = new URLSearchParams(location.search).get('at');
+  if (at && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(at)) {
+    const [lat, lng] = at.split(',').map(Number); pos = { lat, lng }; posLabel = 'test position';
+    return labelPosition();
+  }
+  if (!navigator.geolocation) { $('youAreAt').textContent = 'No GPS on this device.'; return; }
+  navigator.geolocation.getCurrentPosition(
+    (p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; labelPosition(); },
+    (e) => { $('youAreAt').textContent = e.code === 1 ? 'Location is blocked — allow it in your browser settings.' : 'Still looking for a GPS fix…'; },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  navigator.geolocation.watchPosition((p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 15000 });
+}
+async function labelPosition() {
+  $('youAreAt').textContent = 'You are near…';
+  const t = await reverseGeocode(pos.lat, pos.lng);
+  posLabel = t || `${pos.lat.toFixed(2)}, ${pos.lng.toFixed(2)}`;
+  $('youAreAt').textContent = `You are at ${posLabel}`;
+}
+
+// ── SCREEN 1 ───────────────────────────────────────────────────────────────────
+function renderRecent() {
+  const trips = store.get('nav2_trips', []);
+  $('recent').innerHTML = trips.length ? '<h3 style="margin-top:22px">Recent trips</h3>' : '';
+  trips.slice(0, 3).forEach((t) => {
+    const b = document.createElement('button');
+    b.textContent = t.stop ? `${t.dest.name} — via ${t.stop.name}` : t.dest.name;
+    b.onclick = () => commitTrip(t.dest, t.stop);
+    $('recent').appendChild(b);
+  });
+}
+async function onGo() {
+  const d = $('dest').value.trim(), s = $('stop').value.trim();
+  const box = $('confirm'); box.innerHTML = '';
+  if (!d) { box.innerHTML = '<p class="notice">Type the town you are heading to.</p>'; return; }
+  $('goBtn').disabled = true; $('goBtn').textContent = 'Looking it up…';
+  const gd = await geocode(d);
+  const gs = s ? await geocode(s) : { status: 'none' };
+  $('goBtn').disabled = false; $('goBtn').textContent = 'Go';
+  const fail = (what, g) => g.status === 'failed' ? `Couldn't look up ${what} just now — give it a moment and try again.`
+             : g.status === 'empty' ? `Couldn't find "${what}" on the map — try the town plus its state, e.g. "Yalboroo QLD".` : '';
+  const msg = fail(d, gd) || (s ? fail(s, gs) : '');
+  if (msg) { box.innerHTML = `<p class="notice">${esc(msg)}</p>`; return; }
+  // Never go ahead on a match the driver hasn't confirmed.
+  box.innerHTML = `<div class="card"><h3>${esc(gd.place.name)}</h3>${s ? `<p>Stopping at <b>${esc(gs.place.name)}</b></p>` : ''}
+    <button class="primary" id="yesBtn">Yes, that's it</button><button id="againBtn">Try again</button></div>`;
+  $('yesBtn').onclick = () => commitTrip(gd.place, s ? gs.place : null);
+  $('againBtn').onclick = () => { box.innerHTML = ''; $('dest').focus(); };
+}
+function commitTrip(dest, stop) {
+  trip = { dest, stop: stop || null, ts: Date.now() };
+  store.set('nav2_trip', trip);
+  const others = store.get('nav2_trips', []).filter((t) => t.dest.name !== dest.name || (t.stop && t.stop.name) !== (stop && stop.name));
+  store.set('nav2_trips', [trip, ...others].slice(0, 3));
+  round = null; store.del('nav2_round');
+  openMain();
+}
+
+// ── SCREEN 2 ───────────────────────────────────────────────────────────────────
+async function openMain() {
+  show('s2');
+  $('heading').textContent = `Heading to ${trip.dest.name}`;
+  $('stopLine').textContent = trip.stop ? `Stopping at ${trip.stop.name}` : '';
+  $('routeLine').textContent = 'Working out the route…';
+  if (!pos) { $('routeLine').textContent = 'Waiting for your GPS position…'; return; }
+  const r = await api('route', { lat: pos.lat, lng: pos.lng, dlat: trip.dest.lat, dlng: trip.dest.lng }, 12000);
+  if (r.ok && r.data && r.data.km != null) $('routeLine').textContent = `${r.data.drive_time} · ${r.data.km} km left`;
+  else $('routeLine').textContent = navigator.onLine ? "Couldn't get the route just now." : 'No signal — distance unavailable.';
+  if (trip.stop) {
+    const rs = await api('route', { lat: pos.lat, lng: pos.lng, dlat: trip.stop.lat, dlng: trip.stop.lng }, 12000);
+    if (rs.ok && rs.data && rs.data.km != null) $('stopLine').textContent = `Stopping at ${trip.stop.name} — ${rs.data.drive_time} · ${rs.data.km} km`;
+  }
+}
+
+// ── SCREEN 3 ───────────────────────────────────────────────────────────────────
+let windowH = 1, kind = 'both';
+function segInit(id, onPick) {
+  $(id).querySelectorAll('button').forEach((b) => b.onclick = () => {
+    $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b)); onPick(b.dataset.v);
+  });
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function facLine(r) {
+  const f = r.facilities || {}, word = (v) => v === 'yes' ? 'yes' : v === 'no' ? 'no' : 'not known';
+  const allUnknown = ['powered', 'showers', 'toilets', 'pool', 'wifi'].every((k) => f[k] !== 'yes' && f[k] !== 'no') && (!r.price || r.price === 'unknown');
+  if (allUnknown) return 'Facilities and price not known yet';
+  return `Powered sites: ${word(f.powered)} · Showers: ${word(f.showers)} · Toilets: ${word(f.toilets)} · Pool: ${word(f.pool)} · Wi-fi: ${word(f.wifi)}`
+       + (r.price && r.price !== 'unknown' ? ` · Price: ${r.price}` : '');
+}
+async function search() {
+  if (!trip) return show('s1');
+  const tgt = target();
+  $('results').innerHTML = '<p class="quiet">Searching ahead…</p>'; $('stayNotice').innerHTML = '';
+  $('searchBtn').disabled = true;
+  const params = pos ? { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng, window: windowH, kind } : null;
+  const r = params ? await api('stay', params, 25000) : { ok: false, status: 0, data: null };
+  $('searchBtn').disabled = false;
+  if (r.ok && r.data && Array.isArray(r.data.results)) {
+    const saved = { answer: r.data, target: tgt.name, ts: Date.now(), params };
+    store.set('nav2_last_stay', saved);
+    round = { sites: r.data.results, tried: [], called: null, calledAt: null, target: tgt.name, params, ts: Date.now() };
+    store.set('nav2_round', round);
+    renderStay(r.data, tgt.name, '');
+    return;
+  }
+  // Failed: no signal (or the service) — show the last answer plainly labelled, if there is one.
+  const last = store.get('nav2_last_stay', null);
+  const why = !pos ? 'No GPS position yet.' : (!navigator.onLine || r.status === 0) ? 'No signal.' : 'The stay service is playing up — not your signal.';
+  if (last && last.answer) {
+    if (!round || !round.sites) { round = { sites: last.answer.results, tried: [], called: null, calledAt: null, target: last.target, params: last.params, ts: last.ts }; store.set('nav2_round', round); }
+    renderStay(last.answer, last.target, `${why} Showing your last answer from ${timeLabel(last.ts)}.`);
+  } else {
+    $('results').innerHTML = `<p class="notice">${esc(why)} ${!pos ? 'Give it a moment.' : 'Try again when you have coverage.'}</p>`;
+  }
+}
+function renderStay(ans, tgtName, notice) {
+  const box = $('results'); box.innerHTML = '';
+  $('stayNotice').innerHTML = notice ? `<div class="notice">${esc(notice)}</div>` : '';
+  if (ans.note) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = cap(ans.note) + '.'; box.appendChild(n); }
+  if (!ans.results || !ans.results.length) { const p = document.createElement('p'); p.className = 'card'; p.textContent = ans.message || 'Nothing found ahead.'; box.appendChild(p); return; }
+  const tried = (round && round.tried) || [];
+  const nextUp = round ? nextUntried() : null;
+  ans.results.forEach((r, i) => {
+    const free = r.kind === 'free';
+    const c = document.createElement('div');
+    c.className = 'card' + (free ? ' free' : '') + (tried.includes(r.name) ? ' tried' : '') + (nextUp && nextUp.name === r.name && tried.length ? ' next' : '');
+    c.innerHTML = `<h3>${i + 1}. ${esc(r.name)}${tried.includes(r.name) ? '<span class="tag">tried</span>' : ''}</h3>
+      <div class="kind">${free ? 'Free camp' : 'Caravan park'}</div>
+      <div class="meta"><b>${r.km_ahead} km ahead · ${esc(r.drive_time)}</b></div>
+      <div class="meta">${r.km_from_destination} km from ${esc(tgtName)}</div>
+      <div class="fac">${esc(facLine(r))}</div>`;
+    if (!free && r.phone) {
+      const a = document.createElement('a'); a.className = 'btn primary'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
+      a.textContent = `Call ${r.phone}`; a.onclick = () => noteCalled(r.name); c.appendChild(a);
+    } else {
+      if (!free) { const p = document.createElement('div'); p.className = 'meta quiet'; p.textContent = 'No phone number found'; c.appendChild(p); }
+      const b = document.createElement('button'); b.className = free ? 'brown' : ''; b.textContent = 'Take me there'; b.onclick = () => takeMeThere(r.lat, r.lng); c.appendChild(b);
+    }
+    box.appendChild(c);
+  });
+  // Everyone with a number tried → one offer: search further.
+  if (round && round.tried.length && !nextUntried() && windowH === 1) {
+    const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (2 hours)';
+    b.onclick = () => { windowH = 2; $('segWindow').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === '2')); search(); };
+    box.appendChild(b);
+  }
+}
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+// ── Ring-around (ported from the old app's round: tried list, called site, next untried) ──
+function nextUntried() { return round ? (round.sites.find((s) => s.kind === 'park' && s.phone && !round.tried.includes(s.name)) || null) : null; }
+function noteCalled(name) { if (!round) return; round.called = name; round.calledAt = Date.now(); store.set('nav2_round', round); }
+function checkCallReturn() {
+  if (!round || !round.called) return;
+  if (Date.now() - (round.calledAt || 0) > 15 * 60 * 1000) { round.called = null; store.set('nav2_round', round); return; }   // a stale call never re-asks days later
+  $('calledLine').textContent = `You called ${round.called}.`;
+  show('s4');
+}
+function outcome(kind) {
+  const name = round && round.called; if (!name) return show('s3');
+  const site = round.sites.find((s) => s.name === name);
+  round.called = null;
+  if (kind === 'booked') { store.del('nav2_round'); round = null; if (site) takeMeThere(site.lat, site.lng); return openMain(); }
+  if (!round.tried.includes(name)) round.tried.push(name);
+  store.set('nav2_round', round);
+  const last = store.get('nav2_last_stay', null);
+  show('s3');
+  renderStay(last && last.answer && last.target === round.target ? last.answer : { results: round.sites }, round.target, '');   // the list again, marked — no new search
+}
+
+// ── Wiring ─────────────────────────────────────────────────────────────────────
+$('goBtn').onclick = onGo;
+$('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
+$('stop').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
+$('changeBtn').onclick = () => { renderRecent(); show('s1'); };
+$('stayBtn').onclick = () => { show('s3'); if (round && round.sites && round.sites.length) { const last = store.get('nav2_last_stay', null); renderStay(last && last.target === round.target ? last.answer : { results: round.sites }, round.target, last ? `Showing your answer from ${timeLabel(last.ts)}. Tap Search for fresh results.` : ''); } else search(); };
+$('backBtn').onclick = openMain;
+$('searchBtn').onclick = search;
+$('bookedBtn').onclick = () => outcome('booked');
+$('fullBtn').onclick = () => outcome('full');
+$('noAnswerBtn').onclick = () => outcome('noanswer');
+segInit('segWindow', (v) => { windowH = +v; });
+segInit('segKind', (v) => { kind = v; });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkCallReturn(); });
+window.addEventListener('pageshow', checkCallReturn);
+$('stamp').textContent = BUILD;
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(async function boot() {
+  renderRecent();
+  if (trip) openMain(); else show('s1');
+  await initPosition();
+  if (trip && pos) openMain();                    // re-render with the real distance once we know where we are
+  // Reopened with a call outstanding → straight to "Did you get a site?"
+  checkCallReturn();
+  // Reopened with a saved answer and no signal → show it, plainly labelled.
+  if (trip && !navigator.onLine && document.querySelector('#s2.on')) {
+    const last = store.get('nav2_last_stay', null);
+    if (last && last.answer) { show('s3'); renderStay(last.answer, last.target, `No signal. Showing your last answer from ${timeLabel(last.ts)}.`); }
+  }
+})();
+</script>
+</body>
+</html>

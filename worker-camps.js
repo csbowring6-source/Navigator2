@@ -1030,8 +1030,22 @@ async function handleReverseGeocode(request, env) {
   return jsonResp({ cached: false, data: g.data });
 }
 
+// ═══ GET /route — the trip's distance and drive time, nothing else (STAYAPP) ═══
+// lat,lng → dlat,dlng. The new app's main screen needs "12 hr 40 · 1102 km" before any
+// stay search runs; this reuses osrmRoute() and its in-memory cache, so the later /stay
+// for the same pair pays no second routing call. Free source, no Places, no OSM.
+async function handleRoute(request) {
+  const u = new URL(request.url);
+  const num = (k) => parseFloat(u.searchParams.get(k));
+  const lat = num("lat"), lng = num("lng"), dlat = num("dlat"), dlng = num("dlng");
+  if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
+  const route = await osrmRoute(lat, lng, dlat, dlng);
+  if (route.error) return jsonResp({ error: "couldn't get the road route", detail: route.error, unavailable: true }, 502);
+  return jsonResp({ km: Math.round(route.km), drive_time: hrsMins(route.secs / 60), mins: Math.round(route.secs / 60) });
+}
+
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:10 AM AEST (STAYGAP: /stay searches every 20 km; shown parks without a number get one Place Details lookup, 500 m match; 6 s Overpass cap per anchor, unchecked stretches named)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:17 AM AEST (STAYAPP: GET /route — km and drive time to the destination, same OSRM call and cache as /stay)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -1179,6 +1193,7 @@ async function route(request, env, url) {
       "/camps2": () => handleCamps2(request, env),   // Places-backed camps — LIVE (phase 3 merge)
       "/camps2-osm": () => handleCamps2Osm(request, env),   // filtered OSM non-commercial camps — LIVE (phase 3 merge)
       "/stay": () => handleStay(request, env),   // STAY: three places ahead on the route, as finished data (no AI)
+      "/route": () => handleRoute(request),      // STAYAPP: km + drive time to the destination — same OSRM call and cache as /stay, no lookups
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
