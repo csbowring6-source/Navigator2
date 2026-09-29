@@ -22,7 +22,7 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Public Sans',system-ui,sans-serif;font-size:19px;line-height:1.35}
-  body{padding:16px 16px 40px;max-width:520px;margin:0 auto}
+  body{padding:16px 16px 40px;max-width:600px;margin:0 auto}   /* NEWTRIP: full phone width, 16 px margins, capped at 600 px on big screens */
   h1,h2,h3{font-family:'Barlow Semi Condensed',sans-serif;font-weight:700;margin:0 0 10px;line-height:1.1}
   h1{font-size:34px} h2{font-size:28px} h3{font-size:24px}
   /* STAYLIST: the Stay screen is COMPACT — body 16 px, small heading, tight padding — so the
@@ -32,7 +32,11 @@
   .screen{display:none} .screen.on{display:block}
   .top{font-size:20px;color:var(--muted);margin-bottom:18px}
   label{display:block;font-weight:600;margin:16px 0 6px}
-  input[type=text]{width:100%;min-height:60px;font:inherit;font-size:22px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+  input[type=text]{width:100%;min-height:64px;font:inherit;font-size:20px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+  #goBtn{min-height:72px;font-size:24px}
+  /* Main screen (NEWTRIP): the two job buttons are big enough to hit at a glance; "New trip" is a plain bordered button. */
+  .job{min-height:88px;font-size:24px}
+  #newTripBtn{background:var(--card);border:2px solid var(--line);min-height:56px;font-size:21px;margin:0 0 18px}
   input[type=text]:focus{outline:3px solid var(--green);outline-offset:1px}
   button,.btn{display:block;width:100%;min-height:56px;font:inherit;font-size:21px;font-weight:700;padding:12px 16px;border-radius:12px;border:2px solid var(--line);
     background:var(--card);color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;margin:10px 0}
@@ -46,8 +50,8 @@
   .seg{gap:6px;margin-bottom:6px} .seg button{margin:0;min-height:44px;font-size:16px;font-weight:400;border-width:1px;border-radius:9px;padding:8px 6px}
   .seg button.sel{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
   .seg.when{flex-wrap:wrap} .seg.when button{flex:1 1 45%}   /* 2×2 so "At Rockhampton" never truncates */
-  .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:18px}
-  .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
+  .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:12px}
+  .panel h2{color:#fff;font-size:26px;margin-bottom:6px} .panel .big{font-size:20px;font-weight:700} .panel #stopLine{font-size:17px;margin-top:4px}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
   /* Compact result rows (STAYLIST): text left, a square green phone button right; the ROW is the map handover. */
   .rows{margin-top:8px}
@@ -74,6 +78,7 @@
 <!-- ═══ SCREEN 1: WHERE ARE YOU HEADING ═══ -->
 <section id="s1" class="screen">
   <div class="top" id="youAreAt">Finding where you are…</div>
+  <div id="posHelp1"></div>
   <h1>Where are you heading?</h1>
   <label for="dest">Destination</label>
   <input type="text" id="dest" placeholder="Town, e.g. Yalboroo" autocomplete="off" enterkeyhint="go">
@@ -90,10 +95,11 @@
     <h2 id="heading">Heading to …</h2>
     <div class="big" id="routeLine">Working out the route…</div>
     <div id="stopLine"></div>
-    <button class="link" id="changeBtn">Change</button>
+    <div id="posHelp2"></div>
   </div>
-  <button class="primary" id="stayBtn">Somewhere to stay</button>
-  <button class="btn off" disabled>Fuel — Coming next</button>
+  <button id="newTripBtn">New trip</button>
+  <button class="primary job" id="stayBtn">Somewhere to stay</button>
+  <button class="btn off job" disabled>Fuel — Coming next</button>
   <div class="stamp" id="stamp"></div>
 </section>
 
@@ -109,7 +115,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 12:11 PM AEST';
+const BUILD = 'new v 29 Sep 2026, 12:28 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -179,18 +185,51 @@ function show(id) { document.querySelectorAll('.screen').forEach((s) => s.classL
 function target() { return trip && (trip.stop || trip.dest); }   // a set stop is searched towards first
 
 // ── Position: ?at=LAT,LNG for laptop testing, otherwise GPS ────────────────────
-async function initPosition() {
+// NEWTRIP (GPS): the SAME ask as the old app's initGPS — getCurrentPosition with high
+// accuracy, a 15 s timeout, no cached fix, retried up to four times (3 s apart) on a
+// timeout / no-fix error, plus a watchPosition that keeps `pos` fresh. The old app's
+// browser permission prompt is the browser's own — nothing extra is needed here either.
+// Two things the first version got wrong: it never redrew the main screen when the fix
+// arrived AFTER boot (so "Waiting for your GPS position…" stayed forever on a real
+// phone), and it never gave up. Now every fix goes through onFix(), and a 15 s guard
+// replaces the waiting line with plain words and a Try again button.
+let gpsRetries = 0, posGuard = null, posFailed = false;
+const NO_POS_MSG = "Can't get your position. Check location is switched on for this browser.";
+function testPosition() {   // ?at=LAT,LNG — read from the CURRENT address only, never saved, never reused without it
   const at = new URLSearchParams(location.search).get('at');
-  if (at && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(at)) {
-    const [lat, lng] = at.split(',').map(Number); pos = { lat, lng }; posLabel = 'test position';
-    return labelPosition();
-  }
+  if (!at || !/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(at)) return null;
+  const [lat, lng] = at.split(',').map(Number); return { lat, lng };
+}
+function onFix(lat, lng) {
+  const first = !pos;
+  pos = { lat, lng }; posFailed = false;
+  clearTimeout(posGuard); posGuard = null;
+  if (first) { labelPosition(); if (trip && document.querySelector('#s2.on')) openMain(); }   // the main screen was waiting on this
+}
+function showNoPosition() {
+  posFailed = true;
+  const help = (id) => { const el = $(id); if (!el) return; el.innerHTML = ''; const b = document.createElement('button'); b.textContent = 'Try again'; b.style.marginTop = '8px'; b.onclick = () => initPosition(true); el.appendChild(b); };
+  $('youAreAt').textContent = NO_POS_MSG; help('posHelp1');
+  if (trip) { $('routeLine').textContent = NO_POS_MSG; $('routeLine').style.fontSize = '17px'; help('posHelp2'); }
+}
+function initPosition(retry) {
+  const t = testPosition();
+  if (t) { posLabel = 'test position'; onFix(t.lat, t.lng); return; }
   if (!navigator.geolocation) { $('youAreAt').textContent = 'No GPS on this device.'; return; }
+  if (retry) { gpsRetries = 0; posFailed = false; $('youAreAt').textContent = 'Finding where you are…'; ['posHelp1', 'posHelp2'].forEach((id) => { if ($(id)) $(id).innerHTML = ''; }); if (trip) { $('routeLine').textContent = 'Waiting for your GPS position…'; $('routeLine').style.fontSize = ''; } }
+  // Never leave the driver waiting: 15 s with no fix → plain words + Try again.
+  clearTimeout(posGuard); posGuard = setTimeout(() => { if (!pos) showNoPosition(); }, 15000);
   navigator.geolocation.getCurrentPosition(
-    (p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; labelPosition(); },
-    (e) => { $('youAreAt').textContent = e.code === 1 ? 'Location is blocked — allow it in your browser settings.' : 'Still looking for a GPS fix…'; },
+    (p) => { gpsRetries = 0; onFix(p.coords.latitude, p.coords.longitude); },
+    (e) => {
+      if (e.code === 1) { clearTimeout(posGuard); showNoPosition(); return; }        // blocked — retrying won't help
+      if (gpsRetries < 4) { gpsRetries++; setTimeout(() => initPosition(false), 3000); }   // timeout / no fix: transient, retry like the old app
+    },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-  navigator.geolocation.watchPosition((p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 15000 });
+  if (!retry && !initPosition.watching) {
+    initPosition.watching = true;
+    navigator.geolocation.watchPosition((p) => onFix(p.coords.latitude, p.coords.longitude), () => {}, { enableHighAccuracy: true, maximumAge: 15000 });
+  }
 }
 async function labelPosition() {
   $('youAreAt').textContent = 'You are near…';
@@ -242,8 +281,8 @@ async function openMain() {
   show('s2');
   $('heading').textContent = `Heading to ${trip.dest.name}`;
   $('stopLine').textContent = trip.stop ? `Stopping at ${trip.stop.name}` : '';
-  $('routeLine').textContent = 'Working out the route…';
-  if (!pos) { $('routeLine').textContent = 'Waiting for your GPS position…'; return; }
+  $('routeLine').textContent = 'Working out the route…'; $('routeLine').style.fontSize = ''; $('posHelp2').innerHTML = '';
+  if (!pos) { if (posFailed) showNoPosition(); else $('routeLine').textContent = 'Waiting for your GPS position…'; return; }   // onFix() redraws this screen when the fix lands
   const r = await api('route', { lat: pos.lat, lng: pos.lng, dlat: trip.dest.lat, dlng: trip.dest.lng }, 12000);
   if (r.ok && r.data && r.data.km != null) $('routeLine').textContent = `${r.data.drive_time} · ${r.data.km} km left`;
   else $('routeLine').textContent = navigator.onLine ? "Couldn't get the route just now." : 'No signal — distance unavailable.';
@@ -285,9 +324,10 @@ async function search() {
   const r = params ? await api('stay', params, 25000) : { ok: false, status: 0, data: null };
   if (seq !== searchSeq) return;   // superseded by a newer tap
   if (r.ok && r.data && Array.isArray(r.data.results)) {
-    const saved = { answer: r.data, target: tgt.name, ts: Date.now(), params };
+    const kept = { when, kind };   // never the position — a ?at= test position must not be saved or reused
+    const saved = { answer: r.data, target: tgt.name, ts: Date.now(), params: kept };
     store.set('nav2_last_stay', saved);
-    round = { sites: r.data.results, calls: {}, target: tgt.name, params, ts: Date.now() };
+    round = { sites: r.data.results, calls: {}, target: tgt.name, params: kept, ts: Date.now() };
     store.set('nav2_round', round);
     renderStay(r.data, tgt.name, '');
     return;
@@ -375,7 +415,8 @@ function onReturn() { if (lastShown && document.querySelector('#s3.on')) renderS
 $('goBtn').onclick = onGo;
 $('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('stop').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
-$('changeBtn').onclick = () => { renderRecent(); show('s1'); };
+// New trip: screen 1 with EMPTY boxes and the recent trips listed (the current trip stays saved until a new one is confirmed).
+$('newTripBtn').onclick = () => { $('dest').value = ''; $('stop').value = ''; $('confirm').innerHTML = ''; renderRecent(); show('s1'); };
 $('stayBtn').onclick = () => {
   show('s3'); labelAtStop();
   const last = store.get('nav2_last_stay', null);
@@ -398,8 +439,7 @@ $('stamp').textContent = BUILD;
 (async function boot() {
   renderRecent();
   if (trip) openMain(); else show('s1');
-  await initPosition();
-  if (trip && pos) openMain();                    // re-render with the real distance once we know where we are
+  initPosition(false);                            // a ?at= fix lands synchronously; a real fix redraws the main screen via onFix() when it arrives
   // Reopened with a saved answer and no signal → show it, plainly labelled.
   if (trip && !navigator.onLine && document.querySelector('#s2.on')) {
     const last = store.get('nav2_last_stay', null);
