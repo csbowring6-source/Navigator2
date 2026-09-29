@@ -893,9 +893,11 @@ async function handleStay(request, env) {
   const notes = [];
   if (!placesOk) notes.push("couldn't check caravan parks just now");
   if (!osmOk) notes.push("couldn't check free camps just now");
+  else if (osmPartial) notes.push(`free camps couldn't be checked for the stretch ${osmFailed.map(stretchOf).join(" and ")} — the parks shown for it are complete, the free camps are not`);
   return jsonResp({
     ...nothing, route: routeOut, found: wanted.length, results, message,
-    sources: { places: placesOk ? "ok" : "failed", osm: osmOk ? "ok" : "failed", anchors: anchors.length, phone_lookups: phoneLookups, ...(phoneOutcomes.length ? { phone_outcomes: phoneOutcomes } : {}) },
+    sources: { places: placesOk ? "ok" : "failed", osm: !osmOk ? "failed" : osmPartial ? "partial" : "ok", anchors: anchors.length,
+               ...(osmFailed.length ? { free_camps_unchecked: osmFailed.map(stretchOf) } : {}), phone_lookups: phoneLookups, ...(phoneOutcomes.length ? { phone_outcomes: phoneOutcomes } : {}) },
     ...(notes.length ? { note: notes.join("; ") } : {}),
   });
 }
@@ -1029,7 +1031,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:53 AM AEST (STAYGAP: /stay searches every 20 km; shown parks without a number get one Place Details lookup, 500 m match)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:10 AM AEST (STAYGAP: /stay searches every 20 km; shown parks without a number get one Place Details lookup, 500 m match; 6 s Overpass cap per anchor, unchecked stretches named)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
