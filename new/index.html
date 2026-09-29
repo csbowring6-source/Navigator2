@@ -21,6 +21,7 @@
     button:disabled,.btn.off{color:#8E948F}
   }
   *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%}   /* SMALLER: the phone browser must not enlarge text on its own */
   html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Public Sans',system-ui,sans-serif;font-size:19px;line-height:1.35}
   body{padding:16px 16px 40px;max-width:600px;margin:0 auto}   /* NEWTRIP: full phone width, 16 px margins, capped at 600 px on big screens */
   h1,h2,h3{font-family:'Barlow Semi Condensed',sans-serif;font-weight:700;margin:0 0 10px;line-height:1.1}
@@ -33,16 +34,20 @@
   .top{font-size:20px;color:var(--muted);margin-bottom:18px}
   label{display:block;font-weight:600;margin:16px 0 6px}
   input[type=text]{width:100%;min-height:64px;font:inherit;font-size:20px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
-  #goBtn{min-height:72px;font-size:24px;margin:10px 0 0}
+  #goBtn{min-height:60px;font-size:22px;margin:8px 0 0}
   /* Screen 1 compact (CONFIRMFIT): one-line 30 px heading, tight spacing, so boxes (or the confirm card) AND the first recent trip fit 390×844. */
-  #s1 .top{margin-bottom:8px} #s1 h1{font-size:30px;margin:0 0 6px;white-space:nowrap}
-  #s1 label{margin:8px 0 4px} #s1 .trips h3{margin:14px 0 6px;font-size:22px} #s1 .trips button{min-height:52px;margin:6px 0}
-  #confirm .card{padding:12px 14px;margin:4px 0 0}
-  #confirm .nmc{font-weight:700;font-size:24px;line-height:1.15} #confirm .stopc{margin:4px 0 0;font-size:18px}
-  #yesBtn{min-height:64px;font-size:22px;margin:10px 0 8px} #againBtn{min-height:56px;background:var(--card);border:2px solid var(--line);margin:0}
+  /* SMALLER: screen 1 ~20% smaller throughout; the heading ALWAYS one line, shrinking with the screen. */
+  #s1{font-size:16px}
+  #s1 .top{font-size:15px;margin-bottom:6px} #s1 h1{font-size:min(26px,6.5vw);margin:0 0 4px;white-space:nowrap;overflow:hidden}
+  #s1 label{font-size:16px;margin:6px 0 3px}
+  #s1 input[type=text]{min-height:56px;font-size:18px;padding:10px 12px}
+  #s1 .trips h3{margin:12px 0 4px;font-size:18px} #s1 .trips button{min-height:48px;font-size:16px;padding:8px 14px;margin:5px 0}
+  #confirm .card{padding:10px 12px;margin:2px 0 0}
+  #confirm .nmc{font-weight:700;font-size:21px;line-height:1.15} #confirm .stopc{margin:3px 0 0;font-size:16px}
+  #yesBtn{min-height:56px;font-size:19px;margin:8px 0 6px} #againBtn{min-height:48px;font-size:17px;background:var(--card);border:2px solid var(--line);margin:0}
   /* Main screen (NEWTRIP): the two job buttons are big enough to hit at a glance; "New trip" is a plain bordered button. */
-  .job{min-height:88px;font-size:24px}
-  #newTripBtn{background:var(--card);border:2px solid var(--line);min-height:56px;font-size:21px;margin:0 0 18px}
+  .job{min-height:72px;font-size:20px}
+  #newTripBtn{background:var(--card);border:2px solid var(--line);min-height:48px;font-size:18px;margin:0 0 14px}
   input[type=text]:focus{outline:3px solid var(--green);outline-offset:1px}
   button,.btn{display:block;width:100%;min-height:56px;font:inherit;font-size:21px;font-weight:700;padding:12px 16px;border-radius:12px;border:2px solid var(--line);
     background:var(--card);color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;margin:10px 0}
@@ -57,7 +62,7 @@
   .seg button.sel{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
   .seg.when{flex-wrap:wrap} .seg.when button{flex:1 1 45%}   /* 2×2 so "At Rockhampton" never truncates */
   .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:12px}
-  .panel h2{color:#fff;font-size:26px;margin-bottom:6px} .panel .big{font-size:20px;font-weight:700} .panel #stopLine{font-size:17px;margin-top:4px}
+  .panel{padding:14px 16px} .panel h2{color:#fff;font-size:22px;margin-bottom:4px} .panel .big{font-size:18px;font-weight:700} .panel #stopLine{font-size:15px;margin-top:3px}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
   /* Compact result rows (STAYLIST): text left, a square green phone button right; the ROW is the map handover. */
   .rows{margin-top:8px}
@@ -124,7 +129,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 12:55 PM AEST';
+const BUILD = 'new v 29 Sep 2026, 01:03 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
