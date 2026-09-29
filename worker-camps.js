@@ -247,12 +247,14 @@ async function overpassAttempt(mirror, q, ms) {
   }
 }
 
-async function overpass(q) {
+// `deadlineMs` (optional) shortens the TOTAL budget for one caller — /stay passes ~6 s
+// so one slow mirror pair can't hold a many-anchor request to the 13 s default.
+async function overpass(q, deadlineMs) {
   const key = q;
   const hit = osmCache.get(key);
   if (hit && Date.now() - hit.ts < OSM_TTL) return { data: hit.data, cached: true };
 
-  const deadline = Date.now() + OVERPASS_DEADLINE_MS;
+  const deadline = Date.now() + (deadlineMs || OVERPASS_DEADLINE_MS);
   let lastErr = "";
   for (let i = 0; i < OVERPASS_MIRRORS.length; i += 2) {
     const remaining = deadline - Date.now();
@@ -535,7 +537,7 @@ function facilityTags(t) {
 // The lookup itself, shared by /camps2-osm and /stay: { results, cached } or { errResp }.
 // Caches up to 40 nearest (was 12) so a corridor anchor isn't starved; the route still
 // presents 12. Older cached entries (≤12, no tags) stay valid — tags default to none.
-async function osmCamps(lat, lon, radiusKm, env) {
+async function osmCamps(lat, lon, radiusKm, env, opts) {
   // KV cache FIRST — a hit serves WITHOUT hitting Overpass. Distinct "camps2-osm:"
   // prefix so it never collides with the "camps:" or "camps2:" caches. 7-day TTL.
   const kv = env && env.PLACES_KV;
@@ -548,7 +550,7 @@ async function osmCamps(lat, lon, radiusKm, env) {
   // Distinct query string from /camps, so overpass()'s in-memory cache never collides.
   const r = radiusKm * 1000;
   const q = `[out:json][timeout:20];(node["tourism"~"camp_site|caravan_site"](around:${r},${lat},${lon});way["tourism"~"camp_site|caravan_site"](around:${r},${lat},${lon});node["highway"="rest_area"](around:${r},${lat},${lon});way["highway"="rest_area"](around:${r},${lat},${lon}););out center tags 150;`;
-  const res = await overpass(q);
+  const res = await overpass(q, opts && opts.deadlineMs);   // /stay passes a shorter budget; the route uses the default
   if (res.error) {
     // A fresh KV hit would have returned above — honest error, never a crash.
     return { errResp: jsonResp({ error: "camps lookup failed", detail: res.error, unavailable: true }, 503) };
@@ -601,9 +603,18 @@ async function handleCamps2Osm(request, env) {
 // which absorbs the detour. This endpoint doesn't, so it's tighter.)
 const STAY_CORRIDOR_KM = 5;
 const STAY_ANCHOR_RADIUS_KM = 40;    // each lookup circle (the Places bias cap is 50 km)
-const STAY_ANCHOR_SPACING_KM = 50;   // along-route spacing — circles overlap by ~30 km
+// STAYGAP speed guard: Overpass gets ~6 s per anchor here (one mirror pair, no second
+// round) instead of the routes' 13 s, so a slow mirror can't hold a cold request past
+// 10 s. A timed-out anchor is REPORTED — "free camps couldn't be checked for that
+// stretch" — never silently left out. Parks (Places) are unaffected.
+const STAY_OSM_DEADLINE_MS = 6000;
+// STAYGAP: every 20 km (was 50). Places returns at most 20 results per circle, so on a
+// busy corridor (the M1 through Brisbane) a 50 km spacing let whole towns of parks fall
+// between the 20-result caps. 20 km spacing means each stretch of road is inside ~4
+// circles, each ranked from a different centre.
+const STAY_ANCHOR_SPACING_KM = 20;
 const STAY_ANCHOR_GRID = 0.2;        // anchors snap to a ~20 km grid so a moving van re-hits the same KV keys
-const STAY_MAX_ANCHORS = 6;
+const STAY_MAX_ANCHORS = 12;         // a 2 h window is ~180 km → ~9 anchors; 6 would have cut it short
 const STAY_RESULTS = 3;
 
 // Durations are ALWAYS hours-and-minutes (the app's locked convention, ported verbatim
@@ -737,6 +748,52 @@ function stayPrice(tags) {
   return "unknown";
 }
 
+// STAYGAP — a final-results-only phone back-fill. A PARK that arrived without a number
+// (the Text Search field mask asked for nationalPhoneNumber and got nothing) is looked up
+// ONCE more by its Places id via Place Details, asking for both the national and the
+// international number. The number is accepted only if Details' location is within 500 m
+// of the site we're showing — a stale or re-pointed id must never hand a driver the
+// wrong park's number. KV: found → 90 days; not found → 7 days (so a park that adds a
+// number is picked up within a week, and a known blank isn't re-billed every request).
+// Free camps are never looked up. At most 3 lookups per request (one per shown park).
+const PHONE_FIELD_MASK = "id,location,nationalPhoneNumber,internationalPhoneNumber";
+const PHONE_MATCH_KM = 0.5;
+async function placePhoneById(id, siteLat, siteLon, env) {
+  if (!id || !env.GOOGLE_PLACES_KEY) return { phone: null, from: "skipped" };
+  const kv = env && env.PLACES_KV;
+  const ckey = `phone:${id}`;
+  if (kv) {
+    try { const c = await kv.get(ckey, { type: "json" }); if (c && "phone" in c) return { phone: c.phone, from: "cache" }; } catch (e) {}
+  }
+  let phone = null, outcome = "not-found";
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const r = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`, {
+      headers: { "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY, "X-Goog-FieldMask": PHONE_FIELD_MASK },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!r.ok) {                                                 // a failed lookup is NOT cached as "no number"
+      let detail = ""; try { const e = await r.json(); detail = (e && e.error && e.error.message) || ""; } catch (_) {}
+      return { phone: null, from: `error HTTP ${r.status}${detail ? " — " + detail.slice(0, 120) : ""}` };
+    }
+    const d = await r.json();
+    const loc = (d && d.location) || {};
+    const near = typeof loc.latitude === "number" && typeof loc.longitude === "number"
+      && hav(siteLat, siteLon, loc.latitude, loc.longitude) <= PHONE_MATCH_KM;
+    if (!near) outcome = "mismatch";                            // Details points somewhere else — reject, but cache the miss
+    else {
+      const p = String((d && (d.nationalPhoneNumber || d.internationalPhoneNumber)) || "").trim();
+      if (p.replace(/[^\d]/g, "").length >= 6) { phone = p; outcome = "found"; }
+    }
+  } catch (e) {
+    return { phone: null, from: "error " + (e && e.name === "AbortError" ? "timeout" : String((e && e.message) || e).slice(0, 80)) };
+  }
+  if (kv) { try { await kv.put(ckey, JSON.stringify({ phone, ts: Date.now() }), { expirationTtl: (phone ? 90 : 7) * 24 * 3600 }); } catch (e) {} }
+  return { phone, from: outcome };
+}
+
 async function handleStay(request, env) {
   const u = new URL(request.url);
   const num = (k) => parseFloat(u.searchParams.get(k));
@@ -767,14 +824,19 @@ async function handleStay(request, env) {
     let i = 0; while (i + 1 <= endIdx && route.cumKm[i + 1] <= target) i++;
     const a = { lat: +snap(route.pts[i].lat).toFixed(2), lon: +snap(route.pts[i].lon).toFixed(2) };
     const ak = `${a.lat},${a.lon}`;
-    if (!seenA.has(ak)) { seenA.add(ak); anchors.push(a); }
+    if (!seenA.has(ak)) { seenA.add(ak); a.atKm = Math.round(target); anchors.push(a); }   // atKm: where on the route this circle sits (for the honest per-stretch note)
     if (target >= stretchKm || anchors.length >= STAY_MAX_ANCHORS) break;
   }
   const lookups = await Promise.all(anchors.map(async (a) => {
-    const [p, o] = await Promise.all([placesCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env), osmCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env)]);
-    return { places: p.errResp ? null : p.results, osm: o.errResp ? null : o.results };
+    const [p, o] = await Promise.all([placesCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env), osmCamps(a.lat, a.lon, STAY_ANCHOR_RADIUS_KM, env, { deadlineMs: STAY_OSM_DEADLINE_MS })]);
+    return { places: p.errResp ? null : p.results, osm: o.errResp ? null : o.results, atKm: a.atKm };
   }));
   const placesOk = lookups.some((l) => l.places), osmOk = lookups.some((l) => l.osm);
+  // Every anchor whose free-camp lookup failed is named by the stretch its circle covers
+  // (its route km ± the circle radius, clipped to the window). Plain words, never silence.
+  const osmFailed = lookups.filter((l) => !l.osm);
+  const osmPartial = osmOk && osmFailed.length > 0;
+  const stretchOf = (l) => `${Math.max(0, l.atKm - STAY_ANCHOR_RADIUS_KM)}–${Math.min(Math.round(stretchKm), l.atKm + STAY_ANCHOR_RADIUS_KM)} km ahead`;
   if (!placesOk && !osmOk) return jsonResp({ ...nothing, error: "camp lookups failed", unavailable: true }, 503);
   // Pool by stable id across anchors (overlapping circles return the same sites).
   const byId = (arr, key) => { const m = new Map(); arr.forEach((r) => { if (r && r.id && !m.has(r.id)) m.set(r.id, { ...r }); }); return [...m.values()]; };
@@ -805,6 +867,15 @@ async function handleStay(request, env) {
     const firstFree = wanted.find((q) => q.kindOf === "free");
     if (firstFree) { picked = [...picked.slice(0, STAY_RESULTS - 1), firstFree].sort((a, b) => a.kmAhead - b.kmAhead); }
   }
+  // STAYGAP: back-fill numbers for the shown PARKS only (never free camps), in parallel.
+  let phoneLookups = 0; const phoneOutcomes = [];   // outcomes are reported (cache/found/not-found/mismatch/error …) so a silent miss is diagnosable
+  await Promise.all(picked.map(async (q) => {
+    if (q.kindOf !== "park" || verifiedPhone(q.s) || q.s.source !== "places" || !q.s.id) return;
+    phoneLookups++;
+    const r = await placePhoneById(q.s.id, q.s.lat, q.s.lon, env);
+    phoneOutcomes.push(`${q.s.name}: ${r.from}`);
+    if (r.phone) q.s = { ...q.s, phone: r.phone };
+  }));
   const results = picked.map(({ s, kmAhead, secs, kmToDest, kindOf }) => ({
     name: s.name, kind: kindOf, lat: s.lat, lng: s.lon,
     phone: verifiedPhone(s),
@@ -824,7 +895,7 @@ async function handleStay(request, env) {
   if (!osmOk) notes.push("couldn't check free camps just now");
   return jsonResp({
     ...nothing, route: routeOut, found: wanted.length, results, message,
-    sources: { places: placesOk ? "ok" : "failed", osm: osmOk ? "ok" : "failed", anchors: anchors.length },
+    sources: { places: placesOk ? "ok" : "failed", osm: osmOk ? "ok" : "failed", anchors: anchors.length, phone_lookups: phoneLookups, ...(phoneOutcomes.length ? { phone_outcomes: phoneOutcomes } : {}) },
     ...(notes.length ? { note: notes.join("; ") } : {}),
   });
 }
@@ -958,7 +1029,7 @@ async function handleReverseGeocode(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:41 AM AEST (STAY: GET /stay — three places ahead on the route as finished data, no AI)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 09:53 AM AEST (STAYGAP: /stay searches every 20 km; shown parks without a number get one Place Details lookup, 500 m match)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
