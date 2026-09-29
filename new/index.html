@@ -9,8 +9,16 @@
 <style>
   /* ── Look: warm off-white, dark text, green actions, orange-brown for free camps + warnings ── */
   :root{
+    color-scheme:light dark;   /* STAYTIDY: we supply both palettes — Chrome must not auto-darken the page itself */
     --bg:#F4F1EA; --ink:#1B1F1D; --green:#1E6B47; --brown:#9A4A00; --card:#FFFFFF;
-    --muted:#4A514D; --line:#1B1F1D; --grey:#C9C6BE;
+    --muted:#4A514D; --line:#1B1F1D; --grey:#C9C6BE; --brown-text:#9A4A00;
+  }
+  /* Dark mode: dark background, light text, the SAME green for selected + Call buttons. */
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141715; --ink:#F1EFE8; --card:#1F2421; --muted:#B4B9B3; --line:#DCD9D0; --grey:#3A3F3C; --brown:#B85A0A; --brown-text:#E39A5A;
+    }
+    button:disabled,.btn.off{color:#8E948F}
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Public Sans',system-ui,sans-serif;font-size:19px;line-height:1.35}
@@ -21,27 +29,30 @@
   .screen{display:none} .screen.on{display:block}
   .top{font-size:20px;color:var(--muted);margin-bottom:18px}
   label{display:block;font-weight:600;margin:16px 0 6px}
-  input[type=text]{width:100%;min-height:60px;font:inherit;font-size:22px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+  input[type=text]{width:100%;min-height:60px;font:inherit;font-size:22px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
   input[type=text]:focus{outline:3px solid var(--green);outline-offset:1px}
   button,.btn{display:block;width:100%;min-height:56px;font:inherit;font-size:21px;font-weight:700;padding:12px 16px;border-radius:12px;border:2px solid var(--line);
-    background:#fff;color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;margin:10px 0}
+    background:var(--card);color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;margin:10px 0}
   .primary{background:var(--green);color:#fff;border-color:var(--green)}
   .brown{background:var(--brown);color:#fff;border-color:var(--brown)}
   .ghost{background:transparent}
   .link{background:none;border:none;color:var(--green);text-decoration:underline;font-size:19px;min-height:44px;width:auto;display:inline-block;padding:8px 0;margin:0}
   button:disabled,.btn.off{background:var(--grey);color:#5c5c5c;border-color:var(--grey);cursor:default}
   .row{display:flex;gap:10px} .row>*{flex:1}
-  .seg button{margin:0} .seg button.sel{background:var(--ink);color:#fff;border-color:var(--ink)}
+  /* Choice buttons: unselected = plain, thin border, normal weight; selected = solid green, white bold, tick. Same in both modes. */
+  .seg button{margin:0;font-weight:400;border-width:1px;padding:12px 10px}
+  .seg button.sel{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
+  .seg button.sel::before{content:'✓ '}
   .seg.when{flex-wrap:wrap;gap:8px;margin-bottom:10px} .seg.when button{flex:1 1 45%;font-size:19px;padding:10px 8px}   /* 2×2 so "At Rockhampton" never truncates */
   .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:18px}
   .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
-  .card.free{border-color:var(--brown)} .card.free .kind{color:var(--brown)}
+  .card.free{border-color:var(--brown)} .card.free .kind{color:var(--brown-text)}
   .called{color:var(--muted);font-size:17px;font-weight:600;margin:6px 0 0}
   .card h3{font-size:26px} .kind{font-weight:700;color:var(--green);margin-bottom:6px}
   .meta{margin:4px 0} .fac{color:var(--muted);font-size:18px;margin:8px 0}
   .tag{display:inline-block;font-size:16px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--ink);color:#fff;margin-left:8px;vertical-align:middle}
-  .notice{border:2px solid var(--brown);color:var(--brown);background:#fff;border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 14px}
+  .notice{border:2px solid var(--brown);color:var(--brown-text);background:var(--card);border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 14px}
   .quiet{color:var(--muted);font-size:17px}
   .stamp{color:var(--muted);font-size:14px;text-align:center;margin-top:30px}
   .trips button{text-align:left}
@@ -81,14 +92,13 @@
   <h1>Somewhere to stay</h1>
   <div class="row seg when" id="segWhen"><button data-v="soon" class="sel">Soon</button><button data-v="1">Within 1 hr</button><button data-v="2">Within 2 hrs</button><button data-v="stop" id="atStopBtn">At …</button></div>
   <div class="row seg" id="segKind"><button data-v="both" class="sel">Both</button><button data-v="paid">Paid</button><button data-v="free">Free</button></div>
-  <button class="primary" id="searchBtn">Search</button>
   <div id="stayNotice"></div>
   <div id="results"></div>
 </section>
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 11:03 AM AEST';
+const BUILD = 'new v 29 Sep 2026, 11:38 AM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -236,27 +246,33 @@ async function openMain() {
 let when = 'soon', kind = 'both';   // WHEN to stop: soon · 1 · 2 (hours ahead) · stop (at the planned stop / destination)
 function shortName(p) { return (p && p.name || '').split(',')[0].trim(); }
 function labelAtStop() { const t = target(); $('atStopBtn').textContent = t ? `At ${shortName(t)}` : 'At stop'; }
+// STAYTIDY: a tap on any choice button searches straight away — there is no separate Search
+// button, so the cards can never sit under a selection they don't belong to.
 function segInit(id, onPick) {
-  $(id).querySelectorAll('button').forEach((b) => b.onclick = () => {
-    $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b)); onPick(b.dataset.v);
-  });
+  $(id).querySelectorAll('button').forEach((b) => b.onclick = () => { onPick(b.dataset.v); syncSeg(); search(); });
+}
+function syncSeg() {   // the buttons always show the CURRENT when/kind (also after a saved answer is restored)
+  $('segWhen').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === when));
+  $('segKind').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === kind));
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function facLine(r) {
   const f = r.facilities || {}, word = (v) => v === 'yes' ? 'yes' : v === 'no' ? 'no' : 'not known';
-  const allUnknown = ['powered', 'showers', 'toilets', 'pool', 'wifi'].every((k) => f[k] !== 'yes' && f[k] !== 'no') && (!r.price || r.price === 'unknown');
-  if (allUnknown) return 'Facilities and price not known yet';
-  return `Powered sites: ${word(f.powered)} · Showers: ${word(f.showers)} · Toilets: ${word(f.toilets)} · Pool: ${word(f.pool)} · Wi-fi: ${word(f.wifi)}`
-       + (r.price && r.price !== 'unknown' ? ` · Price: ${r.price}` : '');
+  const priceKnown = r.price && r.price !== 'unknown';
+  const priceBit = r.kind === 'free' ? ' · Free' : priceKnown ? ` · Price: ${r.price}` : ' · price not known';
+  const allUnknown = ['powered', 'showers', 'toilets', 'pool', 'wifi'].every((k) => f[k] !== 'yes' && f[k] !== 'no');
+  if (allUnknown) return 'Facilities not known yet' + priceBit;   // never "not known" item by item
+  return `Powered sites: ${word(f.powered)} · Showers: ${word(f.showers)} · Toilets: ${word(f.toilets)} · Pool: ${word(f.pool)} · Wi-fi: ${word(f.wifi)}` + priceBit;
 }
+let searchSeq = 0;   // a later tap wins — an earlier, slower answer is dropped, never drawn over the new selection
 async function search() {
   if (!trip) return show('s1');
   const tgt = target();
-  $('results').innerHTML = '<p class="quiet">Searching ahead…</p>'; $('stayNotice').innerHTML = '';
-  $('searchBtn').disabled = true;
+  const seq = ++searchSeq;
+  $('results').innerHTML = '<p class="quiet">Searching…</p>'; $('stayNotice').innerHTML = ''; lastShown = null;   // old cards gone the moment a button is tapped
   const params = pos ? { lat: pos.lat, lng: pos.lng, dlat: tgt.lat, dlng: tgt.lng, when, kind } : null;
   const r = params ? await api('stay', params, 25000) : { ok: false, status: 0, data: null };
-  $('searchBtn').disabled = false;
+  if (seq !== searchSeq) return;   // superseded by a newer tap
   if (r.ok && r.data && Array.isArray(r.data.results)) {
     const saved = { answer: r.data, target: tgt.name, ts: Date.now(), params };
     store.set('nav2_last_stay', saved);
@@ -305,7 +321,7 @@ function renderStay(ans, tgtName, notice) {
   // Only under a "Soon" list: widen to the one-hour mark. (The other modes have their own point.)
   if (ans.when === 'soon') {
     const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (within 1 hr)';
-    b.onclick = () => { when = '1'; $('segWhen').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === '1')); search(); };
+    b.onclick = () => { when = '1'; syncSeg(); search(); };
     box.appendChild(b);
   }
 }
@@ -322,9 +338,18 @@ $('goBtn').onclick = onGo;
 $('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('stop').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('changeBtn').onclick = () => { renderRecent(); show('s1'); };
-$('stayBtn').onclick = () => { show('s3'); labelAtStop(); if (round && round.sites && round.sites.length) { const last = store.get('nav2_last_stay', null); renderStay(last && last.target === round.target ? last.answer : { results: round.sites }, round.target, last ? `Showing your answer from ${timeLabel(last.ts)}. Tap Search for fresh results.` : ''); } else search(); };
+$('stayBtn').onclick = () => {
+  show('s3'); labelAtStop();
+  const last = store.get('nav2_last_stay', null);
+  if (round && round.sites && round.sites.length && last && last.target === round.target) {
+    // Show the saved answer — and set the buttons to what it was searched with, so they never disagree.
+    if (last.answer && last.answer.when) when = last.answer.when;
+    if (last.params && last.params.kind) kind = last.params.kind;
+    syncSeg();
+    renderStay(last.answer, round.target, `Showing your answer from ${timeLabel(last.ts)}. Tap a button to search again.`);
+  } else { syncSeg(); search(); }
+};
 $('backBtn').onclick = openMain;
-$('searchBtn').onclick = search;
 segInit('segWhen', (v) => { when = v; });
 segInit('segKind', (v) => { kind = v; });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onReturn(); });
