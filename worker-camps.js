@@ -882,7 +882,7 @@ async function handleStay(request, env) {
   const qualifying = [];
   for (const s of merged) {
     if (s.lat == null || s.lon == null) continue;
-    let distFromStop = null, rank;
+    let distFromStop = null, rank, beyond = false;
     if (when === "stop") {
       distFromStop = hav(dlat, dlng, s.lat, s.lon);
       if (distFromStop > STAY_STOP_RADIUS_KM) continue;              // not in the town
@@ -895,21 +895,29 @@ async function handleStay(request, env) {
       if (nv.km > STAY_CORRIDOR_KM) continue;                        // too far off the road
       if (nv.idx <= startIdx || kmAhead < 0.5) continue;              // behind us, or underfoot
       if (when === "soon" && secs > 3600) continue;                   // soon = inside the hour
-      if (hoursAhead && kmAhead < stretchStartKm) continue;           // well short of the N-hour point — not "in N hours"
-      rank = when === "soon" ? kmAhead : Math.abs(kmAhead - pointKm);
+      const inside = !hoursAhead || secs <= hoursAhead * 3600;
+      rank = when === "soon" ? kmAhead : inside ? -kmAhead : 1e6 + kmAhead;   // 1/2: furthest inside first; beyond-the-time after, nearest first
+      beyond = !inside;
     }
-    qualifying.push({ s, kmAhead, secs, kmToDest: route.km - route.cumKm[nv.idx], distFromStop, rank, kindOf: stayKind(s) });
+    qualifying.push({ s, kmAhead, secs, kmToDest: route.km - route.cumKm[nv.idx], distFromStop, rank, beyond, kindOf: stayKind(s) });
   }
   qualifying.sort((a, b) => a.rank - b.rank);
-  const wanted = kind === "both" ? qualifying : qualifying.filter((q) => q.kindOf === (kind === "free" ? "free" : "park"));
+  const wantedAll = kind === "both" ? qualifying : qualifying.filter((q) => q.kindOf === (kind === "free" ? "free" : "park"));
+  const wanted = wantedAll.filter((q) => !q.beyond);
 
-  // 4. Three nearest (to the mode's point); with kind=both the nearest free camp takes the
-  // last slot if none made it on distance alone.
+  // 4. Three by the mode's rank; with kind=both the best-ranked free camp takes the last slot
+  // if none made it on rank alone. 1/2 with nothing inside the time → the nearest beyond it.
   let picked = wanted.slice(0, STAY_RESULTS);
   if (kind === "both" && !picked.some((q) => q.kindOf === "free")) {
     const firstFree = wanted.find((q) => q.kindOf === "free");
     if (firstFree) { picked = [...picked.slice(0, STAY_RESULTS - 1), firstFree].sort((a, b) => a.rank - b.rank); }
   }
+  let beyondNote = "";
+  if (hoursAhead && !picked.length) {
+    const nb = wantedAll.find((q) => q.beyond);
+    if (nb) { picked = [nb]; beyondNote = `Nothing within ${hoursAhead === 1 ? "1 hour" : "2 hours"}. The nearest is ${hrsMins(nb.secs / 60)} ahead`; }
+  }
+  if (hoursAhead) picked.sort((a, b) => a.kmAhead - b.kmAhead);   // listed nearest first
   // STAYGAP: back-fill numbers for the shown PARKS only (never free camps), in parallel.
   let phoneLookups = 0; const phoneOutcomes = [];   // outcomes are reported (cache/found/not-found/mismatch/error …) so a silent miss is diagnosable
   await Promise.all(picked.map(async (q) => {
@@ -934,9 +942,10 @@ async function handleStay(request, env) {
     const what = kind === "free" ? "free camps" : kind === "paid" ? "parks" : "parks or free camps";
     message = when === "stop" ? `No ${what} within ${STAY_STOP_RADIUS_KM} km of the stop`
             : when === "soon" ? `No ${what} within 1 hour ahead`
-            : `No ${what} around the ${hoursAhead === 1 ? "1 hour" : "2 hour"} mark ahead`;
+            : `No ${what} within ${hoursAhead === 1 ? "1 hour" : "2 hours"} ahead`;
   }
   const notes = [];
+  if (beyondNote) notes.push(beyondNote);
   if (!placesOk) notes.push("couldn't check caravan parks just now");
   if (!osmOk) notes.push("couldn't check free camps just now");
   else if (osmPartial) notes.push(`free camps couldn't be checked for the stretch ${osmFailed.map(stretchOf).join(" and ")} — the parks shown for it are complete, the free camps are not`);
@@ -1091,7 +1100,7 @@ async function handleRoute(request) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 10:54 AM AEST (STAYWHEN: /stay takes when=soon|1|2|stop — nearest ahead, around the N-hour point, or within 15 km of the stop)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 11:03 AM AEST (STAYWHEN: /stay takes when=soon|1|2|stop — nearest ahead, furthest inside N hours, or within 15 km of the stop)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
