@@ -25,6 +25,9 @@
   body{padding:16px 16px 40px;max-width:520px;margin:0 auto}
   h1,h2,h3{font-family:'Barlow Semi Condensed',sans-serif;font-weight:700;margin:0 0 10px;line-height:1.1}
   h1{font-size:34px} h2{font-size:28px} h3{font-size:24px}
+  /* STAYLIST: the Stay screen is COMPACT — body 16 px, small heading, tight padding — so the
+     choice buttons and the first three rows fit one phone screen. */
+  #s3{font-size:16px} #s3 h1{font-size:26px;margin:0 0 8px} #s3 .link{font-size:16px;min-height:36px;padding:4px 0}
   p{margin:0 0 12px}
   .screen{display:none} .screen.on{display:block}
   .top{font-size:20px;color:var(--muted);margin-bottom:18px}
@@ -39,21 +42,29 @@
   .link{background:none;border:none;color:var(--green);text-decoration:underline;font-size:19px;min-height:44px;width:auto;display:inline-block;padding:8px 0;margin:0}
   button:disabled,.btn.off{background:var(--grey);color:#5c5c5c;border-color:var(--grey);cursor:default}
   .row{display:flex;gap:10px} .row>*{flex:1}
-  /* Choice buttons: unselected = plain, thin border, normal weight; selected = solid green, white bold, tick. Same in both modes. */
-  .seg button{margin:0;font-weight:400;border-width:1px;padding:12px 10px}
+  /* Choice buttons: 44 px, smaller text. Unselected = plain, thin border, normal weight; selected = solid green, white bold. No ticks. */
+  .seg{gap:6px;margin-bottom:6px} .seg button{margin:0;min-height:44px;font-size:16px;font-weight:400;border-width:1px;border-radius:9px;padding:8px 6px}
   .seg button.sel{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
-  .seg button.sel::before{content:'✓ '}
-  .seg.when{flex-wrap:wrap;gap:8px;margin-bottom:10px} .seg.when button{flex:1 1 45%;font-size:19px;padding:10px 8px}   /* 2×2 so "At Rockhampton" never truncates */
+  .seg.when{flex-wrap:wrap} .seg.when button{flex:1 1 45%}   /* 2×2 so "At Rockhampton" never truncates */
   .panel{background:var(--green);color:#fff;border-radius:14px;padding:18px;margin-bottom:18px}
   .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
-  .card.free{border-color:var(--brown)} .card.free .kind{color:var(--brown-text)}
-  .called{color:var(--muted);font-size:17px;font-weight:600;margin:6px 0 0}
-  .card h3{font-size:26px} .kind{font-weight:700;color:var(--green);margin-bottom:6px}
-  .meta{margin:4px 0} .fac{color:var(--muted);font-size:18px;margin:8px 0}
-  .tag{display:inline-block;font-size:16px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--ink);color:#fff;margin-left:8px;vertical-align:middle}
-  .notice{border:2px solid var(--brown);color:var(--brown-text);background:var(--card);border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 14px}
-  .quiet{color:var(--muted);font-size:17px}
+  /* Compact result rows (STAYLIST): text left, a square green phone button right; the ROW is the map handover. */
+  .rows{margin-top:8px}
+  .rowi{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;margin:6px 0;cursor:pointer}
+  .rowi.free{border-color:var(--brown)} .rowi.free .nm,.rowi.free .ln2{color:var(--brown-text)}
+  .rowi .txt{flex:1;min-width:0}
+  .nm{font-weight:700;font-size:18px;line-height:1.2;overflow-wrap:anywhere}   /* long names wrap — never "…" */
+  .ln2{font-size:15px;color:var(--ink);margin-top:2px;line-height:1.3}
+  .fac{font-size:13px;color:var(--muted);margin-top:2px}
+  .called{color:var(--muted);font-size:13px;font-weight:600;margin-top:2px}
+  .nonum{color:var(--muted);font-size:13px;margin-top:2px}
+  .badge{display:inline-block;font-size:12px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--brown);color:#fff;margin-left:6px;vertical-align:middle}
+  .ph{flex:0 0 56px;width:56px;height:56px;min-height:56px;margin:0;padding:0;border-radius:10px;background:var(--green);border-color:var(--green);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center}
+  .ph.off{background:var(--grey);border-color:var(--grey)}
+  .slim{min-height:44px;font-size:16px;padding:8px 12px;margin:8px 0}
+  .notice{border:2px solid var(--brown);color:var(--brown-text);background:var(--card);border-radius:10px;padding:10px 12px;font-weight:600;font-size:15px;margin:6px 0 8px}
+  .quiet{color:var(--muted);font-size:16px}
   .stamp{color:var(--muted);font-size:14px;text-align:center;margin-top:30px}
   .trips button{text-align:left}
 </style>
@@ -98,7 +109,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 11:38 AM AEST';
+const BUILD = 'new v 29 Sep 2026, 12:11 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -256,13 +267,13 @@ function syncSeg() {   // the buttons always show the CURRENT when/kind (also af
   $('segKind').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === kind));
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// Facilities: only what is actually KNOWN (yes or no), nothing when nothing is known.
 function facLine(r) {
-  const f = r.facilities || {}, word = (v) => v === 'yes' ? 'yes' : v === 'no' ? 'no' : 'not known';
-  const priceKnown = r.price && r.price !== 'unknown';
-  const priceBit = r.kind === 'free' ? ' · Free' : priceKnown ? ` · Price: ${r.price}` : ' · price not known';
-  const allUnknown = ['powered', 'showers', 'toilets', 'pool', 'wifi'].every((k) => f[k] !== 'yes' && f[k] !== 'no');
-  if (allUnknown) return 'Facilities not known yet' + priceBit;   // never "not known" item by item
-  return `Powered sites: ${word(f.powered)} · Showers: ${word(f.showers)} · Toilets: ${word(f.toilets)} · Pool: ${word(f.pool)} · Wi-fi: ${word(f.wifi)}` + priceBit;
+  const f = r.facilities || {};
+  const known = [['powered', 'Powered'], ['showers', 'Showers'], ['toilets', 'Toilets'], ['pool', 'Pool'], ['wifi', 'Wi-fi']]
+    .filter(([k]) => f[k] === 'yes' || f[k] === 'no').map(([k, l]) => `${l}: ${f[k]}`);
+  if (r.price && r.price !== 'unknown' && r.price !== 'free') known.push(`Price: ${r.price}`);
+  return known.join(' · ');
 }
 let searchSeq = 0;   // a later tap wins — an earlier, slower answer is dropped, never drawn over the new selection
 async function search() {
@@ -298,32 +309,59 @@ function renderStay(ans, tgtName, notice) {
   if (ans.note) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = cap(ans.note) + '.'; box.appendChild(n); }
   if (!ans.results || !ans.results.length) { const p = document.createElement('p'); p.className = 'card'; p.textContent = ans.message || 'Nothing found ahead.'; box.appendChild(p); return; }
   const calls = (round && round.calls) || {};
+  const short = shortName({ name: tgtName });
+  const list = document.createElement('div'); list.className = 'rows';
   ans.results.forEach((r, i) => {
     const free = r.kind === 'free';
-    const c = document.createElement('div');
-    c.className = 'card' + (free ? ' free' : '');
-    c.innerHTML = `<h3>${i + 1}. ${esc(r.name)}</h3>
-      <div class="kind">${free ? 'Free camp' : 'Caravan park'}</div>
-      ${ans.when === 'stop'
-        ? `<div class="meta"><b>${r.dist_from_stop_km} km from ${esc(shortName({ name: tgtName }))}</b></div><div class="meta">${r.km_ahead} km ahead · ${esc(r.drive_time)}</div>`
-        : `<div class="meta"><b>${r.km_ahead} km ahead · ${esc(r.drive_time)}</b></div><div class="meta">${r.km_from_destination} km from ${esc(tgtName)}</div>`}
-      <div class="fac">${esc(facLine(r))}</div>`;
-    if (!free && r.phone) {
-      const a = document.createElement('a'); a.className = 'btn primary'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
-      a.textContent = `Call ${r.phone}`; a.onclick = () => noteCalled(r.name); c.appendChild(a);
-      if (calls[r.name]) { const l = document.createElement('div'); l.className = 'called'; l.textContent = `Called at ${timeLabel(calls[r.name])}`; c.appendChild(l); }
-    } else if (!free) { const p = document.createElement('div'); p.className = 'meta quiet'; p.textContent = 'No phone number found'; c.appendChild(p); }
-    // Every card can hand over to the map app — a park with a number gets it UNDER the Call button.
-    const b = document.createElement('button'); b.className = free ? 'brown' : ''; b.textContent = 'Take me there'; b.onclick = () => takeMeThere(r.lat, r.lng); c.appendChild(b);
-    box.appendChild(c);
+    const row = document.createElement('div'); row.className = 'rowi' + (free ? ' free' : '');
+    const line2 = ans.when === 'stop'
+      ? `${r.dist_from_stop_km} km from ${esc(short)} · ${esc(r.drive_time)} away`
+      : `${r.km_ahead} km ahead · ${esc(r.drive_time)} · ${r.km_from_destination} km to ${esc(short)}`;
+    const fac = facLine(r);
+    row.innerHTML = `<div class="txt"><div class="nm">${i + 1}. ${esc(r.name)}${free ? '<span class="badge">FREE</span>' : ''}</div>
+      <div class="ln2">${line2}</div>${fac ? `<div class="fac">${esc(fac)}</div>` : ''}
+      ${calls[r.name] ? `<div class="called">Called at ${timeLabel(calls[r.name])}</div>` : ''}</div>`;
+    row.onclick = () => takeMeThere(r.lat, r.lng);   // the ROW is the map handover
+    if (r.phone) {
+      const a = document.createElement('a'); a.className = 'btn ph'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
+      a.textContent = '📞'; a.setAttribute('aria-label', `Call ${r.name} on ${r.phone}`);
+      a.onclick = (e) => { e.stopPropagation(); noteCalled(r.name); };
+      row.appendChild(a);
+    } else if (!free) {
+      // No number yet. The first three were already looked up by the Worker (nothing found);
+      // rows beyond that look up ON TAP — a paid lookup only when the driver actually wants it.
+      const looked = i < 3 || r.phoneLookedUp;
+      const b = document.createElement('button'); b.className = 'btn ph' + (looked ? ' off' : ''); b.textContent = '📞';
+      b.setAttribute('aria-label', looked ? `No phone number found for ${r.name}` : `Look up the number for ${r.name}`);
+      b.onclick = (e) => { e.stopPropagation(); if (!looked) lookupPhone(r, row, b); };
+      row.appendChild(b);
+      if (looked) { const n = document.createElement('div'); n.className = 'nonum'; n.textContent = 'No phone number found'; row.querySelector('.txt').appendChild(n); }
+    }
+    list.appendChild(row);
   });
-  // One button at the bottom of every list: widen to two hours (already at two hours → nothing further to offer).
+  box.appendChild(list);
   // Only under a "Soon" list: widen to the one-hour mark. (The other modes have their own point.)
   if (ans.when === 'soon') {
-    const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (within 1 hr)';
+    const b = document.createElement('button'); b.className = 'brown slim'; b.textContent = 'Search further (within 1 hr)';
     b.onclick = () => { when = '1'; syncSeg(); search(); };
     box.appendChild(b);
   }
+}
+// On-tap number lookup for rows 4–10 (Worker /stay-phone: Place Details, 500 m rule, cached).
+// Found → the row keeps the number (saved with the round) and the phone dials; not found →
+// "No phone number found" under the row and the button greys out.
+async function lookupPhone(r, row, btn) {
+  if (!r.id) { r.phoneLookedUp = true; onReturn(); return; }
+  btn.textContent = '…'; btn.disabled = true;
+  const res = await api('stay-phone', { id: r.id, lat: r.lat, lng: r.lng }, 12000);
+  const phone = res.ok && res.data && res.data.phone;
+  r.phoneLookedUp = true;
+  if (phone) { r.phone = phone; noteCalled(r.name); }
+  // Persist onto the saved round/answer so a reopen shows the same state.
+  const site = round && round.sites && round.sites.find((s) => s.name === r.name); if (site) { site.phone = r.phone || null; site.phoneLookedUp = true; store.set('nav2_round', round); }
+  const last = store.get('nav2_last_stay', null); if (last && last.answer && last.answer.results) { const ls = last.answer.results.find((s) => s.name === r.name); if (ls) { ls.phone = r.phone || null; ls.phoneLookedUp = true; store.set('nav2_last_stay', last); } }
+  onReturn();   // re-draw the same list, no search
+  if (phone) window.location.href = 'tel:' + phone.replace(/[^\d+]/g, '');
 }
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 

@@ -616,7 +616,8 @@ const STAY_OSM_DEADLINE_MS = 6000;
 const STAY_ANCHOR_SPACING_KM = 20;
 const STAY_ANCHOR_GRID = 0.2;        // anchors snap to a ~20 km grid so a moving van re-hits the same KV keys
 const STAY_MAX_ANCHORS = 12;         // a 2 h window is ~180 km → ~9 anchors; 6 would have cut it short
-const STAY_RESULTS = 3;
+const STAY_RESULTS = 10;         // STAYLIST: every place found, up to 10 (was 3)
+const STAY_PHONE_BACKFILL = 3;   // only the first rows get the automatic Place Details back-fill; the rest look up on tap (/stay-phone)
 
 // Durations are ALWAYS hours-and-minutes (the app's locked convention, ported verbatim
 // from index.html hrsMins): "1 hr 35" · "2 hr" · "28 min" — never decimals, never "95 minutes".
@@ -920,7 +921,7 @@ async function handleStay(request, env) {
   if (hoursAhead) picked.sort((a, b) => a.kmAhead - b.kmAhead);   // listed nearest first
   // STAYGAP: back-fill numbers for the shown PARKS only (never free camps), in parallel.
   let phoneLookups = 0; const phoneOutcomes = [];   // outcomes are reported (cache/found/not-found/mismatch/error …) so a silent miss is diagnosable
-  await Promise.all(picked.map(async (q) => {
+  await Promise.all(picked.slice(0, STAY_PHONE_BACKFILL).map(async (q) => {
     if (q.kindOf !== "park" || verifiedPhone(q.s) || q.s.source !== "places" || !q.s.id) return;
     phoneLookups++;
     const r = await placePhoneById(q.s.id, q.s.lat, q.s.lon, env);
@@ -928,7 +929,7 @@ async function handleStay(request, env) {
     if (r.phone) q.s = { ...q.s, phone: r.phone };
   }));
   const results = picked.map(({ s, kmAhead, secs, kmToDest, distFromStop, kindOf }) => ({
-    name: s.name, kind: kindOf, lat: s.lat, lng: s.lon,
+    id: s.id || "", name: s.name, kind: kindOf, lat: s.lat, lng: s.lon,   // id: the app's key for an on-tap /stay-phone lookup
     phone: verifiedPhone(s),
     km_ahead: Math.round(kmAhead), drive_time: hrsMins(secs / 60),
     km_from_destination: Math.round(kmToDest),
@@ -1085,6 +1086,20 @@ async function handleReverseGeocode(request, env) {
   return jsonResp({ cached: false, data: g.data });
 }
 
+// ═══ GET /stay-phone — one place's number on request (STAYLIST) ═══
+// id (Places id) + lat,lng (the site as shown). Same placePhoneById as the automatic
+// back-fill: Place Details, accepted only within 500 m of the site, KV 90 days found /
+// 7 days not-found, a failed call never cached. Rows 4–10 of a /stay list use this when
+// the driver taps their phone button, so those lookups are only ever paid for on demand.
+async function handleStayPhone(request, env) {
+  const u = new URL(request.url);
+  const id = (u.searchParams.get("id") || "").trim();
+  const lat = parseFloat(u.searchParams.get("lat")), lng = parseFloat(u.searchParams.get("lng"));
+  if (!id || isNaN(lat) || isNaN(lng)) return jsonResp({ error: "id, lat and lng required" }, 400);
+  const r = await placePhoneById(id, lat, lng, env);
+  return jsonResp({ phone: r.phone, outcome: r.from });
+}
+
 // ═══ GET /route — the trip's distance and drive time, nothing else (STAYAPP) ═══
 // lat,lng → dlat,dlng. The new app's main screen needs "12 hr 40 · 1102 km" before any
 // stay search runs; this reuses osrmRoute() and its in-memory cache, so the later /stay
@@ -1100,7 +1115,7 @@ async function handleRoute(request) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 11:03 AM AEST (STAYWHEN: /stay takes when=soon|1|2|stop — nearest ahead, furthest inside N hours, or within 15 km of the stop)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 12:11 PM AEST (STAYLIST: /stay returns up to 10 places, phone back-fill on the first 3; GET /stay-phone looks up one place's number on request)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -1247,7 +1262,8 @@ async function route(request, env, url) {
       "/camps": () => handleCamps(request, env),   // fallback-only: the frontend's Places-down safety net (phase 4)
       "/camps2": () => handleCamps2(request, env),   // Places-backed camps — LIVE (phase 3 merge)
       "/camps2-osm": () => handleCamps2Osm(request, env),   // filtered OSM non-commercial camps — LIVE (phase 3 merge)
-      "/stay": () => handleStay(request, env),   // STAY: three places ahead on the route, as finished data (no AI)
+      "/stay": () => handleStay(request, env),   // STAY: places ahead on the route (up to 10), as finished data (no AI)
+      "/stay-phone": () => handleStayPhone(request, env),   // STAYLIST: one place's number on request (500 m rule, cached)
       "/route": () => handleRoute(request),      // STAYAPP: km + drive time to the destination — same OSRM call and cache as /stay, no lookups
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
