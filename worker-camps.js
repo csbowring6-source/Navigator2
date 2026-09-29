@@ -1424,7 +1424,7 @@ async function handleFuelAhead(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:33 PM AEST (FUELCHEAP: /fuelahead takes fuel=diesel|petrol — prices ≤72 h old per servo, cheapest per stop, cheapest within range, two-line headline)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:18 PM AEST (FUELCHEAP: /fuelahead takes fuel=diesel|petrol — prices ≤72 h old per servo, cheapest per stop, cheapest within range, two-line headline)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
