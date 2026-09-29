@@ -70,7 +70,8 @@ function nswTimestamp() {
   return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(h)}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} ${ap}`;
 }
 
-async function nswFuel(lat, lon, fueltype, radius, env) {
+// `limit` (FUEL): the route callers keep the 8-by-price cap; /fuelahead asks for more.
+async function nswFuel(lat, lon, fueltype, radius, env, limit) {
   const token = await getNswToken(env);
   const r = await fetch(
     "https://api.onegov.nsw.gov.au/FuelPriceCheck/v2/fuel/prices/nearby",
@@ -101,7 +102,7 @@ async function nswFuel(lat, lon, fueltype, radius, env) {
       lon: s.location ? s.location.longitude : null,
       updated: p.lastupdated,
     };
-  }).slice(0, 8);
+  }).slice(0, limit || 8);
 }
 
 // ═══ WA FuelWatch ═══
@@ -110,7 +111,7 @@ function xmlField(block, tag) {
   const m = block.match(new RegExp("<" + tag + ">([^<]*)</" + tag + ">"));
   return m ? m[1].trim() : "";
 }
-async function waFuel(lat, lon, fueltype) {
+async function waFuel(lat, lon, fueltype, limit) {
   const geo = await fetch(
     `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
     { headers: { "User-Agent": "NavigatorApp/1.0", "Accept-Language": "en" } }
@@ -134,7 +135,7 @@ async function waFuel(lat, lon, fueltype) {
     updated: xmlField(it, "date"),
   }));
   results.sort((a, b) => a.price - b.price);
-  return results.slice(0, 8);
+  return results.slice(0, limit || 8);
 }
 
 // ═══ Informed Sources FPDAPI — QLD and SA ═══
@@ -142,7 +143,7 @@ const FPD_FUEL = { U91: 2, DL: 3, P95: 5, P98: 8, E10: 12 };
 const FPD_REGION = { QLD: 1, SA: 4 };
 const fpdCache = {};
 
-async function fpdFuel(stateKey, base, token, lat, lon, fueltype, radiusKm) {
+async function fpdFuel(stateKey, base, token, lat, lon, fueltype, radiusKm, limit) {
   const auth = { Authorization: "FPDAPI SubscriberToken=" + token, "Content-Type": "application/json" };
   const region = FPD_REGION[stateKey];
   const c = fpdCache[stateKey] || (fpdCache[stateKey] = { sites: null, sitesTs: 0, prices: null, pricesTs: 0 });
@@ -174,7 +175,7 @@ async function fpdFuel(stateKey, base, token, lat, lon, fueltype, radiusKm) {
     });
   }
   results.sort((a, b) => a.price - b.price);
-  return results.slice(0, 8);
+  return results.slice(0, limit || 8);
 }
 
 async function handleFuel(request, env) {
@@ -1120,8 +1121,240 @@ async function handleRoute(request) {
   return jsonResp({ km: Math.round(route.km), drive_time: hrsMins(route.secs / 60), mins: Math.round(route.secs / 60), line });
 }
 
+// ═══ GET /fuelahead — the FUEL job as finished data, code only, no AI, no Google (FUEL) ═══
+// lat,lng (the van) · dlat,dlng (stop or destination) · range (km the driver can still go).
+// Route (same osrmRoute + cache as /stay) → servos AHEAD within 3 km of the road from two
+// free sources — the state price feeds (/fuel's fetchers) and OpenStreetMap (a corridor
+// query that KEEPS opening_hours and fuel:diesel) — merged (same place = within 150 m).
+// Every distance is measured FROM THE DRIVER, along the route, never from the previous
+// servo. Returns the servos within range (nearest first, ≤10) plus the FIRST one beyond,
+// and a headline built here. Hours are parsed only when certain; otherwise "hours not known".
+const FUEL_CORRIDOR_KM = 3;
+const FUEL_BEYOND_KM = 150;      // how far past the range we look for the "first servo beyond"
+const FUEL_RESULTS = 10;
+const FUEL_PRICE_MAX_H = 72;     // a diesel price older than this is not quoted
+const STATE_TZ = { QLD: "Australia/Brisbane", NSW: "Australia/Sydney", ACT: "Australia/Sydney", VIC: "Australia/Melbourne", TAS: "Australia/Hobart", SA: "Australia/Adelaide", NT: "Australia/Darwin", WA: "Australia/Perth" };
+const STATE_NAME = { QLD: "Queensland", NSW: "New South Wales", ACT: "the ACT", VIC: "Victoria", TAS: "Tasmania", SA: "South Australia", NT: "the Northern Territory", WA: "Western Australia" };
+const FEED_NAME = { QLD: "QLD Fuel Prices", NSW: "NSW FuelCheck", ACT: "NSW FuelCheck", TAS: "NSW FuelCheck", SA: "SA Fuel Pricing", WA: "WA FuelWatch" };   // VIC and NT: no feed
+const FPD_SA_BASE = "https://fppdirectapi-prod.safuelpricinginformation.com.au";
+const FPD_QLD_BASE = "https://fppdirectapi-prod.fuelpricesqld.com.au";
+// Which state a point is in — good enough to pick a feed (and to say honestly when there
+// isn't one). The Murray forms the VIC/NSW border, approximated by a handful of points.
+// Murray towns west→east: SA border, Mildura, Swan Hill, Echuca, Cobram, Corowa, Albury/Wodonga, Hume, Tom Groggin, Indi, Cape Howe.
+const VIC_BORDER = [[141, -34.02], [142.16, -34.17], [143.55, -35.33], [144.75, -36.11], [145.65, -35.90], [146.38, -35.98], [146.92, -36.095], [147.4, -36.05], [148.0, -36.30], [148.2, -36.80], [149.98, -37.50]];
+function stateOf(lat, lon) {
+  if (lon < 129) return "WA";
+  if (lat > -26 && lon < 138) return "NT";
+  if (lat <= -26 && lon <= 141) return "SA";
+  if (lat > -29) return "QLD";
+  if (lat < -39.5) return "TAS";
+  let b = null;
+  for (let i = 0; i < VIC_BORDER.length - 1; i++) { const [x1, y1] = VIC_BORDER[i], [x2, y2] = VIC_BORDER[i + 1]; if (lon >= x1 && lon <= x2) { b = y1 + (y2 - y1) * (lon - x1) / (x2 - x1); break; } }
+  if (b == null && lon > 149.98) b = -37.5;
+  if (b != null && lat < b) return "VIC";
+  if (lat < -35.1 && lat > -35.95 && lon > 148.75 && lon < 149.4) return "ACT";
+  return "NSW";
+}
+async function feedAt(state, lat, lon, env) {
+  if (state === "WA") return waFuel(lat, lon, "DL", 40);
+  if (state === "SA") return fpdFuel("SA", FPD_SA_BASE, env.SA_TOKEN, lat, lon, "DL", 30, 40);
+  if (state === "QLD") return fpdFuel("QLD", FPD_QLD_BASE, env.QLD_TOKEN, lat, lon, "DL", 30, 40);
+  if (state === "NSW" || state === "ACT" || state === "TAS") return nswFuel(lat, lon, "DL", 30, env, 40);
+  return [];
+}
+// The feeds' timestamps: FPD is UTC without a Z; NSW is dd/mm/yyyy hh:mm:ss local; WA is dd/mm/yyyy.
+function feedTime(s) {
+  if (!s) return null;
+  let m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (m) return Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`);
+  m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+  if (m) return Date.parse(`${m[3]}-${m[2]}-${m[1]}T${m[4] || "00"}:${m[5] || "00"}:00+10:00`);
+  return null;
+}
+// ── opening_hours: only the common forms, and only when the whole string is understood ──
+//   "24/7" · "06:00-22:00" · "Mo-Fr 06:00-20:00; Sa-Su 07:00-18:00" · "Mo-Su 05:30-21:00; PH off"
+// Overnight ranges (22:00-06:00) are handled. Anything else → null → "hours not known". Never guessed.
+const OH_DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+function parseHours(s) {
+  const t = String(s || "").trim();
+  if (!t) return null;
+  if (/^24\s*\/\s*7$/i.test(t)) return { always: true };
+  const rules = [];
+  for (const raw of t.split(";")) {
+    const part = raw.trim(); if (!part) continue;
+    if (/^(PH|SH)\b/i.test(part)) continue;                                     // holiday rules: ignored, not guessed
+    const m = part.match(/^((?:(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)(?:,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)*)?\s*(.+)$/);
+    if (!m) return null;
+    const days = new Set();
+    if (m[1]) { for (const seg of m[1].split(",")) { const [a, b] = seg.trim().split("-"); const i = OH_DAYS.indexOf(a), j = OH_DAYS.indexOf(b || a); if (i < 0 || j < 0) return null; for (let k = i; ; k = (k + 1) % 7) { days.add(k); if (k === j) break; } } }
+    else for (let k = 0; k < 7; k++) days.add(k);
+    const times = m[2].trim();
+    if (/^(off|closed)$/i.test(times)) { rules.push({ days, ranges: [] }); continue; }
+    if (/^24\s*\/\s*7$/i.test(times)) { rules.push({ days, ranges: [[0, 1440]] }); continue; }
+    const ranges = [];
+    for (const r of times.split(",")) {
+      const mm = r.trim().match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/); if (!mm) return null;
+      const a = +mm[1] * 60 + +mm[2]; let b = +mm[3] * 60 + +mm[4];
+      if (a > 1440 || b > 1440) return null;
+      if (b <= a) b += 1440;                                                    // overnight
+      ranges.push([a, b]);
+    }
+    rules.push({ days, ranges });
+  }
+  if (!rules.length) return null;
+  if (rules.every((r) => r.days.size === 7 && r.ranges.some(([a, b]) => a === 0 && b >= 1440))) return { always: true };
+  return { rules };
+}
+function localClock(tz, date) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-AU", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(date).map((x) => [x.type, x.value]));
+  return { day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday), min: (+p.hour % 24) * 60 + +p.minute };
+}
+function hoursStatus(h, tz, date) {   // → { open, always?, until?, opensIn? (days), opens? }
+  if (h.always) return { open: true, always: true };
+  const { day, min } = localClock(tz, date);
+  let until = null;
+  for (const r of h.rules) {
+    if (r.days.has(day)) for (const [a, b] of r.ranges) if (min >= a && min < b) until = Math.max(until == null ? 0 : until, b);
+    if (r.days.has((day + 6) % 7)) for (const [a, b] of r.ranges) if (b > 1440 && min < b - 1440) until = Math.max(until == null ? 0 : until, b - 1440);
+  }
+  if (until != null) return { open: true, until: until % 1440 };
+  for (let d = 0; d < 8; d++) {
+    const dd = (day + d) % 7; let best = null;
+    for (const r of h.rules) if (r.days.has(dd)) for (const [a] of r.ranges) if (d > 0 || a > min) best = best == null ? a : Math.min(best, a);
+    if (best != null) return { open: false, opensIn: d, opens: best };
+  }
+  return { open: false };
+}
+function clockText(min) { const h = Math.floor(min / 60) % 24, m = min % 60; return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""} ${h < 12 ? "am" : "pm"}`; }
+const DAY_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function openText(st, nowDay) {
+  if (!st) return "hours not known";
+  if (st.open) return st.always ? "open 24 hours" : `open now, until ${clockText(st.until)}`;
+  if (st.opens == null) return "closed now";
+  return `closed now, opens ${st.opensIn === 0 ? "" : st.opensIn === 1 ? "tomorrow " : DAY_NAME[(nowDay + st.opensIn) % 7] + " "}${clockText(st.opens)}`;
+}
+function dieselText(feed, tags, now) {
+  if (feed && feed.price) {
+    const t = feedTime(feed.updated);
+    if (t && now - t <= FUEL_PRICE_MAX_H * 3600e3) { const h = Math.round((now - t) / 3600e3); return `diesel $${(feed.price / 100).toFixed(2)} (checked ${h < 1 ? "under 1" : h} hr ago)`; }
+  }
+  const d = String((tags && tags["fuel:diesel"]) || "").toLowerCase();
+  if (d === "yes") return "diesel: yes (map data)";
+  if (d === "no") return "no diesel";
+  return "diesel not confirmed";
+}
+function servoName(tags, feed) {
+  const t = tags || {};
+  const name = (t.name || (feed && feed.name) || "").trim(), brand = (t.brand || "").trim();
+  if (name && brand && !name.toLowerCase().includes(brand.toLowerCase())) return `${name} (${brand})`;
+  return name || brand || "Servo";
+}
+async function handleFuelAhead(request, env) {
+  const u = new URL(request.url);
+  const num = (k) => parseFloat(u.searchParams.get(k));
+  const lat = num("lat"), lng = num("lng"), dlat = num("dlat"), dlng = num("dlng");
+  let range = num("range");
+  if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
+  if (isNaN(range) || range <= 0) range = 100;
+  range = Math.min(Math.round(range), 1500);
+  const base = { range_km: range, corridor_km: FUEL_CORRIDOR_KM };
+  const now = Date.now();
+
+  // 1. The route.
+  const route = await osrmRoute(lat, lng, dlat, dlng);
+  if (route.error) return jsonResp({ ...base, error: "couldn't get the road route", detail: route.error, unavailable: true }, 502);
+  const lastIdx = route.pts.length - 1;
+  const idxAtKm = (km) => { let i = 0; while (i + 1 <= lastIdx && route.cumKm[i + 1] <= km) i++; return i; };
+  const stretchEndKm = Math.min(route.km, range + FUEL_BEYOND_KM);
+  const endIdx = idxAtKm(stretchEndKm);
+  const startIdx = nearestVertex(route, lat, lng, 0, Math.min(lastIdx, 50)).idx;
+
+  // 2a. OpenStreetMap: ONE bounding-box query over the stretch (cheap for Overpass — a polyline
+  //     `around` over 250 km timed out), tags kept; the 3 km corridor is applied in code below.
+  let s = 90, w = 180, n = -90, e = -180;
+  for (let i = startIdx; i <= endIdx; i++) { const p = route.pts[i]; if (p.lat < s) s = p.lat; if (p.lat > n) n = p.lat; if (p.lon < w) w = p.lon; if (p.lon > e) e = p.lon; }
+  const pad = 0.04;   // ~4 km, a little more than the corridor
+  const bbox = `${(s - pad).toFixed(3)},${(w - pad).toFixed(3)},${(n + pad).toFixed(3)},${(e + pad).toFixed(3)}`;
+  const q = `[out:json][timeout:25][bbox:${bbox}];(node["amenity"="fuel"];way["amenity"="fuel"];);out center tags 600;`;
+  const osmP = overpass(q);
+
+  // 2b. State price feeds, sampled every 40 km along the stretch; each sample's state picks
+  //     its feed — and a state WITHOUT a feed (VIC, NT) is named, never sent elsewhere.
+  const samples = []; for (let k = 0; k <= stretchEndKm; k += 40) samples.push(route.pts[idxAtKm(k)]); samples.push(route.pts[endIdx]);
+  const statesSeen = new Set(), noFeed = new Set(), feedErrors = new Set();
+  const feedCalls = samples.map((p) => { const st = stateOf(p.lat, p.lon); statesSeen.add(st); if (!FEED_NAME[st]) { noFeed.add(st); return Promise.resolve([]); }
+    return feedAt(st, p.lat, p.lon, env).then((r) => (r || []).map((x) => ({ ...x, feedName: FEED_NAME[st] }))).catch(() => { feedErrors.add(FEED_NAME[st]); return []; }); });
+  const [osmRes, ...feedLists] = await Promise.all([osmP, ...feedCalls]);
+  const feedRecs = []; const seenF = new Set();
+  for (const r of feedLists.flat()) { if (r.lat == null || r.lon == null) continue; const k = `${(+r.lat).toFixed(4)},${(+r.lon).toFixed(4)}`; if (!seenF.has(k)) { seenF.add(k); feedRecs.push({ ...r, lat: +r.lat, lon: +r.lon }); } }
+  const osmOk = !osmRes.error;
+  const osmRecs = osmOk ? osmPlacesNearest((osmRes.data && osmRes.data.elements) || [], "", lat, lng, 300).map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, tags: p.tags, id: p.osmid })) : [];
+  if (!osmOk && !feedRecs.length) return jsonResp({ ...base, error: "servo lookups failed", unavailable: true }, 503);
+
+  // 3. Merge: OSM is the ground truth of what exists; a feed record within 150 m joins it,
+  //    a feed record with no OSM twin stands on its own (with no hours / diesel tags).
+  const merged = osmRecs.map((o) => ({ ...o, feed: null, src: "osm" }));
+  for (const f of feedRecs) {
+    const twin = merged.find((m) => hav(m.lat, m.lon, f.lat, f.lon) <= 0.15);
+    if (twin) { if (!twin.feed) { twin.feed = f; twin.src = "osm+" + f.feedName; } }
+    else merged.push({ name: f.name, lat: f.lat, lon: f.lon, tags: {}, feed: f, src: f.feedName });
+  }
+  // 4. Ahead, inside the corridor, measured from the driver along the route.
+  const ahead = [];
+  for (const s of merged) {
+    const nv = nearestVertex(route, s.lat, s.lon, startIdx, endIdx);
+    if (nv.km > FUEL_CORRIDOR_KM) continue;
+    const kmFromYou = route.cumKm[nv.idx] - route.cumKm[startIdx];
+    if (nv.idx <= startIdx || kmFromYou < 0.3) continue;
+    const secs = route.cumS[nv.idx] - route.cumS[startIdx];
+    const st = stateOf(s.lat, s.lon), tz = STATE_TZ[st] || "Australia/Brisbane";
+    const h = parseHours(s.tags && s.tags.opening_hours);
+    const stNow = h ? hoursStatus(h, tz, new Date(now)) : null;
+    const stArr = h ? hoursStatus(h, tz, new Date(now + secs * 1000)) : null;
+    ahead.push({
+      name: servoName(s.tags, s.feed), lat: s.lat, lng: s.lon,
+      km_from_you: Math.round(kmFromYou), drive_time: hrsMins(secs / 60),
+      open: openText(stNow, localClock(tz, new Date(now)).day),
+      closes_before_arrival: !!(stNow && stNow.open && !stNow.always && stArr && !stArr.open),
+      diesel: dieselText(s.feed, s.tags, now),
+      source: s.src, state: st,
+      _km: kmFromYou,
+    });
+  }
+  ahead.sort((a, b) => a._km - b._km);
+  const strip = ({ _km, ...r }) => r;
+  const withinAll = ahead.filter((s) => s._km <= range);
+  // Nearest first, up to 10 — but the LAST servo inside the range is always shown (it is the
+  // headline's "last fuel"), taking the tenth slot if the nearest ten are all in town.
+  let within = withinAll.slice(0, FUEL_RESULTS);
+  if (withinAll.length > FUEL_RESULTS) within = [...withinAll.slice(0, FUEL_RESULTS - 1), withinAll[withinAll.length - 1]];
+  within = within.map(strip);
+  const beyondRaw = ahead.find((s) => s._km > range);
+  const beyond = beyondRaw ? strip(beyondRaw) : null;
+
+  // 5. The headline — every distance from the driver; "last fuel" is the furthest servo inside the range.
+  let headline;
+  if (within.length) {
+    const lastIn = within[within.length - 1];
+    headline = `Last fuel within ${range} km: ${lastIn.name}, ${lastIn.km_from_you} km from you. After that: ${beyond ? `${beyond.name}, ${beyond.km_from_you} km from you.` : `no servo found in the next ${Math.round(stretchEndKm - range)} km.`}`;
+  } else if (beyond) headline = `No fuel within ${range} km. The nearest is ${beyond.name}, ${beyond.km_from_you} km from you.`;
+  else headline = "No servos found ahead on your route.";
+
+  // 6. Honest notes: feedless states on the route, a feed or the map data that didn't answer.
+  const notes = [];
+  for (const st of noFeed) notes.push(`No price feed for ${STATE_NAME[st]}; diesel and prices there come from map data only`);
+  for (const f of feedErrors) notes.push(`${f} didn't answer just now; prices from it are missing`);
+  if (!osmOk) notes.push("couldn't check map data just now — hours and diesel tags are missing, only priced servos are shown");
+  return jsonResp({
+    ...base, route: { km: Math.round(route.km), drive_time: hrsMins(route.secs / 60) }, searched_km: Math.round(stretchEndKm),
+    headline, results: within, beyond_range: beyond, found: ahead.length, within_range: withinAll.length,
+    ...(notes.length ? { note: notes.join("; ") } : {}),
+    sources: { osm: osmOk ? "ok" : "failed", feeds: [...statesSeen].map((s) => `${s}: ${FEED_NAME[s] || "no feed"}`), google_calls: 0 },
+  });
+}
+
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 01:22 PM AEST (MAP: /route also returns the route line, sampled to at most 500 points, from the same cached route)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 01:44 PM AEST (FUEL: GET /fuelahead — servos ahead within range from the state feeds + OpenStreetMap, hours and diesel, first servo beyond; no AI, no Google)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
@@ -1271,6 +1504,7 @@ async function route(request, env, url) {
       "/stay": () => handleStay(request, env),   // STAY: places ahead on the route (up to 10), as finished data (no AI)
       "/stay-phone": () => handleStayPhone(request, env),   // STAYLIST: one place's number on request (500 m rule, cached)
       "/route": () => handleRoute(request),      // STAYAPP: km + drive time to the destination — same OSRM call and cache as /stay, no lookups
+      "/fuelahead": () => handleFuelAhead(request, env),   // FUEL: servos ahead within range + the first beyond, no AI, no Google
       "/stations": () => handleStations(request),
       "/accom": () => handleAccom(request),
       "/weather": () => handleWeather(request, env),
