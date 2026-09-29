@@ -1155,12 +1155,20 @@ function stateOf(lat, lon) {
   if (lat < -35.1 && lat > -35.95 && lon > 148.75 && lon < 149.4) return "ACT";
   return "NSW";
 }
-async function feedAt(state, lat, lon, env) {
-  if (state === "WA") return waFuel(lat, lon, "DL", 40);
-  if (state === "SA") return fpdFuel("SA", FPD_SA_BASE, env.SA_TOKEN, lat, lon, "DL", 30, 40);
-  if (state === "QLD") return fpdFuel("QLD", FPD_QLD_BASE, env.QLD_TOKEN, lat, lon, "DL", 30, 40);
-  if (state === "NSW" || state === "ACT" || state === "TAS") return nswFuel(lat, lon, "DL", 30, env, 40);
+async function feedAt(state, lat, lon, env, code) {   // code: "DL" (diesel) or "U91" (petrol) — FUELCHEAP
+  code = code || "DL";
+  if (state === "WA") return waFuel(lat, lon, code, 40);
+  if (state === "SA") return fpdFuel("SA", FPD_SA_BASE, env.SA_TOKEN, lat, lon, code, 30, 40);
+  if (state === "QLD") return fpdFuel("QLD", FPD_QLD_BASE, env.QLD_TOKEN, lat, lon, code, 30, 40);
+  if (state === "NSW" || state === "ACT" || state === "TAS") return nswFuel(lat, lon, code, 30, env, 40);
   return [];
+}
+// A feed price for the chosen fuel: only if sane (100–400 c/L) and updated within 72 h → { price: $, age_h }.
+function feedPrice(feed, now) {
+  if (!feed || !feed.price || feed.price < 100 || feed.price > 400) return null;
+  const t = feedTime(feed.updated);
+  if (!t || now - t > FUEL_PRICE_MAX_H * 3600e3) return null;
+  return { price: Math.round(feed.price) / 100, age_h: Math.max(0, Math.round((now - t) / 3600e3)) };
 }
 // The feeds' timestamps: FPD is UTC without a Z; NSW is dd/mm/yyyy hh:mm:ss local; WA is dd/mm/yyyy.
 function feedTime(s) {
@@ -1257,7 +1265,9 @@ async function handleFuelAhead(request, env) {
   if ([lat, lng, dlat, dlng].some(isNaN)) return jsonResp({ error: "lat, lng, dlat and dlng required" }, 400);
   if (isNaN(range) || range <= 0) range = 100;
   range = Math.min(Math.round(range), 1500);
-  const base = { range_km: range, corridor_km: FUEL_CORRIDOR_KM };
+  const fuel = (u.searchParams.get("fuel") || "diesel").toLowerCase() === "petrol" ? "petrol" : "diesel";   // FUELCHEAP: petrol = unleaded 91
+  const fuelCode = fuel === "petrol" ? "U91" : "DL";
+  const base = { range_km: range, corridor_km: FUEL_CORRIDOR_KM, fuel };
   const now = Date.now();
 
   // 1. The route.
@@ -1284,7 +1294,7 @@ async function handleFuelAhead(request, env) {
   const samples = []; for (let k = 0; k <= stretchEndKm; k += 40) samples.push(route.pts[idxAtKm(k)]); samples.push(route.pts[endIdx]);
   const statesSeen = new Set(), noFeed = new Set(), feedErrors = new Set();
   const feedCalls = samples.map((p) => { const st = stateOf(p.lat, p.lon); statesSeen.add(st); if (!FEED_NAME[st]) { noFeed.add(st); return Promise.resolve([]); }
-    return feedAt(st, p.lat, p.lon, env).then((r) => (r || []).map((x) => ({ ...x, feedName: FEED_NAME[st] }))).catch(() => { feedErrors.add(FEED_NAME[st]); return []; }); });
+    return feedAt(st, p.lat, p.lon, env, fuelCode).then((r) => (r || []).map((x) => ({ ...x, feedName: FEED_NAME[st] }))).catch(() => { feedErrors.add(FEED_NAME[st]); return []; }); });
   const [osmRes, ...feedLists] = await Promise.all([osmP, ...feedCalls]);
   const feedRecs = []; const seenF = new Set();
   for (const r of feedLists.flat()) { if (r.lat == null || r.lon == null) continue; const k = `${(+r.lat).toFixed(4)},${(+r.lon).toFixed(4)}`; if (!seenF.has(k)) { seenF.add(k); feedRecs.push({ ...r, lat: +r.lat, lon: +r.lon }); } }
@@ -1323,7 +1333,9 @@ async function handleFuelAhead(request, env) {
     const stArr = h ? hoursStatus(h, tz, new Date(now + secs * 1000)) : null;
     const town = townOf(s.lat, s.lon);
     const baseName = servoName(s.tags, s.feed);
-    const opn = openText(stNow, localClock(tz, new Date(now)).day), dsl = dieselText(s.feed, s.tags, now);
+    // The feed record is for the CHOSEN fuel: it only tells us about diesel when diesel was asked for.
+    const opn = openText(stNow, localClock(tz, new Date(now)).day), dsl = dieselText(fuel === "diesel" ? s.feed : null, s.tags, now);
+    const fp = feedPrice(s.feed, now);
     ahead.push({
       // FUELTOWNS: every servo name carries its town ("Caltex Marlborough") unless it already does.
       name: town && !baseName.toLowerCase().includes(town.toLowerCase()) ? `${baseName} ${town}` : baseName,
@@ -1332,6 +1344,7 @@ async function handleFuelAhead(request, env) {
       open: opn,
       closes_before_arrival: !!(stNow && stNow.open && !stNow.always && stArr && !stArr.open),
       diesel: dsl,
+      price: fp ? fp.price : null, price_age_h: fp ? fp.age_h : null,   // FUELCHEAP: the chosen fuel's price, ≤72 h old, else null
       source: s.src, state: st,
       _km: kmFromYou,
       // best-servo rank: open + recent price → open + diesel yes (map) → any open → the rest
@@ -1354,13 +1367,19 @@ async function handleFuelAhead(request, env) {
     const town = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || null;
     const nearest = st._servos[0], best = servos[0];
     const name = town || `${Math.round(nearest._km)} km from you`;
+    // FUELCHEAP: the stop's cheapest servo (lowest price, nearest wins a tie); the servo list is
+    // cheapest first, then the unpriced by open/diesel rank.
+    const priced = st._servos.filter((s) => s.price != null).sort((a, b) => a.price - b.price || a._km - b._km);
+    const cheapest = priced[0] || null;
+    const listed = [...priced, ...st._servos.filter((s) => s.price == null).sort((a, b) => a._rank - b._rank || a._km - b._km)];
     return {
       name, town, lat: best.lat, lng: best.lng,
       km_from_you: Math.round(nearest._km), drive_time: nearest.drive_time,
       servo_count: st._servos.length,
       open: best.open, diesel: best.diesel, closes_before_arrival: best.closes_before_arrival,   // the best servo's summary
       best: best.name,
-      servos: st._servos.map(({ _km, _rank, ...r }) => r),
+      cheapest: cheapest ? { name: cheapest.name, price: cheapest.price, age_h: cheapest.price_age_h, km_from_you: cheapest.km_from_you } : null,
+      servos: listed.map(({ _km, _rank, ...r }) => r),
       _km: nearest._km,
     };
   };
@@ -1382,6 +1401,13 @@ async function handleFuelAhead(request, env) {
     headline = `Last fuel within ${range} km: ${hName(lastIn)}, ${lastIn.km_from_you} km from you. After that: ${beyond ? `${hName(beyond)}, ${beyond.km_from_you} km from you.` : `no servo found in the next ${Math.round(stretchEndKm - range)} km.`}`;
   } else if (beyond) headline = `No fuel within ${range} km. The nearest is ${hName(beyond)}, ${beyond.km_from_you} km from you.`;
   else headline = "No servos found ahead on your route.";
+  // FUELCHEAP: the cheapest priced servo among ALL stops within range (nearest wins a tie).
+  let cheapestInRange = null;
+  for (const st of withinAll) for (const v of st.servos) if (v.price != null && (!cheapestInRange || v.price < cheapestInRange.price || (v.price === cheapestInRange.price && v.km_from_you < cheapestInRange.km_from_you)))
+    cheapestInRange = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h };
+  const cheapestLine = cheapestInRange
+    ? `Cheapest ${fuel} within ${range} km: ${cheapestInRange.name}, $${cheapestInRange.price.toFixed(2)}, ${cheapestInRange.km_from_you} km from you.`
+    : `No ${fuel} prices within ${range} km.`;
 
   // 6. Honest notes: feedless states on the route, a feed or the map data that didn't answer.
   const notes = [];
@@ -1390,14 +1416,15 @@ async function handleFuelAhead(request, env) {
   if (!osmOk) notes.push("couldn't check map data just now — hours and diesel tags are missing, only priced servos are shown");
   return jsonResp({
     ...base, route: { km: Math.round(route.km), drive_time: hrsMins(route.secs / 60) }, searched_km: Math.round(stretchEndKm),
-    headline, results: within, beyond_range: beyond, found: ahead.length, stops_found: stopsOut.length, within_range: withinAll.length,
+    headline, cheapest_line: cheapestLine, cheapest_in_range: cheapestInRange,
+    results: within, beyond_range: beyond, found: ahead.length, stops_found: stopsOut.length, within_range: withinAll.length,
     ...(notes.length ? { note: notes.join("; ") } : {}),
     sources: { osm: osmOk ? "ok" : "failed", feeds: [...statesSeen].map((s) => `${s}: ${FEED_NAME[s] || "no feed"}`), google_calls: 0 },
   });
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:08 PM AEST (FUELTOWNS: /fuelahead groups servos into stops by town — town, km from you, servo count, best servo; servo names carry their town)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:33 PM AEST (FUELCHEAP: /fuelahead takes fuel=diesel|petrol — prices ≤72 h old per servo, cheapest per stop, cheapest within range, two-line headline)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
