@@ -1402,12 +1402,16 @@ async function handleFuelAhead(request, env) {
   } else if (beyond) headline = `No fuel within ${range} km. The nearest is ${hName(beyond)}, ${beyond.km_from_you} km from you.`;
   else headline = "No servos found ahead on your route.";
   // FUELCHEAP: the cheapest priced servo among ALL stops within range (nearest wins a tie).
-  let cheapestInRange = null;
-  for (const st of withinAll) for (const v of st.servos) if (v.price != null && (!cheapestInRange || v.price < cheapestInRange.price || (v.price === cheapestInRange.price && v.km_from_you < cheapestInRange.km_from_you)))
-    cheapestInRange = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h };
+  // NOTHERE: the driver is leaving with a full tank — the cheapest line looks AHEAD, ignoring any
+  // stop whose nearest servo is within 10 km. The stop rows still list the driver's own town.
+  const pick = (stops) => { let c = null; for (const st of stops) for (const v of st.servos) if (v.price != null && (!c || v.price < c.price || (v.price === c.price && v.km_from_you < c.km_from_you))) c = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h }; return c; };
+  const cheapestInRange = pick(withinAll.filter((st) => st._km > 10));
+  const cheapestHere = cheapestInRange ? null : pick(withinAll.filter((st) => st._km <= 10));
   const cheapestLine = cheapestInRange
-    ? `Cheapest ${fuel} within ${range} km: ${cheapestInRange.name}, $${cheapestInRange.price.toFixed(2)}, ${cheapestInRange.km_from_you} km from you.`
-    : `No ${fuel} prices within ${range} km.`;
+    ? `Cheapest ${fuel} ahead within ${range} km: ${cheapestInRange.name}, $${cheapestInRange.price.toFixed(2)}, ${cheapestInRange.km_from_you} km from you.`
+    : cheapestHere
+      ? `No ${fuel} prices further ahead within ${range} km. Cheapest here: ${cheapestHere.name}, $${cheapestHere.price.toFixed(2)}.`
+      : `No ${fuel} prices within ${range} km.`;
 
   // 6. Honest notes: feedless states on the route, a feed or the map data that didn't answer.
   const notes = [];
@@ -1424,7 +1428,7 @@ async function handleFuelAhead(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:18 PM AEST (FUELCHEAP: /fuelahead takes fuel=diesel|petrol — prices ≤72 h old per servo, cheapest per stop, cheapest within range, two-line headline)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:53 PM AEST (NOTHERE: the cheapest line looks ahead — stops within 10 km of the driver are ignored; 'Cheapest here' fallback)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
