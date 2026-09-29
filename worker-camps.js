@@ -1234,7 +1234,7 @@ function openText(st, nowDay) {
   return `closed now, opens ${st.opensIn === 0 ? "" : st.opensIn === 1 ? "tomorrow " : DAY_NAME[(nowDay + st.opensIn) % 7] + " "}${clockText(st.opens)}`;
 }
 function dieselText(feed, tags, now) {
-  if (feed && feed.price) {
+  if (feed && feed.price && feed.price >= 100 && feed.price <= 400) {   // a price outside 100–400 c/L is a feed placeholder, never quoted
     const t = feedTime(feed.updated);
     if (t && now - t <= FUEL_PRICE_MAX_H * 3600e3) { const h = Math.round((now - t) / 3600e3); return `diesel $${(feed.price / 100).toFixed(2)} (checked ${h < 1 ? "under 1" : h} hr ago)`; }
   }
@@ -1275,7 +1275,8 @@ async function handleFuelAhead(request, env) {
   for (let i = startIdx; i <= endIdx; i++) { const p = route.pts[i]; if (p.lat < s) s = p.lat; if (p.lat > n) n = p.lat; if (p.lon < w) w = p.lon; if (p.lon > e) e = p.lon; }
   const pad = 0.04;   // ~4 km, a little more than the corridor
   const bbox = `${(s - pad).toFixed(3)},${(w - pad).toFixed(3)},${(n + pad).toFixed(3)},${(e + pad).toFixed(3)}`;
-  const q = `[out:json][timeout:25][bbox:${bbox}];(node["amenity"="fuel"];way["amenity"="fuel"];);out center tags 600;`;
+  // FUELTOWNS: place names come from the SAME query, so every servo can be named after its town.
+  const q = `[out:json][timeout:25][bbox:${bbox}];(node["amenity"="fuel"];way["amenity"="fuel"];node["place"~"^(city|town|village|hamlet|locality|suburb)$"]["name"];);out center tags 900;`;
   const osmP = overpass(q);
 
   // 2b. State price feeds, sampled every 40 km along the stretch; each sample's state picks
@@ -1288,7 +1289,16 @@ async function handleFuelAhead(request, env) {
   const feedRecs = []; const seenF = new Set();
   for (const r of feedLists.flat()) { if (r.lat == null || r.lon == null) continue; const k = `${(+r.lat).toFixed(4)},${(+r.lon).toFixed(4)}`; if (!seenF.has(k)) { seenF.add(k); feedRecs.push({ ...r, lat: +r.lat, lon: +r.lon }); } }
   const osmOk = !osmRes.error;
-  const osmRecs = osmOk ? osmPlacesNearest((osmRes.data && osmRes.data.elements) || [], "", lat, lng, 300).map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, tags: p.tags, id: p.osmid })) : [];
+  const elements = osmOk ? ((osmRes.data && osmRes.data.elements) || []) : [];
+  const osmRecs = osmOk ? osmPlacesNearest(elements.filter((el) => el.tags && el.tags.amenity === "fuel"), "", lat, lng, 300).map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, tags: p.tags, id: p.osmid })) : [];
+  // Place names (town > village > hamlet > locality/suburb) for naming servos and stops.
+  const PLACE_RANK = { city: 0, town: 0, village: 1, hamlet: 2, suburb: 3, locality: 3 };
+  const places = elements.filter((el) => el.tags && el.tags.place && el.tags.name && (el.lat != null || el.center)).map((el) => ({ name: el.tags.name, lat: el.lat != null ? el.lat : el.center.lat, lon: el.lon != null ? el.lon : el.center.lon, rank: PLACE_RANK[el.tags.place] ?? 4 }));
+  const townOf = (plat, plon) => {   // nearest named place within 5 km; a proper town beats a locality at similar distance
+    let best = null, bestScore = Infinity;
+    for (const p of places) { const d = hav(plat, plon, p.lat, p.lon); if (d > 5) continue; const score = d + p.rank * 1.5; if (score < bestScore) { bestScore = score; best = p; } }
+    return best ? best.name : null;
+  };
   if (!osmOk && !feedRecs.length) return jsonResp({ ...base, error: "servo lookups failed", unavailable: true }, 503);
 
   // 3. Merge: OSM is the ground truth of what exists; a feed record within 150 m joins it,
@@ -1311,33 +1321,66 @@ async function handleFuelAhead(request, env) {
     const h = parseHours(s.tags && s.tags.opening_hours);
     const stNow = h ? hoursStatus(h, tz, new Date(now)) : null;
     const stArr = h ? hoursStatus(h, tz, new Date(now + secs * 1000)) : null;
+    const town = townOf(s.lat, s.lon);
+    const baseName = servoName(s.tags, s.feed);
+    const opn = openText(stNow, localClock(tz, new Date(now)).day), dsl = dieselText(s.feed, s.tags, now);
     ahead.push({
-      name: servoName(s.tags, s.feed), lat: s.lat, lng: s.lon,
+      // FUELTOWNS: every servo name carries its town ("Caltex Marlborough") unless it already does.
+      name: town && !baseName.toLowerCase().includes(town.toLowerCase()) ? `${baseName} ${town}` : baseName,
+      town, lat: s.lat, lng: s.lon,
       km_from_you: Math.round(kmFromYou), drive_time: hrsMins(secs / 60),
-      open: openText(stNow, localClock(tz, new Date(now)).day),
+      open: opn,
       closes_before_arrival: !!(stNow && stNow.open && !stNow.always && stArr && !stArr.open),
-      diesel: dieselText(s.feed, s.tags, now),
+      diesel: dsl,
       source: s.src, state: st,
       _km: kmFromYou,
+      // best-servo rank: open + recent price → open + diesel yes (map) → any open → the rest
+      _rank: /^open/.test(opn) ? (/^diesel \$/.test(dsl) ? 0 : /^diesel: yes/.test(dsl) ? 1 : 2) : 3,
     });
   }
   ahead.sort((a, b) => a._km - b._km);
+
+  // 4b. FUELTOWNS: servos within 5 km of each other along the route form ONE stop, named after
+  //     its town (the town most of its servos sit in), else "[km] km from you".
+  const stops = [];
+  for (const s of ahead) {
+    const cur = stops[stops.length - 1];
+    if (cur && s._km - cur._lastKm <= 5) { cur._servos.push(s); cur._lastKm = s._km; }
+    else stops.push({ _servos: [s], _firstKm: s._km, _lastKm: s._km });
+  }
+  const stopOut = (st) => {
+    const servos = st._servos.slice().sort((a, b) => a._rank - b._rank || a._km - b._km);
+    const counts = {}; for (const s of st._servos) if (s.town) counts[s.town] = (counts[s.town] || 0) + 1;
+    const town = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || null;
+    const nearest = st._servos[0], best = servos[0];
+    const name = town || `${Math.round(nearest._km)} km from you`;
+    return {
+      name, town, lat: best.lat, lng: best.lng,
+      km_from_you: Math.round(nearest._km), drive_time: nearest.drive_time,
+      servo_count: st._servos.length,
+      open: best.open, diesel: best.diesel, closes_before_arrival: best.closes_before_arrival,   // the best servo's summary
+      best: best.name,
+      servos: st._servos.map(({ _km, _rank, ...r }) => r),
+      _km: nearest._km,
+    };
+  };
+  const stopsOut = stops.map(stopOut);
   const strip = ({ _km, ...r }) => r;
-  const withinAll = ahead.filter((s) => s._km <= range);
-  // Nearest first, up to 10 — but the LAST servo inside the range is always shown (it is the
-  // headline's "last fuel"), taking the tenth slot if the nearest ten are all in town.
+  const withinAll = stopsOut.filter((s) => s._km <= range);          // a stop is within range if its nearest servo is
+  // Nearest first, up to 10 stops — the LAST stop inside the range is always shown (it is the headline's "last fuel").
   let within = withinAll.slice(0, FUEL_RESULTS);
   if (withinAll.length > FUEL_RESULTS) within = [...withinAll.slice(0, FUEL_RESULTS - 1), withinAll[withinAll.length - 1]];
   within = within.map(strip);
-  const beyondRaw = ahead.find((s) => s._km > range);
+  const beyondRaw = stopsOut.find((s) => s._km > range);               // the first STOP after the last within range
   const beyond = beyondRaw ? strip(beyondRaw) : null;
 
-  // 5. The headline — every distance from the driver; "last fuel" is the furthest servo inside the range.
+  // 5. The headline — every distance from the driver; "last fuel" is the furthest stop inside the range.
   let headline;
+  const hName = (st) => st.town ? st.name : st.best;   // a stop with no town is named by its best servo in the headline (never "136 km from you, 136 km from you")
   if (within.length) {
     const lastIn = within[within.length - 1];
-    headline = `Last fuel within ${range} km: ${lastIn.name}, ${lastIn.km_from_you} km from you. After that: ${beyond ? `${beyond.name}, ${beyond.km_from_you} km from you.` : `no servo found in the next ${Math.round(stretchEndKm - range)} km.`}`;
-  } else if (beyond) headline = `No fuel within ${range} km. The nearest is ${beyond.name}, ${beyond.km_from_you} km from you.`;
+    headline = `Last fuel within ${range} km: ${hName(lastIn)}, ${lastIn.km_from_you} km from you. After that: ${beyond ? `${hName(beyond)}, ${beyond.km_from_you} km from you.` : `no servo found in the next ${Math.round(stretchEndKm - range)} km.`}`;
+  } else if (beyond) headline = `No fuel within ${range} km. The nearest is ${hName(beyond)}, ${beyond.km_from_you} km from you.`;
   else headline = "No servos found ahead on your route.";
 
   // 6. Honest notes: feedless states on the route, a feed or the map data that didn't answer.
@@ -1347,14 +1390,14 @@ async function handleFuelAhead(request, env) {
   if (!osmOk) notes.push("couldn't check map data just now — hours and diesel tags are missing, only priced servos are shown");
   return jsonResp({
     ...base, route: { km: Math.round(route.km), drive_time: hrsMins(route.secs / 60) }, searched_km: Math.round(stretchEndKm),
-    headline, results: within, beyond_range: beyond, found: ahead.length, within_range: withinAll.length,
+    headline, results: within, beyond_range: beyond, found: ahead.length, stops_found: stopsOut.length, within_range: withinAll.length,
     ...(notes.length ? { note: notes.join("; ") } : {}),
     sources: { osm: osmOk ? "ok" : "failed", feeds: [...statesSeen].map((s) => `${s}: ${FEED_NAME[s] || "no feed"}`), google_calls: 0 },
   });
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 01:44 PM AEST (FUEL: GET /fuelahead — servos ahead within range from the state feeds + OpenStreetMap, hours and diesel, first servo beyond; no AI, no Google)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:08 PM AEST (FUELTOWNS: /fuelahead groups servos into stops by town — town, km from you, servo count, best servo; servo names carry their town)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
