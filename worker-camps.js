@@ -1251,6 +1251,7 @@ function dieselText(feed, tags, now) {
   if (d === "no") return "no diesel";
   return "diesel not confirmed";
 }
+const loose = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "").replace(/(.)\1+/g, "$1");
 function servoName(tags, feed) {
   const t = tags || {};
   const name = (t.name || (feed && feed.name) || "").trim(), brand = (t.brand || "").trim();
@@ -1338,7 +1339,9 @@ async function handleFuelAhead(request, env) {
     const fp = feedPrice(s.feed, now);
     ahead.push({
       // FUELTOWNS: every servo name carries its town ("Caltex Marlborough") unless it already does.
-      name: town && !baseName.toLowerCase().includes(town.toLowerCase()) ? `${baseName} ${town}` : baseName,
+      // FUELLIST: skip the town when the name already carries it — compared loosely (case, punctuation and
+      // doubled letters ignored), so "Mobil Miriwinni" in the town of "Mirriwinni" is left alone.
+      name: town && !loose(baseName).includes(loose(town)) ? `${baseName} ${town}` : baseName,
       town, lat: s.lat, lng: s.lon,
       km_from_you: Math.round(kmFromYou), drive_time: hrsMins(secs / 60),
       open: opn,
@@ -1387,8 +1390,20 @@ async function handleFuelAhead(request, env) {
   const strip = ({ _km, ...r }) => r;
   const withinAll = stopsOut.filter((s) => s._km <= range);          // a stop is within range if its nearest servo is
   // Nearest first, up to 10 stops — the LAST stop inside the range is always shown (it is the headline's "last fuel").
+  // NOTHERE: the cheapest line looks AHEAD — stops within 10 km of the driver are ignored.
+  // (Computed here, before the list is cut, so its stop can be kept in the list — FUELLIST.)
+  const pick = (stops) => { let c = null; for (const st of stops) for (const v of st.servos) if (v.price != null && (!c || v.price < c.price || (v.price === c.price && v.km_from_you < c.km_from_you))) c = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h }; return c; };
+  const cheapestInRange = pick(withinAll.filter((st) => st._km > 10));
+  const cheapestStop = cheapestInRange ? withinAll.find((st) => st.cheapest && st.cheapest.name === cheapestInRange.name && st.cheapest.price === cheapestInRange.price) : null;
+  // Nearest first, up to 10 — plus the LAST stop inside the range and the CHEAPEST stop, each kept in
+  // its place by distance if the cut would have dropped it (so up to 12 may show) — FUELLIST.
   let within = withinAll.slice(0, FUEL_RESULTS);
-  if (withinAll.length > FUEL_RESULTS) within = [...withinAll.slice(0, FUEL_RESULTS - 1), withinAll[withinAll.length - 1]];
+  if (withinAll.length > FUEL_RESULTS) {
+    const keep = new Set(within);
+    keep.add(withinAll[withinAll.length - 1]);
+    if (cheapestStop) keep.add(cheapestStop);
+    within = withinAll.filter((st) => keep.has(st));
+  }
   within = within.map(strip);
   const beyondRaw = stopsOut.find((s) => s._km > range);               // the first STOP after the last within range
   const beyond = beyondRaw ? strip(beyondRaw) : null;
@@ -1404,8 +1419,6 @@ async function handleFuelAhead(request, env) {
   // FUELCHEAP: the cheapest priced servo among ALL stops within range (nearest wins a tie).
   // NOTHERE: the driver is leaving with a full tank — the cheapest line looks AHEAD, ignoring any
   // stop whose nearest servo is within 10 km. The stop rows still list the driver's own town.
-  const pick = (stops) => { let c = null; for (const st of stops) for (const v of st.servos) if (v.price != null && (!c || v.price < c.price || (v.price === c.price && v.km_from_you < c.km_from_you))) c = { name: v.name, town: st.town, price: v.price, km_from_you: v.km_from_you, age_h: v.price_age_h }; return c; };
-  const cheapestInRange = pick(withinAll.filter((st) => st._km > 10));
   const cheapestHere = cheapestInRange ? null : pick(withinAll.filter((st) => st._km <= 10));
   const cheapestLine = cheapestInRange
     ? `Cheapest ${fuel} ahead within ${range} km: ${cheapestInRange.name}, $${cheapestInRange.price.toFixed(2)}, ${cheapestInRange.km_from_you} km from you.`
@@ -1428,7 +1441,7 @@ async function handleFuelAhead(request, env) {
 }
 
 // ═══ Worker build stamp — plain English, so the phone can check what's live ═══
-const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 03:53 PM AEST (NOTHERE: the cheapest line looks ahead — stops within 10 km of the driver are ignored; 'Cheapest here' fallback)";
+const WORKER_BUILD = "Navigator Worker — 29 Sep 2026, 04:16 PM AEST (FUELLIST: the cheapest stop is always in the list (up to 12 stops); a servo name never repeats its town, even spelt differently)";
 
 // Whisper biases decoding toward vocabulary supplied in `prompt`. Australian
 // town names are exactly what it fumbles — "Cardwell" comes back "Cardwall",
