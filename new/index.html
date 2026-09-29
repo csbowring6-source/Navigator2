@@ -36,7 +36,7 @@
   .panel h2{color:#fff;font-size:30px} .panel .big{font-size:26px;font-weight:700} .panel .link{color:#fff}
   .card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
   .card.free{border-color:var(--brown)} .card.free .kind{color:var(--brown)}
-  .card.tried{opacity:.55} .card.next{outline:4px solid var(--green);outline-offset:2px}
+  .called{color:var(--muted);font-size:17px;font-weight:600;margin:6px 0 0}
   .card h3{font-size:26px} .kind{font-weight:700;color:var(--green);margin-bottom:6px}
   .meta{margin:4px 0} .fac{color:var(--muted);font-size:18px;margin:8px 0}
   .tag{display:inline-block;font-size:16px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--ink);color:#fff;margin-left:8px;vertical-align:middle}
@@ -85,18 +85,9 @@
   <div id="results"></div>
 </section>
 
-<!-- ═══ SCREEN 4: AFTER THE CALL ═══ -->
-<section id="s4" class="screen">
-  <h1 id="calledLine">You called …</h1>
-  <p>Did you get a site?</p>
-  <button class="primary" id="bookedBtn">Booked</button>
-  <button id="fullBtn">Full</button>
-  <button id="noAnswerBtn">No answer</button>
-</section>
-
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 10:17 AM AEST';
+const BUILD = 'new v 29 Sep 2026, 10:32 AM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -109,7 +100,8 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} },
 };
 let trip  = store.get('nav2_trip', null);      // { dest:{name,lat,lng}, stop:{name,lat,lng}|null }
-let round = store.get('nav2_round', null);     // { sites:[...], tried:[names], called:name|null, calledAt, target, params }
+let round = store.get('nav2_round', null);     // { sites:[...], calls:{name: time}, target, params } — the list shown, and who's been rung
+let lastShown = null;                          // what screen 3 is currently showing, so a call return can re-draw it without a search
 let pos   = null;                              // { lat, lng }
 let posLabel = '';
 
@@ -265,7 +257,7 @@ async function search() {
   if (r.ok && r.data && Array.isArray(r.data.results)) {
     const saved = { answer: r.data, target: tgt.name, ts: Date.now(), params };
     store.set('nav2_last_stay', saved);
-    round = { sites: r.data.results, tried: [], called: null, calledAt: null, target: tgt.name, params, ts: Date.now() };
+    round = { sites: r.data.results, calls: {}, target: tgt.name, params, ts: Date.now() };
     store.set('nav2_round', round);
     renderStay(r.data, tgt.name, '');
     return;
@@ -274,24 +266,24 @@ async function search() {
   const last = store.get('nav2_last_stay', null);
   const why = !pos ? 'No GPS position yet.' : (!navigator.onLine || r.status === 0) ? 'No signal.' : 'The stay service is playing up — not your signal.';
   if (last && last.answer) {
-    if (!round || !round.sites) { round = { sites: last.answer.results, tried: [], called: null, calledAt: null, target: last.target, params: last.params, ts: last.ts }; store.set('nav2_round', round); }
+    if (!round || !round.sites) { round = { sites: last.answer.results, calls: {}, target: last.target, params: last.params, ts: last.ts }; store.set('nav2_round', round); }
     renderStay(last.answer, last.target, `${why} Showing your last answer from ${timeLabel(last.ts)}.`);
   } else {
     $('results').innerHTML = `<p class="notice">${esc(why)} ${!pos ? 'Give it a moment.' : 'Try again when you have coverage.'}</p>`;
   }
 }
 function renderStay(ans, tgtName, notice) {
+  lastShown = { ans, tgtName, notice };
   const box = $('results'); box.innerHTML = '';
   $('stayNotice').innerHTML = notice ? `<div class="notice">${esc(notice)}</div>` : '';
   if (ans.note) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = cap(ans.note) + '.'; box.appendChild(n); }
   if (!ans.results || !ans.results.length) { const p = document.createElement('p'); p.className = 'card'; p.textContent = ans.message || 'Nothing found ahead.'; box.appendChild(p); return; }
-  const tried = (round && round.tried) || [];
-  const nextUp = round ? nextUntried() : null;
+  const calls = (round && round.calls) || {};
   ans.results.forEach((r, i) => {
     const free = r.kind === 'free';
     const c = document.createElement('div');
-    c.className = 'card' + (free ? ' free' : '') + (tried.includes(r.name) ? ' tried' : '') + (nextUp && nextUp.name === r.name && tried.length ? ' next' : '');
-    c.innerHTML = `<h3>${i + 1}. ${esc(r.name)}${tried.includes(r.name) ? '<span class="tag">tried</span>' : ''}</h3>
+    c.className = 'card' + (free ? ' free' : '');
+    c.innerHTML = `<h3>${i + 1}. ${esc(r.name)}</h3>
       <div class="kind">${free ? 'Free camp' : 'Caravan park'}</div>
       <div class="meta"><b>${r.km_ahead} km ahead · ${esc(r.drive_time)}</b></div>
       <div class="meta">${r.km_from_destination} km from ${esc(tgtName)}</div>
@@ -299,14 +291,14 @@ function renderStay(ans, tgtName, notice) {
     if (!free && r.phone) {
       const a = document.createElement('a'); a.className = 'btn primary'; a.href = 'tel:' + r.phone.replace(/[^\d+]/g, '');
       a.textContent = `Call ${r.phone}`; a.onclick = () => noteCalled(r.name); c.appendChild(a);
-    } else {
-      if (!free) { const p = document.createElement('div'); p.className = 'meta quiet'; p.textContent = 'No phone number found'; c.appendChild(p); }
-      const b = document.createElement('button'); b.className = free ? 'brown' : ''; b.textContent = 'Take me there'; b.onclick = () => takeMeThere(r.lat, r.lng); c.appendChild(b);
-    }
+      if (calls[r.name]) { const l = document.createElement('div'); l.className = 'called'; l.textContent = `Called at ${timeLabel(calls[r.name])}`; c.appendChild(l); }
+    } else if (!free) { const p = document.createElement('div'); p.className = 'meta quiet'; p.textContent = 'No phone number found'; c.appendChild(p); }
+    // Every card can hand over to the map app — a park with a number gets it UNDER the Call button.
+    const b = document.createElement('button'); b.className = free ? 'brown' : ''; b.textContent = 'Take me there'; b.onclick = () => takeMeThere(r.lat, r.lng); c.appendChild(b);
     box.appendChild(c);
   });
-  // Everyone with a number tried → one offer: search further.
-  if (round && round.tried.length && !nextUntried() && windowH === 1) {
+  // One button at the bottom of every list: widen to two hours (already at two hours → nothing further to offer).
+  if (windowH === 1) {
     const b = document.createElement('button'); b.className = 'brown'; b.textContent = 'Search further (2 hours)';
     b.onclick = () => { windowH = 2; $('segWindow').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x.dataset.v === '2')); search(); };
     box.appendChild(b);
@@ -314,26 +306,11 @@ function renderStay(ans, tgtName, notice) {
 }
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-// ── Ring-around (ported from the old app's round: tried list, called site, next untried) ──
-function nextUntried() { return round ? (round.sites.find((s) => s.kind === 'park' && s.phone && !round.tried.includes(s.name)) || null) : null; }
-function noteCalled(name) { if (!round) return; round.called = name; round.calledAt = Date.now(); store.set('nav2_round', round); }
-function checkCallReturn() {
-  if (!round || !round.called) return;
-  if (Date.now() - (round.calledAt || 0) > 15 * 60 * 1000) { round.called = null; store.set('nav2_round', round); return; }   // a stale call never re-asks days later
-  $('calledLine').textContent = `You called ${round.called}.`;
-  show('s4');
-}
-function outcome(kind) {
-  const name = round && round.called; if (!name) return show('s3');
-  const site = round.sites.find((s) => s.name === name);
-  round.called = null;
-  if (kind === 'booked') { store.del('nav2_round'); round = null; if (site) takeMeThere(site.lat, site.lng); return openMain(); }
-  if (!round.tried.includes(name)) round.tried.push(name);
-  store.set('nav2_round', round);
-  const last = store.get('nav2_last_stay', null);
-  show('s3');
-  renderStay(last && last.answer && last.target === round.target ? last.answer : { results: round.sites }, round.target, '');   // the list again, marked — no new search
-}
+// ── Calls: remember WHEN each park was rung; on return the same list re-draws with a
+// "Called at" line on that card. No question asked, no new search — the driver knows the
+// outcome and simply rings the next one.
+function noteCalled(name) { if (!round) return; round.calls = round.calls || {}; round.calls[name] = Date.now(); store.set('nav2_round', round); }
+function onReturn() { if (lastShown && document.querySelector('#s3.on')) renderStay(lastShown.ans, lastShown.tgtName, lastShown.notice); }
 
 // ── Wiring ─────────────────────────────────────────────────────────────────────
 $('goBtn').onclick = onGo;
@@ -343,13 +320,10 @@ $('changeBtn').onclick = () => { renderRecent(); show('s1'); };
 $('stayBtn').onclick = () => { show('s3'); if (round && round.sites && round.sites.length) { const last = store.get('nav2_last_stay', null); renderStay(last && last.target === round.target ? last.answer : { results: round.sites }, round.target, last ? `Showing your answer from ${timeLabel(last.ts)}. Tap Search for fresh results.` : ''); } else search(); };
 $('backBtn').onclick = openMain;
 $('searchBtn').onclick = search;
-$('bookedBtn').onclick = () => outcome('booked');
-$('fullBtn').onclick = () => outcome('full');
-$('noAnswerBtn').onclick = () => outcome('noanswer');
 segInit('segWindow', (v) => { windowH = +v; });
 segInit('segKind', (v) => { kind = v; });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkCallReturn(); });
-window.addEventListener('pageshow', checkCallReturn);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onReturn(); });
+window.addEventListener('pageshow', onReturn);
 $('stamp').textContent = BUILD;
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
@@ -358,8 +332,6 @@ $('stamp').textContent = BUILD;
   if (trip) openMain(); else show('s1');
   await initPosition();
   if (trip && pos) openMain();                    // re-render with the real distance once we know where we are
-  // Reopened with a call outstanding → straight to "Did you get a site?"
-  checkCallReturn();
   // Reopened with a saved answer and no signal → show it, plainly labelled.
   if (trip && !navigator.onLine && document.querySelector('#s2.on')) {
     const last = store.get('nav2_last_stay', null);
