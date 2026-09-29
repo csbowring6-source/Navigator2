@@ -33,7 +33,13 @@
   .top{font-size:20px;color:var(--muted);margin-bottom:18px}
   label{display:block;font-weight:600;margin:16px 0 6px}
   input[type=text]{width:100%;min-height:64px;font:inherit;font-size:20px;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
-  #goBtn{min-height:72px;font-size:24px}
+  #goBtn{min-height:72px;font-size:24px;margin:10px 0 0}
+  /* Screen 1 compact (CONFIRMFIT): one-line 30 px heading, tight spacing, so boxes (or the confirm card) AND the first recent trip fit 390×844. */
+  #s1 .top{margin-bottom:8px} #s1 h1{font-size:30px;margin:0 0 6px;white-space:nowrap}
+  #s1 label{margin:8px 0 4px} #s1 .trips h3{margin:14px 0 6px;font-size:22px} #s1 .trips button{min-height:52px;margin:6px 0}
+  #confirm .card{padding:12px 14px;margin:4px 0 0}
+  #confirm .nmc{font-weight:700;font-size:24px;line-height:1.15} #confirm .stopc{margin:4px 0 0;font-size:18px}
+  #yesBtn{min-height:64px;font-size:22px;margin:10px 0 8px} #againBtn{min-height:56px;background:var(--card);border:2px solid var(--line);margin:0}
   /* Main screen (NEWTRIP): the two job buttons are big enough to hit at a glance; "New trip" is a plain bordered button. */
   .job{min-height:88px;font-size:24px}
   #newTripBtn{background:var(--card);border:2px solid var(--line);min-height:56px;font-size:21px;margin:0 0 18px}
@@ -80,11 +86,14 @@
   <div class="top" id="youAreAt">Finding where you are…</div>
   <div id="posHelp1"></div>
   <h1>Where are you heading?</h1>
-  <label for="dest">Destination</label>
-  <input type="text" id="dest" placeholder="Town, e.g. Yalboroo" autocomplete="off" enterkeyhint="go">
-  <label for="stop">Stopping on the way? (optional)</label>
-  <input type="text" id="stop" placeholder="Town" autocomplete="off" enterkeyhint="go">
-  <button class="primary" id="goBtn">Go</button>
+  <!-- CONFIRMFIT: the text boxes + Go and the confirm card take TURNS in the same spot under the heading, so the whole card is always on screen. -->
+  <div id="entry">
+    <label for="dest">Destination</label>
+    <input type="text" id="dest" placeholder="Town, e.g. Yalboroo" autocomplete="off" enterkeyhint="go">
+    <label for="stop">Stopping on the way? (optional)</label>
+    <input type="text" id="stop" placeholder="Town" autocomplete="off" enterkeyhint="go">
+    <button class="primary" id="goBtn">Go</button>
+  </div>
   <div id="confirm"></div>
   <div class="trips" id="recent"></div>
 </section>
@@ -115,7 +124,7 @@
 
 <script>
 'use strict';
-const BUILD = 'new v 29 Sep 2026, 12:28 PM AEST';
+const BUILD = 'new v 29 Sep 2026, 12:55 PM AEST';
 const API_URL = 'https://delicate-credit-a17e.csbowring6.workers.dev/';
 const $ = (id) => document.getElementById(id);
 const STATE_ABBR = { 'Queensland':'QLD', 'New South Wales':'NSW', 'Victoria':'VIC', 'South Australia':'SA', 'Western Australia':'WA',
@@ -249,6 +258,7 @@ function renderRecent() {
     $('recent').appendChild(b);
   });
 }
+function showEntry() { $('confirm').innerHTML = ''; $('entry').style.display = ''; }
 async function onGo() {
   const d = $('dest').value.trim(), s = $('stop').value.trim();
   const box = $('confirm'); box.innerHTML = '';
@@ -262,10 +272,12 @@ async function onGo() {
   const msg = fail(d, gd) || (s ? fail(s, gs) : '');
   if (msg) { box.innerHTML = `<p class="notice">${esc(msg)}</p>`; return; }
   // Never go ahead on a match the driver hasn't confirmed.
-  box.innerHTML = `<div class="card"><h3>${esc(gd.place.name)}</h3>${s ? `<p>Stopping at <b>${esc(gs.place.name)}</b></p>` : ''}
+  // The card takes the boxes' place (never below them, where it ran off the screen).
+  box.innerHTML = `<div class="card"><div class="nmc">${esc(gd.place.name)}</div>${s ? `<div class="stopc">Stopping at <b>${esc(gs.place.name)}</b></div>` : ''}
     <button class="primary" id="yesBtn">Yes, that's it</button><button id="againBtn">Try again</button></div>`;
+  $('entry').style.display = 'none';
   $('yesBtn').onclick = () => commitTrip(gd.place, s ? gs.place : null);
-  $('againBtn').onclick = () => { box.innerHTML = ''; $('dest').focus(); };
+  $('againBtn').onclick = () => { showEntry(); $('dest').focus(); };   // boxes come back with the typed words still in them
 }
 function commitTrip(dest, stop) {
   trip = { dest, stop: stop || null, ts: Date.now() };
@@ -273,6 +285,7 @@ function commitTrip(dest, stop) {
   const others = store.get('nav2_trips', []).filter((t) => t.dest.name !== dest.name || (t.stop && t.stop.name) !== (stop && stop.name));
   store.set('nav2_trips', [trip, ...others].slice(0, 3));
   round = null; store.del('nav2_round');
+  showEntry();   // screen 1 is left ready for next time (boxes showing, no stale card)
   openMain();
 }
 
@@ -416,7 +429,7 @@ $('goBtn').onclick = onGo;
 $('dest').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 $('stop').addEventListener('keydown', (e) => { if (e.key === 'Enter') onGo(); });
 // New trip: screen 1 with EMPTY boxes and the recent trips listed (the current trip stays saved until a new one is confirmed).
-$('newTripBtn').onclick = () => { $('dest').value = ''; $('stop').value = ''; $('confirm').innerHTML = ''; renderRecent(); show('s1'); };
+$('newTripBtn').onclick = () => { $('dest').value = ''; $('stop').value = ''; showEntry(); renderRecent(); show('s1'); };
 $('stayBtn').onclick = () => {
   show('s3'); labelAtStop();
   const last = store.get('nav2_last_stay', null);
