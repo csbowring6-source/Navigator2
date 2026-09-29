@@ -512,11 +512,13 @@ function fuelLine3(s) {
 }
 const priceText = (v) => v.price != null ? `$${v.price.toFixed(2)} (checked ${v.price_age_h < 1 ? 'under 1' : v.price_age_h} hr ago)` : 'no price';
 // A stop row opens to show each servo in it, cheapest first (price · open · diesel); tapping a servo opens the map app to it.
-function servoList(stop) {
+function servoList(stop, fuel) {
   const box = document.createElement('div'); box.className = 'servos';
   (stop.servos || []).forEach((v) => {
     const d = document.createElement('div'); d.className = 'servo' + (v.closes_before_arrival ? ' warn' : '');
-    d.innerHTML = `<div class="sv-nm">${esc(v.name)}</div><div class="sv-ln"><b>${esc(priceText(v))}</b> · ${v.closes_before_arrival ? '<b>Closes before you get there</b> · ' : ''}${esc(v.open)} · ${esc(v.diesel)}</div>`;
+    // A diesel price already IS the diesel status — don't say it twice; petrol rows keep the diesel status.
+    const dsl = (fuel === 'diesel' && v.price != null) ? '' : ' · ' + esc(v.diesel);
+    d.innerHTML = `<div class="sv-nm">${esc(v.name)}</div><div class="sv-ln"><b>${esc(priceText(v))}</b> · ${v.closes_before_arrival ? '<b>Closes before you get there</b> · ' : ''}${esc(v.open)}${dsl}</div>`;
     d.onclick = (e) => { e.stopPropagation(); takeMeThere(v.lat, v.lng); };
     box.appendChild(d);
   });
@@ -525,7 +527,7 @@ function servoList(stop) {
 function stopRow(s, i, ans, extra) {
   const wrap = document.createElement('div');
   const row = buildRow(s, i, ans, '', {}, { line2: `${s.km_from_you} km from you · ${esc(s.drive_time)}`, line3: fuelLine3(s), noPhone: true, ...(extra || {}),
-    onTap: () => { const open = wrap.querySelector('.servos'); if (open) open.remove(); else wrap.appendChild(servoList(s)); } });
+    onTap: () => { const open = wrap.querySelector('.servos'); if (open) open.remove(); else wrap.appendChild(servoList(s, ans.fuel)); } });
   // The stop holding the cheapest price in range gets a CHEAPEST badge after its name.
   const c = ans.cheapest_in_range;
   if (c && s.cheapest && s.cheapest.name === c.name && s.cheapest.price === c.price) { const b = document.createElement('span'); b.className = 'badge cheap'; b.textContent = 'CHEAPEST'; row.querySelector('.nm').appendChild(b); }
